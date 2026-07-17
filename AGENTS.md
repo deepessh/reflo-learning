@@ -1,6 +1,6 @@
 # AGENTS.md — Operating Manual for Agents Building Reflo
 
-This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.4; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
+This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.5; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
 
 Hard deadline: sprint ends **Aug 7, 2026**; Demo Day Aug 15.
 

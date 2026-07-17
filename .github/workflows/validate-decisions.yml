@@ -1,0 +1,40 @@
+name: Validate decision register
+
+on:
+  pull_request:
+    paths:
+      - AGENTS.md
+      - DECISIONS.md
+      - prds/reflo-prd.md
+      - scripts/validate_decisions.py
+      - .github/workflows/validate-decisions.yml
+  push:
+    branches:
+      - main
+    paths:
+      - AGENTS.md
+      - DECISIONS.md
+      - prds/reflo-prd.md
+      - scripts/validate_decisions.py
+      - .github/workflows/validate-decisions.yml
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test decision validator
+        run: python3 -m unittest scripts/test_validate_decisions.py
+      - name: Validate structure and GitHub references
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/validate_decisions.py --check-links

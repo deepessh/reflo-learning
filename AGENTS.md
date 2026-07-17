@@ -1,10 +1,10 @@
 # AGENTS.md — Operating Manual for Agents Building Reflo
 
-This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.5; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
+This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.6; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file, `DECISIONS.md`, and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
 
 Hard deadline: sprint ends **Aug 7, 2026**; Demo Day Aug 15.
 
-All coordination happens in **GitHub Issues** via the `gh` CLI. No tracking files in the repo. Before issue work, run `gh --version` and `gh auth status`. If `gh` is missing or unauthenticated, do not claim work or create local substitute tracking; report the setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
+All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` is the sole repository tracking-file exception: it is the searchable register of effective implementation and process verdicts, not a substitute task tracker. Before issue work, run `gh --version` and `gh auth status`. If `gh` is missing or unauthenticated, do not claim work or create local substitute tracking; report the setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
 
 ---
 
@@ -28,11 +28,16 @@ All coordination happens in **GitHub Issues** via the `gh` CLI. No tracking file
 Agents are stateless between sessions. All durable memory lives in GitHub Issues or the code:
 
 - **Task state & handoffs** — the issue is the memory. End every session by commenting on your assigned issue: what you did, what's half-done, exact next step, gotchas. The next agent reads the issue body, the latest handoff and subsequent comments, and linked PRs before touching anything. Link PRs with `Closes #<n>`.
-- **Decisions** — issues labeled `decision`. Title = the choice; body = context, options, recommendation. **Who may close:** an agent may close its own `decision` issue only if the choice (a) is not on the §7 escalation list and (b) doesn't contradict the PRD; everything else waits for a human verdict. The closing comment states the verdict and why. **Before any architectural or library choice, search both open and closed `decision` issues** (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or re-litigate a closed decision silently — add evidence to the existing issue or reopen it with new evidence instead.
+- **Decisions** — `DECISIONS.md` is the searchable implementation register; GitHub issues labeled `decision` hold proposals, evidence, discussion, and authorization. Before any architectural or library choice, search the PRD mandate index and effective records in `DECISIONS.md`, then search open and closed decision issues (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or silently re-litigate an effective one.
+  1. Open a `decision` issue containing the context, independently reversible choice, options, recommendation, decision DRI, authorized decider, deadline, and implementation consequence. A pending index row in `DECISIONS.md` may point to it but has no implementation authority.
+  2. Record the authorized verdict in an issue comment identifying the decider and approval basis. An agent may authorize its own choice only when it is outside §7, does not contradict the PRD, and the issue names the agent as authorized decider; all other choices wait for the named human.
+  3. Open a PR adding an `Accepted` or `Rejected` effective record linked to the exact verdict comment. The verdict is not effective until that PR merges. A register entry without matching authorization is invalid.
+  4. Close the decision issue only after the register PR merges. Semantic changes require a new decision that supersedes the old record; clarifications require a linked issue and PR.
+  5. The PRD controls requirements, scope, architecture mandates, priorities, and release gates. PRD-mandated choices can be changed only by revising the PRD. Code that contradicts an effective decision is a defect.
 - **Bugs & debt** — anything you notice but don't fix: open an issue labeled `bug` or `tech-debt`, one line each. Log it; don't detour.
 - **Local code context** — language-appropriate `AGENT-NOTE:` comments at the spot a future agent needs them.
 
-Do not store state in chat history, external docs, or your own head. If it's not in an issue, a PR, or the code, it didn't happen.
+Do not store state in chat history, external docs, or your own head. If task state is not in an issue/PR, or an effective verdict is not in `DECISIONS.md`, it did not happen.
 
 ## 3. Labels & milestones (the vocabulary)
 
@@ -55,7 +60,7 @@ Don't invent new labels; propose them via a `decision` issue.
 **One-time repo init (human + first agent, day 1):**
 1. Create the three milestones (`W1`, `W2`, `W3` with PRD §13 date ranges) and the labels in §3 — `gh label create` / `gh api` script them.
 2. Install GitHub CLI and provision one GitHub identity per agent where possible. For a private repo, grant issue read/write plus the repository permissions needed for branches and PRs; classic tokens generally require `repo`. Confirm `gh --version` and `gh auth status` before seeding work. If identities must share a bot, use the comment-claim protocol in §1.
-3. Seed closed `decision` issues from the PRD's already-made calls: vector store and model routing (§9), plus the SR algorithm and messaging priority (§6), so day-one searches find them.
+3. Reconcile the PRD mandate index in `DECISIONS.md` with closed `decision` issues for vector store and model routing (§9), plus the SR algorithm and messaging priority (§6), so both repository and GitHub searches find them. PRD mandates remain authoritative even before those issue links are backfilled.
 4. File the sprint-week task issues into their milestones.
 
 ```
@@ -63,6 +68,8 @@ Install:      Unavailable — application not scaffolded
 Dev server:   Unavailable — application not scaffolded
 Tests:        Unavailable — application not scaffolded
 Lint/format:  Unavailable — application not scaffolded
+Decisions:    python3 scripts/validate_decisions.py
+Gov tests:    python3 -m unittest scripts/test_validate_decisions.py
 DB migrate:   Unavailable — application not scaffolded
 ```
 
@@ -70,7 +77,10 @@ Current repo layout:
 
 ```
 AGENTS.md             Agent operating manual
+DECISIONS.md          Effective decision register and pending index
+.github/workflows/    Repository governance checks
 prds/reflo-prd.md     Product requirements and implementation source of truth
+scripts/              Repository governance utilities
 ```
 
 ## 5. Code & workflow conventions

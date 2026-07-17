@@ -30,10 +30,10 @@ These entries improve discovery; they are not ordinary decision records and cann
 
 | Mandate | Fixed choice | Authoritative source | Change control |
 |---|---|---|---|
-| `M-001` | AnalyticDB for PostgreSQL is the sprint vector store. | `prds/reflo-prd.md` §9 | PRD revision only |
-| `M-002` | Every model call uses the shared, traced model-routing module; Qwen, Qwen-TTS, and flagged Wanx are routed by task. | `prds/reflo-prd.md` §9; `AGENTS.md` §5 | PRD revision only |
-| `M-003` | Knowledge updates use a versioned Bayesian mastery update and FSRS-style scheduling; novel psychometrics are out of scope. | `prds/reflo-prd.md` §6, F4 | PRD revision only |
-| `M-004` | Delivery priority is Telegram P0, opted-in email fallback, and WhatsApp P1 after approval. | `prds/reflo-prd.md` §6, F6 | PRD revision only |
+| `M-001` | AnalyticDB for PostgreSQL is the sprint vector store. | `prds/reflo-prd.md` §9 | PRD revision only; discovery [#22](https://github.com/deepessh/reflo-learning/issues/22) |
+| `M-002` | Every model call uses the shared, traced model-routing module; Qwen, Qwen-TTS, and flagged Wanx are routed by task. | `prds/reflo-prd.md` §9; `AGENTS.md` §5 | PRD revision only; discovery [#23](https://github.com/deepessh/reflo-learning/issues/23) |
+| `M-003` | Knowledge updates use a versioned Bayesian mastery update and FSRS-style scheduling; novel psychometrics are out of scope. | `prds/reflo-prd.md` §6, F4 | PRD revision only; discovery [#24](https://github.com/deepessh/reflo-learning/issues/24) |
+| `M-004` | Delivery priority is Telegram P0, opted-in email fallback, and WhatsApp P1 after approval. | `prds/reflo-prd.md` §6, F6 | PRD revision only; discovery [#25](https://github.com/deepessh/reflo-learning/issues/25) |
 | `M-005` | P1 runtime surfaces are disabled behind feature flags and cannot displace P0 work. | `prds/reflo-prd.md` §6 and §13; `AGENTS.md` §5 | PRD revision only |
 | `M-006` | The P0 production story uses the named Alibaba services in Singapore; offline behavior is a labeled, bounded fallback. | `prds/reflo-prd.md` §9 and §12 | PRD revision only |
 
@@ -47,26 +47,26 @@ Role names in this bootstrap inventory route ownership but do not satisfy the fu
 
 | Key | Independently reversible choice | Decision DRI | Authorized decider | Deadline | Consequence if unresolved | Issue |
 |---|---|---|---|---|---|---|
-| `P-001` | Workspace/package tooling and deployable service boundaries | Engineering lead | Founding team | 2026-07-18 | Blocks application scaffold | Not opened — GitHub bootstrap pending |
-| `P-002` | SQL migration tool, schema ownership, and cross-language write boundary | Engineering lead | Founding team | 2026-07-18 | Blocks database scaffold and worker contracts | Not opened — GitHub bootstrap pending |
-| `P-003` | Provider abstraction boundary and adapter rollout policy | Engineering lead | Founding team | 2026-07-18 | Blocks integration interfaces | Not opened — GitHub bootstrap pending |
-| `P-004` | IaC tool, state ownership, environment topology, secret boundary, and promotion process | Infrastructure DRI | Founding team; human approval for spending | 2026-07-18 | Blocks reproducible Singapore deployment | Not opened — GitHub bootstrap pending |
-| `P-005` | Email authentication mechanism/provider and session lifecycle | Application DRI | Founding team; human approval for paid service | 2026-07-18 | Blocks accounts and pilot access | Not opened — GitHub bootstrap pending |
-| `P-006` | Owner-scope enforcement pattern across API, database, assets, and retrieval | Security DRI | Founding team | 2026-07-19 | Blocks authorization-sensitive implementation | Not opened — GitHub bootstrap pending |
-| `P-007` | PDF/EPUB/DOCX parser, OCR, malware scanner, and isolated-worker runtime | Ingestion DRI | Founding team; human approval for paid service | 2026-07-19 | Blocks secure ingestion pipeline | Not opened — GitHub bootstrap pending |
-| `P-008` | Chunking policy, embedding model/version, and vector namespace contract | Ingestion DRI | Founding team | 2026-07-19 | Blocks source spans, embedding, and retrieval | Not opened — GitHub bootstrap pending |
-| `P-009` | Model-router interface, task routing, prompt registry, and tracing contract | ML platform DRI | Founding team | 2026-07-19 | Blocks all model-backed features | Not opened — GitHub bootstrap pending |
-| `P-010` | Quota-independent fallback TTS and common audio-asset contract | Media DRI | Founding team; human approval for spending | 2026-07-18 | Blocks the Week 1 audio gate | Not opened — GitHub bootstrap pending |
-| `P-011` | Event envelope, versioning, idempotency namespace, retry/DLQ policy, and finalization semantics | Platform DRI | Founding team | 2026-07-20 | Blocks durable generation and delivery | Not opened — GitHub bootstrap pending |
-| `P-012` | OSS/CDN object layout, authorized signing mechanism, and URL expiry | Platform DRI | Founding team | 2026-07-19 | Blocks private source and asset delivery | Not opened — GitHub bootstrap pending |
-| `P-013` | Feature-flag mechanism and default-off enforcement for P1 runtime surfaces | Application DRI | Founding team | 2026-07-20 | Blocks safe P1 integration | Not opened — GitHub bootstrap pending |
-| `P-014` | Bayesian priors, evidence mapping, confidence calculation, and reproducibility fixtures | Knowledge-model DRI | Founding team | 2026-07-24 | Blocks mastery updates and Flow B | Not opened — GitHub bootstrap pending |
-| `P-015` | Rubric bands, auto-grading threshold, abstention rule implementation, and FSRS grade mapping | Assessment DRI | Founding team | 2026-07-25 | Blocks grading evaluation and pilot evidence | Not opened — GitHub bootstrap pending |
-| `P-016` | Consent implementation, retention schedule, deletion execution, export workflow, and telemetry redaction | Privacy DRI | Named human owner | 2026-07-25 | Blocks pilot activation | Not opened — GitHub bootstrap pending |
-| `P-017` | Evaluation harness and dataset-versioning method for PRD §11 gates | Evaluation DRI | Founding team; human approval for content rights | 2026-07-25 | Blocks release-gate evidence | Not opened — GitHub bootstrap pending |
-| `P-018` | Offline bundle boundary and online/offline Flow B parity assertion | Demo DRI | Founding team | 2026-07-26 | Blocks offline Flow B | Not opened — GitHub bootstrap pending |
-| `P-019` | Pilot rollout controls and operational kill-switch mechanism | Platform DRI | Founding team | 2026-07-26 | Blocks safe pilot rollout | Not opened — GitHub bootstrap pending |
-| `P-020` | Free versus discounted paid pilot | Product DRI | Named human owner | 2026-07-30 | Keeps Stripe disabled and pilots free by default | Not opened — GitHub bootstrap pending |
+| `P-001` | Workspace/package tooling and deployable service boundaries | Engineering lead | Founding team | 2026-07-18 | Blocks application scaffold | [#2](https://github.com/deepessh/reflo-learning/issues/2) |
+| `P-002` | SQL migration tool, schema ownership, and cross-language write boundary | Engineering lead | Founding team | 2026-07-18 | Blocks database scaffold and worker contracts | [#3](https://github.com/deepessh/reflo-learning/issues/3) |
+| `P-003` | Provider abstraction boundary and adapter rollout policy | Engineering lead | Founding team | 2026-07-18 | Blocks integration interfaces | [#4](https://github.com/deepessh/reflo-learning/issues/4) |
+| `P-004` | IaC tool, state ownership, environment topology, secret boundary, and promotion process | Infrastructure DRI | Founding team; human approval for spending | 2026-07-18 | Blocks reproducible Singapore deployment | [#5](https://github.com/deepessh/reflo-learning/issues/5) |
+| `P-005` | Email authentication mechanism/provider and session lifecycle | Application DRI | Founding team; human approval for paid service | 2026-07-18 | Blocks accounts and pilot access | [#6](https://github.com/deepessh/reflo-learning/issues/6) |
+| `P-006` | Owner-scope enforcement pattern across API, database, assets, and retrieval | Security DRI | Founding team | 2026-07-19 | Blocks authorization-sensitive implementation | [#7](https://github.com/deepessh/reflo-learning/issues/7) |
+| `P-007` | PDF/EPUB/DOCX parser, OCR, malware scanner, and isolated-worker runtime | Ingestion DRI | Founding team; human approval for paid service | 2026-07-19 | Blocks secure ingestion pipeline | [#8](https://github.com/deepessh/reflo-learning/issues/8) |
+| `P-008` | Chunking policy, embedding model/version, and vector namespace contract | Ingestion DRI | Founding team | 2026-07-19 | Blocks source spans, embedding, and retrieval | [#9](https://github.com/deepessh/reflo-learning/issues/9) |
+| `P-009` | Model-router interface, task routing, prompt registry, and tracing contract | ML platform DRI | Founding team | 2026-07-19 | Blocks all model-backed features | [#10](https://github.com/deepessh/reflo-learning/issues/10) |
+| `P-010` | Quota-independent fallback TTS and common audio-asset contract | Media DRI | Founding team; human approval for spending | 2026-07-18 | Blocks the Week 1 audio gate | [#11](https://github.com/deepessh/reflo-learning/issues/11) |
+| `P-011` | Event envelope, versioning, idempotency namespace, retry/DLQ policy, and finalization semantics | Platform DRI | Founding team | 2026-07-20 | Blocks durable generation and delivery | [#12](https://github.com/deepessh/reflo-learning/issues/12) |
+| `P-012` | OSS/CDN object layout, authorized signing mechanism, and URL expiry | Platform DRI | Founding team | 2026-07-19 | Blocks private source and asset delivery | [#13](https://github.com/deepessh/reflo-learning/issues/13) |
+| `P-013` | Feature-flag mechanism and default-off enforcement for P1 runtime surfaces | Application DRI | Founding team | 2026-07-20 | Blocks safe P1 integration | [#14](https://github.com/deepessh/reflo-learning/issues/14) |
+| `P-014` | Bayesian priors, evidence mapping, confidence calculation, and reproducibility fixtures | Knowledge-model DRI | Founding team | 2026-07-24 | Blocks mastery updates and Flow B | [#16](https://github.com/deepessh/reflo-learning/issues/16) |
+| `P-015` | Rubric bands, auto-grading threshold, abstention rule implementation, and FSRS grade mapping | Assessment DRI | Founding team | 2026-07-25 | Blocks grading evaluation and pilot evidence | [#17](https://github.com/deepessh/reflo-learning/issues/17) |
+| `P-016` | Consent implementation, retention schedule, deletion execution, export workflow, and telemetry redaction | Privacy DRI | Named human owner | 2026-07-25 | Blocks pilot activation | [#18](https://github.com/deepessh/reflo-learning/issues/18) |
+| `P-017` | Evaluation harness and dataset-versioning method for PRD §11 gates | Evaluation DRI | Founding team; human approval for content rights | 2026-07-19 | Blocks Week 1 and pre-pilot release-gate evidence | [#15](https://github.com/deepessh/reflo-learning/issues/15) |
+| `P-018` | Offline bundle boundary and online/offline Flow B parity assertion | Demo DRI | Founding team | 2026-07-26 | Blocks offline Flow B | [#19](https://github.com/deepessh/reflo-learning/issues/19) |
+| `P-019` | Pilot rollout controls and operational kill-switch mechanism | Platform DRI | Founding team | 2026-07-26 | Blocks safe pilot rollout | [#20](https://github.com/deepessh/reflo-learning/issues/20) |
+| `P-020` | Free versus discounted paid pilot | Product DRI | Named human owner | 2026-07-30 | Keeps Stripe disabled and pilots free by default | [#21](https://github.com/deepessh/reflo-learning/issues/21) |
 
 Activation, D7, experiment, readiness, and numerical release-gate semantics are already fixed by the PRD. Track their implementation in ordinary issues unless a genuinely unresolved, independently reversible choice emerges.
 

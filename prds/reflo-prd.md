@@ -1,9 +1,11 @@
 # Reflo — Product Requirements Document
 
-**Version:** 1.1 · **Date:** July 15, 2026 · **Status:** Approved for build sprint
-**Changelog:** v1.1 — priority tiers corrected (not everything is P0), re-teach metric given a proper control, WhatsApp lead-time risk added, vector DB decision made, Builder Day added to plan
+**Version:** 1.2 · **Date:** July 17, 2026 · **Status:** Approved for build sprint
+**Changelog:** v1.2 — grounding rule clarified (inline citations for tutoring answers only), video degradation made an explicit product rule, ingestion added to the never-cut clause, pointer to AGENTS.md added
+v1.1 — priority tiers corrected (not everything is P0), re-teach metric given a proper control, WhatsApp lead-time risk added, vector DB decision made, Builder Day added to plan
 **Program:** AI Agent Builder Challenge (Alibaba Cloud × AMD × Beta University)
 **Sprint:** July 17 – August 7, 2026 · **Demo Day:** August 15, 2026
+**Ways of working:** this PRD defines scope, priorities, and quality bars. Operating instructions for agents/contributors (task pickup, memory files, conventions, escalation) live in `AGENTS.md` at the repo root.
 
 ---
 
@@ -57,7 +59,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 1. **The knowledge model is the product.** Every feature either feeds the model (assessment) or acts on it (adaptation). Content generation is in service of this loop, never the headline.
 2. **Agent, not library.** Reflo decides what you study next. The learner can always override, but the default experience is directed.
-3. **Grounded, always.** Every lesson, quiz, and answer must be traceable to the uploaded source material (RAG-grounded). No hallucinated curriculum.
+3. **Grounded, always.** Every lesson, quiz, and answer must be traceable to the uploaded source material (RAG-grounded). No hallucinated curriculum. Conversational tutoring answers carry inline citations to chapter/section (§11); lessons and quizzes must be source-traceable but do not carry inline citations.
 4. **Respect the learner's time.** Sessions are effective in 10-minute increments. Micro-lessons over lectures.
 5. **Honest measurement.** Never inflate mastery to flatter the user. Readiness scores must be calibrated — the product's credibility is its accuracy.
 
@@ -76,6 +78,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 - Generation is queue-driven (RocketMQ) and progressive — chapter 1 assets ready fast, rest fill in; UI shows generation status per chapter
 - All assets stored in OSS, streamed via CDN
 - Quality bar: audio listenable at 1.5×; video visually explains (diagrams/motion), not a slideshow of text
+- Degradation rule: video is an enhancement, never a blocker. If Wanx/GPU capacity is unavailable or slow, the chapter ships with audio + text and video backfills later; no learner-facing flow may hard-depend on video existing
 
 ### F3. Adaptive Assessment Engine — *P0*
 - Per-chapter quiz bank generated at ingestion: multiple choice, short answer (LLM-graded), and concept-linking items; each question tagged to concept ID(s)
@@ -199,7 +202,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 | Copyright question on stage | Low | Openly licensed demo material; §11 talking points ready |
 | Retention theater (pilots sign up, don't return) | Medium | Daily messaging delivery is the hook; recruit pilots with a real exam date < 60 days out |
 | WhatsApp Business approval doesn't land in time | Medium–High | Telegram is the P0 channel (no approval needed); WhatsApp is an upgrade, not a dependency — approval started Jul 16 |
-| Too many P0s for a 3-person team | High | Cut order pre-agreed if Week 2 slips: 1) voice mode (already P1), 2) video per chapter → demo-course only, 3) OAuth → email-only auth. The knowledge model + re-teach loop is never cut |
+| Too many P0s for a 3-person team | High | Cut order pre-agreed if Week 2 slips: 1) voice mode (already P1), 2) video per chapter → demo-course only, 3) OAuth → email-only auth. The knowledge model + re-teach loop is never cut, nor is ingestion (F1) — without it the loop cannot be demonstrated |
 
 ---
 

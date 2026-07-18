@@ -114,5 +114,5 @@ Only `Accepted`, `Rejected`, and `Superseded` records belong in this section.
 - **Supersedes:** None
 - **Issue:** https://github.com/deepessh/reflo-learning/issues/2
 - **Verdict:** https://github.com/deepessh/reflo-learning/issues/2#issuecomment-5013334405
-- **Pull request:** https://github.com/deepessh/reflo-learning/pull/0
+- **Pull request:** https://github.com/deepessh/reflo-learning/pull/63
 - **Bootstrap exception:** No

@@ -4,13 +4,13 @@ This file covers **how to work**, not what to build. Everything product-side —
 
 Hard deadline: sprint ends **Aug 7, 2026**; Demo Day Aug 15.
 
-All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` is the sole repository tracking-file exception: it is the searchable register of effective implementation and process verdicts, not a substitute task tracker. Before issue work, run `gh --version` and `gh auth status`. If `gh` is missing or unauthenticated, do not claim work or create local substitute tracking; report the setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
+All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` is the sole repository tracking-file exception: it is the searchable register of effective implementation and process verdicts, not a substitute task tracker. Before issue work, run `gh --version`, `gh auth status -h github.com`, and a read-only API probe such as `gh api user --jq .login`. In a network-restricted or sandboxed execution environment, a failed `gh auth status` is inconclusive when the API probe also reports a connection, DNS, or network error: retry both checks with the environment's approved network-access/escalation mechanism before diagnosing authentication. Do not ask a human to log in, refresh credentials, or replace a token based only on a sandboxed failure. Never use `--show-token` or print, persist, or paste a token while diagnosing access. If `gh` is missing or a network-enabled check confirms that credentials are absent, invalid, or insufficiently scoped, do not claim work or create local substitute tracking; report the verified setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
 
 ---
 
 ## 1. Picking up work
 
-1. Work = open issues in the current sprint milestone: `W1` = Jul 17–23, `W2` = Jul 24–30, and `W3` = Jul 31–Aug 7 (PRD §13). Substitute the milestone containing today's date: `gh issue list --milestone "<current-milestone>" --no-assignee --state open`. Outside those dates, do not infer a current milestone; ask a human which queue is active.
+1. Work = open issues in the current sprint milestone: `W1` = Jul 17–23, `W2` = Jul 24–30, and `W3` = Jul 31–Aug 7 (PRD §13). Substitute the milestone containing today's date: `gh issue list --milestone "<current-milestone>" --state open --search "no:assignee"`. Outside those dates, do not infer a current milestone; ask a human which queue is active.
 2. Claim by comment first; assignment only mirrors the winning claim:
    - Confirm the issue has no assignee and no existing winning `CLAIM:` comment.
    - Post `CLAIM: <stable-agent-name>`. Do not put a client-generated timestamp in the body.
@@ -59,7 +59,7 @@ Don't invent new labels; propose them via a `decision` issue.
 
 **One-time repo init (human + first agent, day 1):**
 1. Create the three milestones (`W1`, `W2`, `W3` with PRD §13 date ranges) and the labels in §3 — `gh label create` / `gh api` script them.
-2. Install GitHub CLI and provision one GitHub identity per agent where possible. For a private repo, grant issue read/write plus the repository permissions needed for branches and PRs; classic tokens generally require `repo`. Confirm `gh --version` and `gh auth status` before seeding work. If identities must share a bot, use the comment-claim protocol in §1.
+2. Install GitHub CLI and provision one GitHub identity per agent where possible. For a private repo, grant issue read/write plus the repository permissions needed for branches and PRs; classic tokens generally require `repo`. Verify CLI, authentication, and API access using the network-aware procedure above before seeding work. If identities must share a bot, use the comment-claim protocol in §1.
 3. Reconcile the PRD mandate index in `DECISIONS.md` with closed `decision` issues for vector store and model routing (§9), plus the SR algorithm and messaging priority (§6), so both repository and GitHub searches find them. PRD mandates remain authoritative even before those issue links are backfilled.
 4. File the sprint-week task issues into their milestones.
 

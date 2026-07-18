@@ -47,7 +47,6 @@ Role names in this bootstrap inventory route ownership but do not satisfy the fu
 
 | Key | Independently reversible choice | Decision DRI | Authorized decider | Deadline | Consequence if unresolved | Issue |
 |---|---|---|---|---|---|---|
-| `P-001` | Workspace/package tooling and deployable service boundaries | Engineering lead | Founding team | 2026-07-18 | Blocks application scaffold | [#2](https://github.com/deepessh/reflo-learning/issues/2) |
 | `P-002` | SQL migration tool, schema ownership, and cross-language write boundary | Engineering lead | Founding team | 2026-07-18 | Blocks database scaffold and worker contracts | [#3](https://github.com/deepessh/reflo-learning/issues/3) |
 | `P-003` | Provider abstraction boundary and adapter rollout policy | Engineering lead | Founding team | 2026-07-18 | Blocks integration interfaces | [#4](https://github.com/deepessh/reflo-learning/issues/4) |
 | `P-004` | IaC tool, state ownership, environment topology, secret boundary, and promotion process | Infrastructure DRI | Founding team; human approval for spending | 2026-07-18 | Blocks reproducible Singapore deployment | [#5](https://github.com/deepessh/reflo-learning/issues/5) |
@@ -96,3 +95,24 @@ Only `Accepted`, `Rejected`, and `Superseded` records belong in this section.
 - **Verdict:** Repository owner directive dated 2026-07-17, durably recorded by this entry
 - **Pull request:** Current bootstrap change; replace with the merged PR URL when GitHub access is restored
 - **Bootstrap exception:** Yes — limited to the files listed in the Bootstrap exception section
+
+## D-GH-2 — Workspace tooling and deployable service boundaries
+
+- **Status:** Accepted
+- **Decision date:** 2026-07-18
+- **Proposer:** codex-root
+- **Decision DRI:** @deepessh
+- **Authorized decider:** @deepessh, repository owner and founding-team decider named in the originating issue
+- **Implementation owner:** Owner of issue #26
+- **PRD references:** `prds/reflo-prd.md` §9 and §13
+- **Context and boundary:** The documentation-only repository needs one collaboration surface while preserving the PRD-mandated CDN, ECS, and Function Compute deployment targets. This verdict controls repository/package tooling and source/deployment boundaries only; adjacent database, framework, infrastructure, parser, authentication, and model-routing choices remain independently reversible decisions.
+- **Options considered:** Separate repositories for each deployable; one combined deployable with later extraction; one monorepo with explicit deployable applications and shared packages.
+- **Authorized verdict:** Use a single monorepo with pnpm 10.x workspaces and Turborepo 2.x, pinning exact tool versions in the scaffold. Establish independently buildable and deployable `apps/web` for the Next.js PWA, `apps/api` for the ECS API plus learner/session orchestrator, and `apps/jobs` for Function Compute handlers, alongside non-deployable shared packages. Applications may consume shared packages but may not import another application; shared packages expose deliberate public entry points and contain no deployment startup code. Keep the API and orchestrator in one ECS deployable for the sprint, permit independent handler packaging from `apps/jobs`, require no paid or remote Turborepo cache, and preserve the option to add independently deployed non-Node workers later.
+- **Rationale:** A monorepo gives the three-person sprint one review surface, one lockfile, direct typed-contract sharing, and dependency-aware root commands without collapsing runtime boundaries. Separate repositories add contract-publishing and coordination overhead, while one combined deployable conflicts with independent CDN, ECS, and Function Compute build and release needs.
+- **Testable consequences:** The scaffold has one pinned pnpm lockfile and pinned local Turborepo dependency; root install, dev, test, lint/format, and build commands cover all participating workspaces; `apps/web`, `apps/api`, and `apps/jobs` each build and package without importing another application; deployment artifacts can be produced independently; package-boundary checks reject app-to-app imports; governance tests remain green.
+- **Reversal criteria:** Supersede this decision if measured workspace or CI overhead exceeds its coordination benefit, if deployable coupling prevents independent release, or if a required runtime cannot be supported without splitting repositories. Reversal requires a new authorized decision and merged record.
+- **Supersedes:** None
+- **Issue:** https://github.com/deepessh/reflo-learning/issues/2
+- **Verdict:** https://github.com/deepessh/reflo-learning/issues/2#issuecomment-5013334405
+- **Pull request:** https://github.com/deepessh/reflo-learning/pull/63
+- **Bootstrap exception:** No

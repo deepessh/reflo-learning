@@ -50,9 +50,11 @@ class DecisionValidationTests(unittest.TestCase):
         self.assertEqual([], errors)
 
     def test_future_github_backed_record_is_valid(self) -> None:
+        baseline_errors, baseline_urls = validator.validate_document(self.valid_text)
         errors, urls = validator.validate_document(self.valid_text + self.future_record())
+        self.assertEqual([], baseline_errors)
         self.assertEqual([], errors)
-        self.assertEqual(3, len(urls))
+        self.assertEqual(len(baseline_urls) + 3, len(urls))
 
     def test_duplicate_effective_id_is_rejected(self) -> None:
         duplicate = "\n".join(

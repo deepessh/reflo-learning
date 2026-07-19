@@ -192,7 +192,7 @@ Only `Accepted`, `Rejected`, and `Superseded` records belong in this section.
 - **Supersedes:** None
 - **Issue:** https://github.com/deepessh/reflo-learning/issues/6
 - **Verdict:** https://github.com/deepessh/reflo-learning/issues/6#issuecomment-5017555040
-- **Pull request:** https://github.com/deepessh/reflo-learning/pull/0
+- **Pull request:** https://github.com/deepessh/reflo-learning/pull/78
 - **Bootstrap exception:** No
 
 ## D-GH-7 — Layered owner-scope enforcement

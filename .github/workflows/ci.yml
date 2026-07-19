@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Enable pinned pnpm
+        run: corepack enable && corepack prepare pnpm@10.34.5 --activate
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify workspace
+        run: pnpm check

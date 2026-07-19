@@ -53,7 +53,7 @@ Don't invent new labels. The work-item helper may create only the decision-autho
 
 ## 4. Setup & commands — keep current
 
-> The repository is currently documentation-only and has not been scaffolded. The owner of the scaffold issue must replace the unavailable entries below in the same PR that introduces each command. A stale commands section is worse than none — update it whenever a command changes.
+> The repository is scaffolded as a pnpm/Turborepo monorepo. A stale commands section is worse than none — update it whenever a command changes.
 
 **One-time repo init (human + first agent, day 1):**
 1. Create the three milestones (`W1`, `W2`, `W3` with PRD §13 date ranges) and the labels in §3 — `gh label create` / `gh api` script them.
@@ -62,15 +62,17 @@ Don't invent new labels. The work-item helper may create only the decision-autho
 4. File the sprint-week task issues into their milestones.
 
 ```
-Install:      Unavailable — application not scaffolded
-Dev server:   Unavailable — application not scaffolded
-Tests:        Unavailable — application not scaffolded
-Lint/format:  Unavailable — application not scaffolded
+Install:      corepack pnpm install --frozen-lockfile
+Dev server:   corepack pnpm dev
+Tests:        corepack pnpm test
+Lint/format:  corepack pnpm lint / corepack pnpm format
 Decisions:    python3 scripts/validate_decisions.py
 Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
-DB migrate:   Unavailable — application not scaffolded
+Build:        corepack pnpm build
+Package:      corepack pnpm package
+DB migrate:   Unavailable — schema issue #27 is not implemented
 ```
 
 Current repo layout:
@@ -78,7 +80,10 @@ Current repo layout:
 ```
 AGENTS.md             Agent operating manual
 DECISIONS.md          Effective decision register and pending index
-.github/workflows/    Repository governance checks
+.github/workflows/    Repository governance and workspace CI checks
+apps/                 Independently deployable web, API, and jobs applications
+infra/                OpenTofu bootstrap/environment/module boundaries
+packages/             Shared runtime contracts, configuration, and tool config
 prds/reflo-prd.md     Product requirements and implementation source of truth
 scripts/              Repository governance utilities
 ```

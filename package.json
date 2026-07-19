@@ -1,0 +1,40 @@
+{
+  "name": "reflo",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "boundaries": "node scripts/check-boundaries.mjs",
+    "build": "turbo run build",
+    "build:packages": "turbo run build --filter='./packages/*'",
+    "check": "pnpm lint && pnpm test && pnpm build && pnpm package",
+    "dev": "pnpm build:packages && turbo run dev --filter='./apps/*'",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:check": "node scripts/check-infra-policy.mjs",
+    "lint": "turbo run lint && pnpm boundaries && pnpm infra:check && pnpm format:check",
+    "package": "pnpm build && pnpm package:web && pnpm package:api && pnpm package:jobs",
+    "package:api": "node scripts/prepare-artifact.mjs api && pnpm --filter @reflo/api --prod deploy .artifacts/api",
+    "package:jobs": "node scripts/prepare-artifact.mjs jobs && pnpm --filter @reflo/jobs --prod deploy .artifacts/jobs",
+    "package:web": "node scripts/prepare-artifact.mjs web apps/web/out",
+    "test": "turbo run test && node --test scripts/*.test.mjs && python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.2.10",
+    "prettier": "3.9.5",
+    "turbo": "2.10.5",
+    "typescript-eslint": "8.64.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

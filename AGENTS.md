@@ -10,18 +10,14 @@ All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` i
 
 ## 1. Picking up work
 
-1. Work = open issues in the current sprint milestone: `W1` = Jul 17–23, `W2` = Jul 24–30, and `W3` = Jul 31–Aug 7 (PRD §13). Substitute the milestone containing today's date: `gh issue list --milestone "<current-milestone>" --state open --search "no:assignee"`. Outside those dates, do not infer a current milestone; ask a human which queue is active.
-2. Claim by comment first; assignment only mirrors the winning claim:
-   - Confirm the issue has no assignee and no existing winning `CLAIM:` comment.
-   - Post `CLAIM: <stable-agent-name>`. Do not put a client-generated timestamp in the body.
-   - Re-fetch all `CLAIM:` and `WITHDRAW CLAIM:` comments. A claim is active until a later withdrawal by the same stable agent name. The earliest active claim in GitHub's server-side chronological order wins; if timestamps tie, the smaller GitHub issue-comment database ID wins. Later claimants post `WITHDRAW CLAIM: <stable-agent-name>` and choose another issue. A claim posted while an earlier claim remains active never displaces it.
-   - With distinct GitHub identities, the winner runs `gh issue edit <n> --add-assignee @me`, then verifies it is the sole assignee with `gh issue view <n> --json assignees`. With a shared bot identity, the winning comment is authoritative because assignment cannot identify the agent.
-   - Re-check the winning claim and assignment immediately before creating the branch. Never work an issue whose winning claim belongs to another agent.
-3. One active claim per agent. Before claiming, verify that the same stable agent name has no other active claim. Close the issue (or leave a status comment, withdraw the claim, and remove your assignment when identities are distinct) before claiming another.
-4. If work isn't an issue, it doesn't exist. Propose new work by opening an issue with a PRD-section reference and the `triage` label — a human moves it into a milestone. Whether something is in sprint scope is a PRD question (§6 vs §7); don't decide it yourself.
-5. If **two distinct approaches** have failed, add the `blocked` label, comment what you tried and what you need, unassign yourself, and pick up something else. Don't spin.
+1. Run `scripts/work-item.sh pick`. Do not invent `gh` claim commands, post `CLAIM:` comments, choose an issue manually, or mutate claim labels yourself.
+2. The helper selects dependency-ready work from the milestone containing today's date (`W1` = Jul 17–23, `W2` = Jul 24–30, `W3` = Jul 31–Aug 7), preferring P0 over `p1` and then the lowest issue number. Outside those dates it fails so a human can identify the active queue.
+3. One worktree has one deterministic `agent:wt-*` identity and at most one active claim. Every Codex task sharing that worktree shares the claim; use a separate worktree for a separate claim. `work:claimed` plus `agent:wt-*` are authoritative, and assignees are an independent availability signal that the helper never changes.
+4. Finish by closing the issue, or relinquish unfinished work, then run `scripts/work-item.sh release --handoff "<what changed, exact next step, and gotchas>"`. The helper posts the durable handoff with the releasing Codex thread ID and removes the claim labels. Completed work stays claimed until its issue closes; releasing an open issue explicitly makes its unfinished work available again.
+5. If work isn't an issue, it doesn't exist. Propose new work by opening an issue with a PRD-section reference and the `triage` label — a human moves it into a milestone. Whether something is in sprint scope is a PRD question (§6 vs §7); don't decide it yourself.
+6. If **two distinct approaches** have failed, add the `blocked` label, comment what you tried and what you need, unassign yourself, and pick up something else. Don't spin.
 
-**Identity requirement:** distinct GitHub users are preferred because assignments remain useful. With a shared bot token, `@me` is identical for all agents, so use stable agent names and treat the server-ordered claim comments—not assignment—as the ownership record.
+Dependency declarations use one exact body line: `Depends on: #12, #13`. Omit the line when no issue dependency exists. Do not put ranges or prose on that line; malformed or inaccessible dependencies fail closed.
 
 ## 2. Memory & state (how agents share context)
 
@@ -50,8 +46,10 @@ Do not store state in chat history, external docs, or your own head. If task sta
 | `needs-human` | Escalation (see §7). Agents never resolve these. |
 | `bug` / `tech-debt` | Known issues log |
 | `p1` | P1-priority feature per the PRD. Consequence: ships behind a feature flag (§5) |
+| `work:claimed` | Work item currently claimed through `scripts/work-item.sh` |
+| `agent:wt-*` | Claim owner derived from one local Git worktree fingerprint |
 
-Don't invent new labels; propose them via a `decision` issue.
+Don't invent new labels. The work-item helper may create only the decision-authorized `work:claimed` and `agent:wt-*` labels; propose every other addition through a `decision` issue.
 
 ## 4. Setup & commands — keep current
 
@@ -59,7 +57,7 @@ Don't invent new labels; propose them via a `decision` issue.
 
 **One-time repo init (human + first agent, day 1):**
 1. Create the three milestones (`W1`, `W2`, `W3` with PRD §13 date ranges) and the labels in §3 — `gh label create` / `gh api` script them.
-2. Install GitHub CLI and provision one GitHub identity per agent where possible. For a private repo, grant issue read/write plus the repository permissions needed for branches and PRs; classic tokens generally require `repo`. Verify CLI, authentication, and API access using the network-aware procedure above before seeding work. If identities must share a bot, use the comment-claim protocol in §1.
+2. Install GitHub CLI and provision one GitHub identity per agent where possible. For a private repo, grant issue read/write plus the repository permissions needed for branches and PRs; classic tokens generally require `repo`. Verify CLI, authentication, and API access using the network-aware procedure above before seeding work. Work ownership remains worktree-scoped even when GitHub identities are distinct.
 3. Reconcile the PRD mandate index in `DECISIONS.md` with closed `decision` issues for vector store and model routing (§9), plus the SR algorithm and messaging priority (§6), so both repository and GitHub searches find them. PRD mandates remain authoritative even before those issue links are backfilled.
 4. File the sprint-week task issues into their milestones.
 
@@ -69,7 +67,9 @@ Dev server:   Unavailable — application not scaffolded
 Tests:        Unavailable — application not scaffolded
 Lint/format:  Unavailable — application not scaffolded
 Decisions:    python3 scripts/validate_decisions.py
-Gov tests:    python3 -m unittest scripts/test_validate_decisions.py
+Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py
+Pick work:    scripts/work-item.sh pick
+Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 DB migrate:   Unavailable — application not scaffolded
 ```
 
@@ -98,7 +98,7 @@ Before pilot activation, every PRD §11 gate marked "before pilot launch" or "bl
 
 ## 7. Escalate to humans (don't decide alone)
 
-Open an issue (or comment on the relevant one) and add the `needs-human` label. If the escalation blocks the current issue, leave a handoff/status comment, withdraw the claim, remove your assignment when identities are distinct, and only then pick up other work. If unblocked in-scope work remains on the issue, keep the claim and continue it instead of claiming a second issue. Escalate:
+Open an issue (or comment on the relevant one) and add the `needs-human` label. If the escalation blocks the current issue, run the release helper with a complete handoff before picking other work. If unblocked in-scope work remains on the issue, keep the claim instead of claiming a second issue. Escalate:
 
 - Anything touching pricing, pilot recruitment, legal/trademark, content licensing, or external comms (Alibaba/AMD/pilot users).
 - Cutting, deferring, or reordering any PRD-scoped feature (milestone changes are human-only).

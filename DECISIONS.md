@@ -35,7 +35,7 @@ These entries improve discovery; they are not ordinary decision records and cann
 | `M-003` | Knowledge updates use a versioned Bayesian mastery update and FSRS-style scheduling; novel psychometrics are out of scope. | `prds/reflo-prd.md` §6, F4 | PRD revision only; discovery [#24](https://github.com/deepessh/reflo-learning/issues/24) |
 | `M-004` | Delivery priority is Telegram P0, opted-in email fallback, and WhatsApp P1 after approval. | `prds/reflo-prd.md` §6, F6 | PRD revision only; discovery [#25](https://github.com/deepessh/reflo-learning/issues/25) |
 | `M-005` | P1 runtime surfaces are disabled behind feature flags and cannot displace P0 work. | `prds/reflo-prd.md` §6 and §13; `AGENTS.md` §5 | PRD revision only |
-| `M-006` | The P0 production story uses the named Alibaba services in Singapore; offline behavior is a labeled, bounded fallback. | `prds/reflo-prd.md` §9 and §12 | PRD revision only |
+| `M-006` | The P0 production story uses the named Alibaba services; offline behavior is a labeled, bounded fallback. | `prds/reflo-prd.md` §9 and §12 | PRD revision only |
 
 The day-one GitHub bootstrap must create or reconcile closed decision issues for `M-001` through `M-004` and backfill their links here. Missing mirror issues do not weaken the underlying PRD mandates.
 
@@ -48,7 +48,7 @@ Role names in this bootstrap inventory route ownership but do not satisfy the fu
 | Key | Independently reversible choice | Decision DRI | Authorized decider | Deadline | Consequence if unresolved | Issue |
 |---|---|---|---|---|---|---|
 | `P-003` | Provider abstraction boundary and adapter rollout policy | Engineering lead | Founding team | 2026-07-18 | Blocks integration interfaces | [#4](https://github.com/deepessh/reflo-learning/issues/4) |
-| `P-004` | IaC tool, state ownership, environment topology, secret boundary, and promotion process | Infrastructure DRI | Founding team; human approval for spending | 2026-07-18 | Blocks reproducible Singapore deployment | [#5](https://github.com/deepessh/reflo-learning/issues/5) |
+| `P-004` | IaC tool, state ownership, environment topology, secret boundary, and promotion process | Infrastructure DRI | Founding team; human approval for spending | 2026-07-18 | Blocks reproducible deployment | [#5](https://github.com/deepessh/reflo-learning/issues/5) |
 | `P-005` | Email authentication mechanism/provider and session lifecycle | Application DRI | Founding team; human approval for paid service | 2026-07-18 | Blocks accounts and pilot access | [#6](https://github.com/deepessh/reflo-learning/issues/6) |
 | `P-006` | Owner-scope enforcement pattern across API, database, assets, and retrieval | Security DRI | Founding team | 2026-07-19 | Blocks authorization-sensitive implementation | [#7](https://github.com/deepessh/reflo-learning/issues/7) |
 | `P-007` | PDF/EPUB/DOCX parser, OCR, malware scanner, and isolated-worker runtime | Ingestion DRI | Founding team; human approval for paid service | 2026-07-19 | Blocks secure ingestion pipeline | [#8](https://github.com/deepessh/reflo-learning/issues/8) |
@@ -68,7 +68,7 @@ Role names in this bootstrap inventory route ownership but do not satisfy the fu
 
 Activation, D7, experiment, readiness, and numerical release-gate semantics are already fixed by the PRD. Track their implementation in ordinary issues unless a genuinely unresolved, independently reversible choice emerges.
 
-Trademark clearance, content-rights evidence, quotas, provider-region verification, recruitment, and external contacts are human gates or operational evidence rather than reusable implementation decisions. Keep them in the relevant `needs-human` issues; an effective decision may link to safe, non-sensitive evidence when it materially supports a verdict.
+Trademark clearance, content-rights evidence, quotas, provider privacy-setting verification, recruitment, and external contacts are human gates or operational evidence rather than reusable implementation decisions. Keep them in the relevant `needs-human` issues; an effective decision may link to safe, non-sensitive evidence when it materially supports a verdict.
 
 ## Effective Decision Records
 

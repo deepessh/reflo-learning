@@ -48,7 +48,6 @@ Role names in this bootstrap inventory route ownership but do not satisfy the fu
 | Key | Independently reversible choice | Decision DRI | Authorized decider | Deadline | Consequence if unresolved | Issue |
 |---|---|---|---|---|---|---|
 | `P-005` | Email authentication mechanism/provider and session lifecycle | Application DRI | Founding team; human approval for paid service | 2026-07-18 | Blocks accounts and pilot access | [#6](https://github.com/deepessh/reflo-learning/issues/6) |
-| `P-006` | Owner-scope enforcement pattern across API, database, assets, and retrieval | Security DRI | Founding team | 2026-07-19 | Blocks authorization-sensitive implementation | [#7](https://github.com/deepessh/reflo-learning/issues/7) |
 | `P-007` | PDF/EPUB/DOCX parser, OCR, malware scanner, and isolated-worker runtime | Ingestion DRI | Founding team; human approval for paid service | 2026-07-19 | Blocks secure ingestion pipeline | [#8](https://github.com/deepessh/reflo-learning/issues/8) |
 | `P-008` | Chunking policy, embedding model/version, and vector namespace contract | Ingestion DRI | Founding team | 2026-07-19 | Blocks source spans, embedding, and retrieval | [#9](https://github.com/deepessh/reflo-learning/issues/9) |
 | `P-009` | Model-router interface, task routing, prompt registry, and tracing contract | ML platform DRI | Founding team | 2026-07-19 | Blocks all model-backed features | [#10](https://github.com/deepessh/reflo-learning/issues/10) |
@@ -175,6 +174,27 @@ Only `Accepted`, `Rejected`, and `Superseded` records belong in this section.
 - **Issue:** https://github.com/deepessh/reflo-learning/issues/5
 - **Verdict:** https://github.com/deepessh/reflo-learning/issues/5#issuecomment-5013676908
 - **Pull request:** https://github.com/deepessh/reflo-learning/pull/66
+- **Bootstrap exception:** No
+
+## D-GH-7 — Layered owner-scope enforcement
+
+- **Status:** Accepted
+- **Decision date:** 2026-07-18
+- **Proposer:** codex-root
+- **Decision DRI:** @deepessh
+- **Authorized decider:** @deepessh, repository owner and founding-team decider named in the originating issue
+- **Implementation owner:** Owners of authorization-sensitive implementation issues; issue #27 owns the initial RDS schema surface
+- **PRD references:** `prds/reflo-prd.md` §9, §10, and §11
+- **Context and boundary:** Every course and source must be isolated by owner scope, with active membership enforced before retrieval, mutation, asset signing, vector operations, and cached responses. This verdict controls the non-bypassable authorization contract across application guards, RDS data access, jobs, caches, asset-signing entry points, vector adapters, and server-resolved citations. It does not choose the physical vector namespace or index layout, OSS key layout or signing technology, URL expiry or invalidation, session mechanics, queue-envelope structure, deletion-role workflow, or migration-role ownership; those remain with issues #9, #13, #6, #12, #18, and D-GH-3 respectively.
+- **Options considered:** Application authorization guards only; database row policies only; layered application authorization plus database and provider-boundary enforcement.
+- **Authorized verdict:** Adopt layered owner-scope enforcement. The server derives the actor and target scope from authenticated identity and persisted resource relationships; client, model, cache, or queue values are never authority. Typed application guards check active membership at the point of every retrieval, mutation, asset-signing request, vector operation, and cached response. RDS runtime access uses transaction-local actor and scope context that fails closed when absent. Runtime roles are not table owners, superusers, or granted `BYPASSRLS`; row-level security and database-enforced scoped relationships independently prevent cross-scope reads, writes, and links. During MVP only personal user scopes may be created, each active user scope has exactly one active owner membership, and organization scopes and non-owner roles remain disabled. Jobs reauthorize membership and resource ownership before privileged access; caches are scope-keyed and reauthorized before return. Asset signing accepts only server-resolved authorized resources and never arbitrary caller-supplied object keys. Vector adapters require a non-removable owner scope for every write, update, search, and result-validation path. Uploaded or retrieved source text cannot influence authorization or filters, and displayed citations resolve server-side only to currently authorized source spans.
+- **Rationale:** Application guards express action-level policy and produce clear failures, but omissions in API or job code must not expose data. RLS and scoped relationships provide an independent RDS backstop, while explicit cache, signing, vector, and citation boundaries cover stores PostgreSQL cannot protect. Transaction-local context prevents pooled connections from leaking authorization state across requests, and least-privilege runtime roles keep the database backstop effective.
+- **Testable consequences:** Tests reject forged scope IDs, absent authorization context, revoked membership at point of use, zero or multiple active owners during a normal active user-scope lifecycle, cross-scope direct and multi-hop relationships, pooled-connection context reuse, cache leakage, tampered job messages, arbitrary or cross-scope asset references, missing or replaced vector filters, cross-scope vector writes or results, unauthorized source-span citations, and direct cross-scope access by runtime database roles. Application-guard and RLS conformance tests cover the same access matrix without assuming either layer replaces the other. Remaining validity of an already issued signed URL follows issue #13 rather than this verdict.
+- **Reversal criteria:** Supersede if the layered contract cannot meet required latency or deployment behavior, PostgreSQL RLS cannot be operated safely with the selected connection and role model, or an alternative provides equivalent independently enforced isolation across every covered store with lower measured risk. Any replacement must preserve the PRD owner-scope, active-membership, untrusted-content, and zero-cross-scope-disclosure requirements.
+- **Supersedes:** None
+- **Issue:** https://github.com/deepessh/reflo-learning/issues/7
+- **Verdict:** https://github.com/deepessh/reflo-learning/issues/7#issuecomment-5014469215
+- **Pull request:** https://github.com/deepessh/reflo-learning/pull/69
 - **Bootstrap exception:** No
 
 ## D-GH-67 — Worktree-based issue pickup and claim labels

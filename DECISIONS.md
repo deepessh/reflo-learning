@@ -256,7 +256,7 @@ Only `Accepted`, `Rejected`, and `Superseded` records belong in this section.
 - **Supersedes:** None
 - **Issue:** https://github.com/deepessh/reflo-learning/issues/12
 - **Verdict:** https://github.com/deepessh/reflo-learning/issues/12#issuecomment-5016725056
-- **Pull request:** https://github.com/deepessh/reflo-learning/pull/0
+- **Pull request:** https://github.com/deepessh/reflo-learning/pull/74
 - **Bootstrap exception:** No
 
 ## D-GH-67 — Worktree-based issue pickup and claim labels

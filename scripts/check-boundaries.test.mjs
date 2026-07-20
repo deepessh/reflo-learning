@@ -109,3 +109,44 @@ test("allows database clients inside the owning db package", () => {
     assert.deepEqual(checkBoundaries(root), []);
   });
 });
+
+test("rejects direct model provider SDK imports from feature code", () => {
+  withFixture((root) => {
+    writeFileSync(
+      path.join(root, "apps/api/src/index.ts"),
+      'import OpenAI from "openai";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /model provider SDK openai is only allowed in packages\/model-router\/src\/adapters/,
+    );
+  });
+});
+
+test("rejects direct model provider SDK imports from shared domain packages", () => {
+  withFixture((root) => {
+    writeFileSync(
+      path.join(root, "packages/shared/src/index.ts"),
+      'import "@alicloud/dashscope";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /model provider SDK @alicloud\/dashscope is only allowed/,
+    );
+  });
+});
+
+test("allows model provider SDK imports only inside model adapter modules", () => {
+  withFixture((root) => {
+    const adapterDirectory = path.join(
+      root,
+      "packages/model-router/src/adapters",
+    );
+    mkdirSync(adapterDirectory, { recursive: true });
+    writeFileSync(
+      path.join(adapterDirectory, "qwen.ts"),
+      'import "@alicloud/dashscope";\n',
+    );
+    assert.deepEqual(checkBoundaries(root), []);
+  });
+});

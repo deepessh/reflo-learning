@@ -14,6 +14,10 @@ const packageRoot = path.resolve(
   "..",
 );
 const wrapper = path.join(packageRoot, "scripts/pg-dump-from-container.sh");
+const canonicalDump = path.join(
+  packageRoot,
+  "scripts/dump-schema-from-container.sh",
+);
 
 test("pinned pg_dump wrapper delegates to the service container", async (t) => {
   const scratch = await mkdtemp(path.join(tmpdir(), "reflo-pg-dump-"));
@@ -56,4 +60,31 @@ test("pinned pg_dump wrapper requires a service container", async () => {
       return true;
     },
   );
+});
+
+test("canonical schema dump exposes only the container pg_dump", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "reflo-schema-dump-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+
+  const fakeNode = path.join(scratch, "node");
+  await writeFile(
+    fakeNode,
+    '#!/usr/bin/env sh\nprintf "script=%s\\n" "$1"\nprintf "client=%s\\n" "$(command -v pg_dump)"\npg_dump --version\n',
+  );
+  await chmod(fakeNode, 0o755);
+  const fakeDocker = path.join(scratch, "docker");
+  await writeFile(fakeDocker, '#!/usr/bin/env sh\nprintf "%s\\n" "$@"\n');
+  await chmod(fakeDocker, 0o755);
+
+  const { stdout } = await execFileAsync(canonicalDump, [], {
+    env: {
+      ...process.env,
+      PATH: `${scratch}:${process.env.PATH ?? ""}`,
+      REFLO_POSTGRES_CONTAINER_ID: "abc123",
+    },
+  });
+  const output = stdout.trimEnd().split("\n");
+  assert.match(output[0], /scripts\/dump-schema\.mjs$/);
+  assert.match(output[1], /^client=.*\/pg_dump$/);
+  assert.deepEqual(output.slice(2), ["exec", "abc123", "pg_dump", "--version"]);
 });

@@ -1,10 +1,10 @@
 # AGENTS.md — Operating Manual for Agents Building Reflo
 
-This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.6; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file, `DECISIONS.md`, and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
+This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.7; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file, `DECISIONS.md`, and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
 
 Hard deadline: sprint ends **Aug 7, 2026**; Demo Day Aug 15.
 
-All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` is the sole repository tracking-file exception: it is the searchable register of effective implementation and process verdicts, not a substitute task tracker. `scripts/work-item.sh` performs the required `gh` CLI, authentication, and read-only API preflight before its `pick` and `release` operations; do not repeat those checks manually before issue work. In a network-restricted or sandboxed execution environment, retry a helper failure that reports unavailable GitHub API access with the environment's approved network-access/escalation mechanism before diagnosing authentication. Do not ask a human to log in, refresh credentials, or replace a token based only on a sandboxed failure. Never use `--show-token` or print, persist, or paste a token while diagnosing access. If the helper reports that `gh` is missing, or a network-enabled run confirms that credentials are absent, invalid, or insufficiently scoped, do not claim work or create local substitute tracking; report the verified setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
+All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` is the sole repository tracking-file exception: it is the searchable register of effective implementation and process verdicts, not a substitute task tracker. Run `scripts/doctor.sh` before setup or when command discovery changes; it checks the exact Node and pnpm pins, resolves standard `gh` install locations, distinguishes an absent command from one installed outside `PATH`, and reports whether the digest-pinned PostgreSQL client is locally available or CI-only. `scripts/work-item.sh` performs the required `gh` CLI, authentication, and read-only API preflight before its `pick` and `release` operations; do not repeat those checks manually before issue work. In a network-restricted or sandboxed execution environment, retry a helper failure that reports unavailable GitHub API access with the environment's approved network-access/escalation mechanism before diagnosing authentication. Do not ask a human to log in, refresh credentials, or replace a token based only on a sandboxed failure. Never use `--show-token` or print, persist, or paste a token while diagnosing access. If the doctor confirms that `gh` is absent rather than merely outside `PATH`, or a network-enabled run confirms that credentials are absent, invalid, or insufficiently scoped, do not claim work or create local substitute tracking; report the verified setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
 
 ---
 
@@ -15,7 +15,7 @@ All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` i
 3. One worktree has one deterministic `agent:wt-*` identity and at most one active claim. Every Codex task sharing that worktree shares the claim; use a separate worktree for a separate claim. `work:claimed` plus `agent:wt-*` are authoritative, and assignees are an independent availability signal that the helper never changes.
 4. Finish by closing the issue, or relinquish unfinished work, then run `scripts/work-item.sh release --handoff "<what changed, exact next step, and gotchas>"`. The helper posts the durable handoff with the releasing Codex thread ID and removes the claim labels. Completed work stays claimed until its issue closes; releasing an open issue explicitly makes its unfinished work available again.
 5. If work isn't an issue, it doesn't exist. Propose new work by opening an issue with a PRD-section reference and the `triage` label — a human moves it into a milestone. Whether something is in sprint scope is a PRD question (§6 vs §7); don't decide it yourself.
-6. If **two distinct approaches** have failed, add the `blocked` label, comment what you tried and what you need, unassign yourself, and pick up something else. Don't spin.
+6. If **two distinct approaches against the same unchanged blocker** have failed, add the `blocked` label, comment what you tried and what you need, unassign yourself, and pick up something else. A materially different approach changes the mechanism or dependency being tested, not just flags or retries. Successive fixes for newly revealed independent failures do not count toward the same two-attempt threshold. Don't spin.
 
 Dependency declarations use one exact body line: `Depends on: #12, #13`. Omit the line when no issue dependency exists. Do not put ranges or prose on that line; malformed or inaccessible dependencies fail closed.
 
@@ -62,6 +62,7 @@ Don't invent new labels. The work-item helper may create only the decision-autho
 4. File the sprint-week task issues into their milestones.
 
 ```
+Doctor:       scripts/doctor.sh
 Install:      corepack pnpm install --frozen-lockfile
 Dev server:   corepack pnpm dev
 Tests:        corepack pnpm test
@@ -73,6 +74,7 @@ Release work: scripts/work-item.sh release --handoff "<status and exact next ste
 Build:        corepack pnpm build
 Package:      corepack pnpm package
 DB migrate:   DATABASE_URL="..." corepack pnpm --filter @reflo/db db:migrate
+DB snapshot:  REFLO_POSTGRES_CONTAINER_ID="..." corepack pnpm --filter @reflo/db db:dump
 ```
 
 Current repo layout:
@@ -90,9 +92,14 @@ scripts/              Repository governance utilities
 
 ## 5. Code & workflow conventions
 
-- Branches: `feat/<issue-number>-<short>`, `fix/<issue-number>-<short>`. Conventional commits (`feat:`, `fix:`, `chore:`).
+- Branches: `feat/<issue-number>-<short>`, `fix/<issue-number>-<short>`. Start each branch from freshly fetched `origin/main`. After a squash merge, never reuse or recreate the deleted feature branch for corrective work; fetch and create a new `fix/` branch from current `origin/main`. Conventional commits (`feat:`, `fix:`, `chore:`).
 - Small PRs, one issue each, `Closes #<n>` in the description. Squash merge.
+- Every status required by the effective GitHub ruleset must report on every pull request. Required workflows cannot use pull-request path filters or conditional required jobs; if selective work is necessary, keep an unconditional sentinel job under the required context. `.github/required-checks.json`, `scripts/check-required-checks.mjs`, and governance CI enforce workflow and live-ruleset alignment for documentation-only and code-only changes.
+- Do not enable auto-merge until every expected required status is visible on the pull request and passing. If a required status fails after merge, reopen the same issue, create a corrective branch from fresh `origin/main`, link the corrective PR, and close the issue again only after the correction merges with every required status green.
 - Tests required for core logic (knowledge-model math, grading, ingestion parsing); UI can be lighter.
+- Generated artifacts are never hand-edited. In particular, regenerate `packages/db/schema.sql` only through `packages/db/scripts/dump-schema-from-container.sh`, using `pg_dump` from the exact digest-pinned PostgreSQL service image rather than a host client or a client that merely matches the major version.
+- Turborepo uses strict environment filtering: every environment variable needed inside a task must be declared in that task's `env` or `passThroughEnv`, and a policy or integration test must prove the value reaches the task.
+- Large generated-file comparisons must emit bounded diagnostics: hashes or lengths, the first differing offset, and small surrounding contexts or tails. Do not dump an entire generated artifact into CI logs.
 - Every LLM call goes through the shared model-routing module with tracing — no raw API calls scattered in feature code.
 - Any P1 runtime surface ships disabled behind a feature flag. Non-runtime P1 artifacts such as a recorded clip or benchmark are labeled as prototypes and are not presented as shipped functionality.
 - Secrets via environment/KMS only. Never commit keys; never echo them in logs, traces, or issue comments. Never put PII in traces **or issues** — issues are the shared memory, treat them as logs.

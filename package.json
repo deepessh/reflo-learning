@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.34.5",
   "engines": {
-    "node": ">=24.18.0 <25"
+    "node": "24.18.0"
   },
   "scripts": {
     "boundaries": "node scripts/check-boundaries.mjs",
@@ -12,14 +12,17 @@
     "build:packages": "turbo run build --filter='./packages/*'",
     "check": "pnpm lint && pnpm test && pnpm build && pnpm package",
     "dev": "pnpm build:packages && turbo run dev --filter='./apps/*'",
+    "doctor": "scripts/doctor.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:check": "node scripts/check-infra-policy.mjs",
-    "lint": "turbo run lint && pnpm boundaries && pnpm infra:check && pnpm format:check",
+    "lint": "turbo run lint && pnpm boundaries && pnpm infra:check && pnpm toolchain:check && pnpm workflows:check && pnpm format:check",
     "package": "pnpm build && pnpm package:web && pnpm package:api && pnpm package:jobs",
     "package:api": "node scripts/prepare-artifact.mjs api && pnpm --filter @reflo/api --prod deploy .artifacts/api",
     "package:jobs": "node scripts/prepare-artifact.mjs jobs && pnpm --filter @reflo/jobs --prod deploy .artifacts/jobs",
     "package:web": "node scripts/prepare-artifact.mjs web apps/web/out",
+    "toolchain:check": "node scripts/check-toolchain-policy.mjs",
+    "workflows:check": "node scripts/check-required-checks.mjs",
     "test": "turbo run test && node --test scripts/*.test.mjs && python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py"
   },
   "devDependencies": {

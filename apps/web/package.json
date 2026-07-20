@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@reflo/accounts": "workspace:*",
     "@reflo/config": "workspace:*",
     "@reflo/contracts": "workspace:*",
     "next": "16.2.10",

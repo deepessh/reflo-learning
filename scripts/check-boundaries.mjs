@@ -23,6 +23,10 @@ const PRIVATE_ASSET_PROVIDER_SDKS = new Set([
   "@alicloud/cdn20180510",
   "ali-oss",
 ]);
+const TRANSACTIONAL_EMAIL_PROVIDER_SDKS = new Set([
+  "@alicloud/credentials",
+  "@alicloud/dm20151123",
+]);
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
   ".cts",
@@ -132,6 +136,36 @@ function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
     ) {
       violations.push(
         `${file}: private asset provider SDK ${specifier} is only allowed in packages/asset-delivery/src/adapters`,
+      );
+      continue;
+    }
+    const transactionalEmailProviderSdk = [
+      ...TRANSACTIONAL_EMAIL_PROVIDER_SDKS,
+    ].find(
+      (candidate) =>
+        specifier === candidate || specifier.startsWith(`${candidate}/`),
+    );
+    const transactionalEmailAdapterRoot = path.join(
+      packagesRoot,
+      "accounts",
+      "src",
+      "adapters",
+    );
+    const relativeToTransactionalEmailAdapters = path.relative(
+      transactionalEmailAdapterRoot,
+      file,
+    );
+    const isInsideTransactionalEmailAdapters =
+      relativeToTransactionalEmailAdapters !== "" &&
+      !relativeToTransactionalEmailAdapters.startsWith("..") &&
+      !path.isAbsolute(relativeToTransactionalEmailAdapters);
+
+    if (
+      transactionalEmailProviderSdk !== undefined &&
+      !isInsideTransactionalEmailAdapters
+    ) {
+      violations.push(
+        `${file}: transactional email provider SDK ${specifier} is only allowed in packages/accounts/src/adapters`,
       );
       continue;
     }

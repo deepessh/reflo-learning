@@ -1,24 +1,18 @@
 import { APP_NAME, readPublicEnvironment } from "@reflo/config";
-import type { HealthResponse } from "@reflo/contracts";
-
-import { getHomeCopy } from "../src/home-copy";
+import { AccountShell } from "../src/account-shell";
 
 const environment = readPublicEnvironment(process.env.NEXT_PUBLIC_REFLO_ENV);
-const copy = getHomeCopy(APP_NAME);
-
-const scaffoldStatus: HealthResponse["status"] = "ok";
+const apiOrigin =
+  process.env.NEXT_PUBLIC_REFLO_API_ORIGIN ?? "http://127.0.0.1:3001";
 
 export default function Home() {
   return (
     <main>
-      <section className="shell">
-        <p className="eyebrow">{copy.eyebrow}</p>
-        <h1>{copy.headline}</h1>
-        <p className="lede">{copy.description}</p>
-        <div className="status">
-          Scaffold {scaffoldStatus} · {environment}
-        </div>
-      </section>
+      <AccountShell
+        apiOrigin={apiOrigin}
+        appName={APP_NAME}
+        environment={environment}
+      />
     </main>
   );
 }

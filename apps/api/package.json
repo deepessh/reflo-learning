@@ -16,8 +16,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@reflo/accounts": "workspace:*",
     "@reflo/config": "workspace:*",
-    "@reflo/contracts": "workspace:*"
+    "@reflo/contracts": "workspace:*",
+    "@reflo/db": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

@@ -1,5 +1,6 @@
 import { readServerEnvironment } from "@reflo/config";
 
+import { createAccountRuntime } from "./account-composition.js";
 import { createApiServer } from "./server.js";
 
 const environment = readServerEnvironment(process.env, {
@@ -9,7 +10,13 @@ const environment = readServerEnvironment(process.env, {
   service: "api",
 });
 
-const server = createApiServer(environment);
+const accountRuntime = createAccountRuntime(
+  process.env,
+  environment.deployment,
+);
+const server = createApiServer(environment, {
+  accounts: accountRuntime.accounts,
+});
 
 server.listen(environment.port, environment.host, () => {
   console.info(
@@ -19,9 +26,12 @@ server.listen(environment.port, environment.host, () => {
 
 function shutdown(signal: NodeJS.Signals) {
   console.info(`Reflo API received ${signal}; shutting down`);
-  server.close((error) => {
+  server.close(async (error) => {
+    await accountRuntime.close().catch(() => {
+      process.exitCode = 1;
+    });
     if (error) {
-      console.error("Reflo API shutdown failed", error);
+      console.error("Reflo API shutdown failed");
       process.exitCode = 1;
     }
   });

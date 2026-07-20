@@ -23,7 +23,11 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["REFLO_SKIP_SCHEMA_DUMP", "TEST_DATABASE_URL"],
+      "env": [
+        "REFLO_POSTGRES_CONTAINER_ID",
+        "REFLO_SKIP_SCHEMA_DUMP",
+        "TEST_DATABASE_URL"
+      ],
       "outputs": []
     }
   }

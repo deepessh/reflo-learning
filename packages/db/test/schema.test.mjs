@@ -81,11 +81,7 @@ test(
           "utf8",
         );
         const actualSchema = await readFile(dumpedSchema, "utf8");
-        assert.equal(
-          actualSchema,
-          expectedSchema,
-          "schema.sql is stale; run db:dump",
-        );
+        assertSchemasEqual(actualSchema, expectedSchema);
       }
 
       client = new pg.Client({ connectionString: databaseUrl.toString() });
@@ -322,5 +318,34 @@ async function expectSqlState(client, code, sql, parameters = []) {
   await assert.rejects(
     client.query(sql, parameters),
     (error) => error.code === code,
+  );
+}
+
+function assertSchemasEqual(actual, expected) {
+  if (actual === expected) {
+    return;
+  }
+
+  let firstDifference = 0;
+  while (
+    firstDifference < actual.length &&
+    firstDifference < expected.length &&
+    actual[firstDifference] === expected[firstDifference]
+  ) {
+    firstDifference += 1;
+  }
+
+  const contextStart = Math.max(0, firstDifference - 120);
+  const contextEnd = firstDifference + 240;
+  assert.fail(
+    [
+      "schema.sql is stale; run db:dump",
+      `first difference: ${firstDifference}`,
+      `actual length: ${actual.length}; expected length: ${expected.length}`,
+      `actual context: ${JSON.stringify(actual.slice(contextStart, contextEnd))}`,
+      `expected context: ${JSON.stringify(expected.slice(contextStart, contextEnd))}`,
+      `actual tail: ${JSON.stringify(actual.slice(-320))}`,
+      `expected tail: ${JSON.stringify(expected.slice(-320))}`,
+    ].join("\n"),
   );
 }

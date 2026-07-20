@@ -38,11 +38,16 @@ jobs:
         run: corepack enable && corepack prepare pnpm@10.34.5 --activate
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Install pinned PostgreSQL client major
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client-16
-      - name: Add PostgreSQL client to PATH
-        run: echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - name: Configure pinned PostgreSQL client
+        run: |
+          install -D -m 0755 packages/db/scripts/pg-dump-from-container.sh \
+            "$RUNNER_TEMP/reflo-postgres-client/pg_dump"
+          echo "$RUNNER_TEMP/reflo-postgres-client" >> "$GITHUB_PATH"
       - name: Verify PostgreSQL client
+        env:
+          REFLO_POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
         run: pg_dump --version
       - name: Verify workspace
+        env:
+          REFLO_POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
         run: pnpm check

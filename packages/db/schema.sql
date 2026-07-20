@@ -1,10 +1,3 @@
---
--- PostgreSQL database dump
---
-
--- Dumped from database version 16.9 (Debian 16.9-1.pgdg120+1)
--- Dumped by pg_dump version 16.9 (Debian 16.9-1.pgdg120+1)
-
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -2301,3 +2294,11 @@ ALTER TABLE public.study_session ENABLE ROW LEVEL SECURITY;
 --
 -- PostgreSQL database dump complete
 --
+
+
+--
+-- Dbmate schema migrations
+--
+
+INSERT INTO public.schema_migrations (version) VALUES
+    ('20260719000100');

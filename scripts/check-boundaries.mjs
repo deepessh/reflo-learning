@@ -19,6 +19,10 @@ const MODEL_PROVIDER_SDKS = new Set([
   "dashscope",
   "openai",
 ]);
+const PRIVATE_ASSET_PROVIDER_SDKS = new Set([
+  "@alicloud/cdn20180510",
+  "ali-oss",
+]);
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
   ".cts",
@@ -100,6 +104,34 @@ function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
     if (modelProviderSdk !== undefined && !isInsideModelAdapters) {
       violations.push(
         `${file}: model provider SDK ${specifier} is only allowed in packages/model-router/src/adapters`,
+      );
+      continue;
+    }
+    const privateAssetProviderSdk = [...PRIVATE_ASSET_PROVIDER_SDKS].find(
+      (candidate) =>
+        specifier === candidate || specifier.startsWith(`${candidate}/`),
+    );
+    const privateAssetAdapterRoot = path.join(
+      packagesRoot,
+      "asset-delivery",
+      "src",
+      "adapters",
+    );
+    const relativeToPrivateAssetAdapters = path.relative(
+      privateAssetAdapterRoot,
+      file,
+    );
+    const isInsidePrivateAssetAdapters =
+      relativeToPrivateAssetAdapters !== "" &&
+      !relativeToPrivateAssetAdapters.startsWith("..") &&
+      !path.isAbsolute(relativeToPrivateAssetAdapters);
+
+    if (
+      privateAssetProviderSdk !== undefined &&
+      !isInsidePrivateAssetAdapters
+    ) {
+      violations.push(
+        `${file}: private asset provider SDK ${specifier} is only allowed in packages/asset-delivery/src/adapters`,
       );
       continue;
     }

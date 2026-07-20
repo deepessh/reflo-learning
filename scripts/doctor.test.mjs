@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,11 +74,15 @@ test("doctor verifies exact tools and the pinned container client", (t) => {
 test("doctor distinguishes an installed command outside PATH", (t) => {
   const { bin, directory } = fixture();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const systemBin = path.join(directory, "system-bin");
+  mkdirSync(systemBin);
+  symlinkSync("/bin/sh", path.join(systemBin, "sh"));
+  symlinkSync("/usr/bin/sed", path.join(systemBin, "sed"));
   const result = spawnSync("/bin/sh", [doctor], {
     encoding: "utf8",
     env: {
       ...process.env,
-      PATH: "/usr/bin:/bin",
+      PATH: systemBin,
       REFLO_DOCTOR_FALLBACK_DIRS: bin,
       REFLO_DOCTOR_ROOT: directory,
     },

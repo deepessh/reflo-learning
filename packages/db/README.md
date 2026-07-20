@@ -4,6 +4,8 @@ This package is the sole owner of Reflo's transactional PostgreSQL schema.
 
 - Add append-only timestamped SQL migrations under `migrations/`.
 - Regenerate and commit `schema.sql` with `pnpm --filter @reflo/db db:dump`.
+- CI runs `pg_dump` from its digest-pinned PostgreSQL service container so the
+  checked-in schema is compared with the exact client version that generated it.
 - Application code must use deliberate public repositories added to this package; raw database clients are forbidden elsewhere.
 - Independently deployed non-Node workers must write through versioned API or `reflo-event-envelope-v1` RocketMQ command contracts. They do not connect directly to core RDS tables.
 - Production migrations are serialized deployment operations run through `pnpm --filter @reflo/db db:migrate`; applications and Function Compute handlers never migrate during startup.

@@ -27,20 +27,11 @@ importers:
         specifier: 8.64.0
         version: 8.64.0(eslint@9.39.5)(typescript@5.9.3)
 
-  packages/asset-delivery:
-    devDependencies:
-      "@types/node":
-        specifier: 24.13.3
-        version: 24.13.3
-      typescript:
-        specifier: 5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: 4.1.10
-        version: 4.1.10(@types/node@24.13.3)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
-
   apps/api:
     dependencies:
+      "@reflo/accounts":
+        specifier: workspace:*
+        version: link:../../packages/accounts
       "@reflo/config":
         specifier: workspace:*
         version: link:../../packages/config
@@ -85,6 +76,9 @@ importers:
 
   apps/web:
     dependencies:
+      "@reflo/accounts":
+        specifier: workspace:*
+        version: link:../../packages/accounts
       "@reflo/config":
         specifier: workspace:*
         version: link:../../packages/config
@@ -117,6 +111,30 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
+  packages/accounts:
+    devDependencies:
+      "@types/node":
+        specifier: 24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
+
+  packages/asset-delivery:
+    devDependencies:
+      "@types/node":
+        specifier: 24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
+
   packages/config:
     devDependencies:
       "@types/node":
@@ -140,12 +158,22 @@ importers:
 
   packages/db:
     dependencies:
+      "@reflo/accounts":
+        specifier: workspace:*
+        version: link:../accounts
       dbmate:
         specifier: 2.34.1
         version: 2.34.1
       pg:
         specifier: 8.16.3
         version: 8.16.3
+    devDependencies:
+      "@types/node":
+        specifier: 24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   packages/feature-flags:
     devDependencies:

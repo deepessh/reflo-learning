@@ -122,6 +122,71 @@ test(
         await client.query("ROLLBACK");
       });
 
+      await suite.test(
+        "bootstraps exactly one personal scope for a verified account",
+        async () => {
+          const existing = await client.query(
+            `SELECT reflo_bootstrap_personal_scope(
+               '00000000-0000-4000-8000-000000000109',
+               '00000000-0000-4000-8000-000000000209',
+               $1
+             ) AS owner_scope_id`,
+            [ids.userA],
+          );
+          assert.equal(existing.rows[0].owner_scope_id, ids.scopeA);
+
+          await client.query("BEGIN");
+          await client.query(
+            `INSERT INTO owner_scope (id)
+             VALUES ('00000000-0000-4000-8000-000000000109')`,
+          );
+          await assert.rejects(
+            client.query(
+              `INSERT INTO scope_membership
+                 (id, owner_scope_id, user_id)
+               VALUES (
+                 '00000000-0000-4000-8000-000000000209',
+                 '00000000-0000-4000-8000-000000000109',
+                 $1
+               )`,
+              [ids.userA],
+            ),
+            (error) => error.code === "23505",
+          );
+          await client.query("ROLLBACK");
+        },
+      );
+
+      await suite.test(
+        "binds every opaque session to the matching personal membership",
+        async () => {
+          await client.query(
+            `INSERT INTO auth_session
+               (id, user_id, owner_scope_id, session_digest,
+                idle_expires_at, absolute_expires_at)
+             VALUES (
+               '00000000-0000-4000-8000-000000000801',
+               $1, $2, decode('81', 'hex'),
+               now() + interval '7 days', now() + interval '30 days'
+             )`,
+            [ids.userA, ids.scopeA],
+          );
+          await expectSqlState(
+            client,
+            "23503",
+            `INSERT INTO auth_session
+               (id, user_id, owner_scope_id, session_digest,
+                idle_expires_at, absolute_expires_at)
+             VALUES (
+               '00000000-0000-4000-8000-000000000802',
+               $1, $2, decode('82', 'hex'),
+               now() + interval '7 days', now() + interval '30 days'
+             )`,
+            [ids.userA, ids.scopeB],
+          );
+        },
+      );
+
       await suite.test("rejects cross-scope relationships", async () => {
         await expectSqlState(
           client,

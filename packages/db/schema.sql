@@ -44,6 +44,50 @@ $$;
 
 
 --
+-- Name: reflo_bootstrap_personal_scope(uuid, uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_bootstrap_personal_scope(new_scope_id uuid, new_membership_id uuid, owner_user_id uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+DECLARE
+  existing_scope_id uuid;
+  owner_status text;
+BEGIN
+  SELECT status INTO owner_status
+  FROM app_user
+  WHERE id = owner_user_id
+  FOR UPDATE;
+
+  IF owner_status IS DISTINCT FROM 'active' THEN
+    RAISE EXCEPTION 'personal scope requires an active authenticated account'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT owner_scope_id INTO existing_scope_id
+  FROM scope_membership
+  WHERE user_id = owner_user_id
+    AND role = 'owner'
+    AND revoked_at IS NULL
+  FOR UPDATE;
+
+  IF existing_scope_id IS NOT NULL THEN
+    RETURN existing_scope_id;
+  END IF;
+
+  PERFORM set_config('reflo.actor_id', owner_user_id::text, true);
+  PERFORM reflo_create_personal_scope(
+    new_scope_id,
+    new_membership_id,
+    owner_user_id
+  );
+  RETURN new_scope_id;
+END
+$$;
+
+
+--
 -- Name: reflo_check_scope_owner_from_membership(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -371,6 +415,7 @@ CREATE TABLE public.auth_session (
     idle_expires_at timestamp with time zone NOT NULL,
     absolute_expires_at timestamp with time zone NOT NULL,
     revoked_at timestamp with time zone,
+    owner_scope_id uuid NOT NULL,
     CONSTRAINT auth_session_check CHECK ((idle_expires_at > created_at)),
     CONSTRAINT auth_session_check1 CHECK ((absolute_expires_at > created_at)),
     CONSTRAINT auth_session_check2 CHECK ((idle_expires_at <= absolute_expires_at)),
@@ -1458,6 +1503,13 @@ CREATE UNIQUE INDEX scope_membership_one_active_owner_idx ON public.scope_member
 
 
 --
+-- Name: scope_membership_one_active_personal_scope_per_user_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX scope_membership_one_active_personal_scope_per_user_idx ON public.scope_membership USING btree (user_id) WHERE ((role = 'owner'::text) AND (revoked_at IS NULL));
+
+
+--
 -- Name: async_operation async_operation_terminal_is_final; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1595,6 +1647,14 @@ ALTER TABLE ONLY public.attempt
 
 ALTER TABLE ONLY public.auth_login_token
     ADD CONSTRAINT auth_login_token_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: auth_session auth_session_personal_membership_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auth_session
+    ADD CONSTRAINT auth_session_personal_membership_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
 
 
 --
@@ -2301,4 +2361,5 @@ ALTER TABLE public.study_session ENABLE ROW LEVEL SECURITY;
 --
 
 INSERT INTO public.schema_migrations (version) VALUES
-    ('20260719000100');
+    ('20260719000100'),
+    ('20260720000100');

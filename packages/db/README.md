@@ -12,6 +12,10 @@ This package is the sole owner of Reflo's transactional PostgreSQL schema.
   pinned container is unavailable, use CI to validate and regenerate later in
   the canonical environment.
 - Application code must use deliberate public repositories added to this package; raw database clients are forbidden elsewhere.
+- The API runtime role must receive explicit `EXECUTE` on
+  `reflo_bootstrap_personal_scope(uuid, uuid, uuid)` during environment
+  provisioning. The function is revoked from `PUBLIC`; authentication fails
+  closed when that capability grant is absent.
 - Independently deployed non-Node workers must write through versioned API or `reflo-event-envelope-v1` RocketMQ command contracts. They do not connect directly to core RDS tables.
 - Production migrations are serialized deployment operations run through `pnpm --filter @reflo/db db:migrate`; applications and Function Compute handlers never migrate during startup.
 

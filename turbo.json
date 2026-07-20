@@ -6,7 +6,11 @@
     "eslint.config.mjs",
     "packages/tsconfig/*.json"
   ],
-  "globalEnv": ["NEXT_PUBLIC_REFLO_ENV", "REFLO_ENV"],
+  "globalEnv": [
+    "NEXT_PUBLIC_REFLO_API_ORIGIN",
+    "NEXT_PUBLIC_REFLO_ENV",
+    "REFLO_ENV"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

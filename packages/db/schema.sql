@@ -2295,9 +2295,10 @@ ALTER TABLE public.study_session ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
+
 --
 -- Dbmate schema migrations
 --
 
 INSERT INTO public.schema_migrations (version) VALUES
- ('20260719000100');
+    ('20260719000100');

@@ -380,6 +380,30 @@ ALTER TABLE ONLY public.attempt_concept_evidence FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: auth_email_delivery_reservation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.auth_email_delivery_reservation (
+    id bigint NOT NULL,
+    reserved_at timestamp with time zone NOT NULL
+);
+
+
+--
+-- Name: auth_email_delivery_reservation_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.auth_email_delivery_reservation ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.auth_email_delivery_reservation_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
 -- Name: auth_login_token; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -993,6 +1017,14 @@ ALTER TABLE ONLY public.attempt
 
 
 --
+-- Name: auth_email_delivery_reservation auth_email_delivery_reservation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auth_email_delivery_reservation
+    ADD CONSTRAINT auth_email_delivery_reservation_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: auth_login_token auth_login_token_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1444,6 +1476,13 @@ CREATE UNIQUE INDEX attempt_provider_submission_idx ON public.attempt USING btre
 --
 
 CREATE UNIQUE INDEX attempt_submission_idempotency_idx ON public.attempt USING btree (submission_idempotency_key) WHERE (submission_idempotency_key IS NOT NULL);
+
+
+--
+-- Name: auth_email_delivery_reservation_reserved_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX auth_email_delivery_reservation_reserved_at_idx ON public.auth_email_delivery_reservation USING btree (reserved_at);
 
 
 --
@@ -2362,4 +2401,5 @@ ALTER TABLE public.study_session ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO public.schema_migrations (version) VALUES
     ('20260719000100'),
-    ('20260720000100');
+    ('20260720000100'),
+    ('20260720000200');

@@ -69,9 +69,14 @@ test(
       });
 
       if (process.env.REFLO_SKIP_SCHEMA_DUMP !== "true") {
+        const dumpScript = process.env.REFLO_POSTGRES_CONTAINER_ID
+          ? path.join(packageRoot, "scripts/dump-schema-from-container.sh")
+          : path.join(packageRoot, "scripts/dump-schema.mjs");
         await execFileAsync(
-          process.execPath,
-          [path.join(packageRoot, "scripts/dump-schema.mjs")],
+          process.env.REFLO_POSTGRES_CONTAINER_ID
+            ? dumpScript
+            : process.execPath,
+          process.env.REFLO_POSTGRES_CONTAINER_ID ? [] : [dumpScript],
           {
             env: { ...migrationEnvironment, REFLO_SCHEMA_FILE: dumpedSchema },
           },

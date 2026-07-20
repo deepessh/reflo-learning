@@ -22,7 +22,7 @@
     "db:dump": "scripts/dump-schema-from-container.sh",
     "db:migrate": "node scripts/strict-migrate.mjs",
     "lint": "eslint scripts src test",
-    "test": "node --test test/*.test.mjs"
+    "test": "pnpm build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@reflo/accounts": "workspace:*",

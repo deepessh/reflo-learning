@@ -18,6 +18,11 @@ export interface AccountRepository {
   listSessionHistory(
     account: AuthenticatedAccount,
   ): Promise<readonly SessionHistoryItem[]>;
+  reserveMagicLinkDelivery(
+    now: Date,
+    dailyLimit: number,
+    totalLimit: number,
+  ): Promise<boolean>;
   redeemLoginToken(
     tokenDigest: string,
     now: Date,

@@ -56,6 +56,37 @@ export class PostgresAccountRepository implements AccountRepository {
     return this.#pool.end();
   }
 
+  async reserveMagicLinkDelivery(
+    now: Date,
+    dailyLimit: number,
+    totalLimit: number,
+  ): Promise<boolean> {
+    return this.#transaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(214765003, 72026)");
+      const counts = await client.query<{
+        daily_count: number;
+        total_count: number;
+      }>(
+        `SELECT count(*)::integer AS total_count,
+                count(*) FILTER (
+                  WHERE reserved_at > $1::timestamptz - interval '24 hours'
+                    AND reserved_at <= $1::timestamptz
+                )::integer AS daily_count
+         FROM auth_email_delivery_reservation`,
+        [now],
+      );
+      const row = requiredRow(counts.rows[0], "email delivery counts");
+      if (row.daily_count >= dailyLimit || row.total_count >= totalLimit) {
+        return false;
+      }
+      await client.query(
+        "INSERT INTO auth_email_delivery_reservation (reserved_at) VALUES ($1)",
+        [now],
+      );
+      return true;
+    });
+  }
+
   async issueLoginToken(issue: LoginTokenIssue): Promise<void> {
     await this.#transaction(async (client) => {
       await client.query(

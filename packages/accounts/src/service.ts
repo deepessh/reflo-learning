@@ -32,6 +32,8 @@ export interface AccountServiceOptions {
   readonly emailPort: TransactionalEmailPort;
   readonly idGenerator: AccountIdGenerator;
   readonly lookupKey: Uint8Array;
+  readonly magicLinkDailyLimit: number;
+  readonly magicLinkTotalLimit: number;
   readonly repository: AccountRepository;
   readonly sessionDigestKey: Uint8Array;
   readonly tokenDigestKey: Uint8Array;
@@ -46,6 +48,11 @@ export class AccountService {
     assertKey("lookupKey", options.lookupKey);
     assertKey("sessionDigestKey", options.sessionDigestKey);
     assertKey("tokenDigestKey", options.tokenDigestKey);
+    assertDeliveryLimit("magicLinkDailyLimit", options.magicLinkDailyLimit);
+    assertDeliveryLimit("magicLinkTotalLimit", options.magicLinkTotalLimit);
+    if (options.magicLinkDailyLimit > options.magicLinkTotalLimit) {
+      throw new Error("magicLinkDailyLimit cannot exceed magicLinkTotalLimit");
+    }
     this.#allowedOrigins = new Set(
       options.callbackOrigins.map((origin) => normalizeOrigin(origin)),
     );
@@ -80,6 +87,15 @@ export class AccountService {
       `origin:${normalizedOrigin}`,
     );
     if (!this.#options.abuseLimiter.allow(emailLookupDigest, originKey, now)) {
+      return;
+    }
+    if (
+      !(await this.#options.repository.reserveMagicLinkDelivery(
+        now,
+        this.#options.magicLinkDailyLimit,
+        this.#options.magicLinkTotalLimit,
+      ))
+    ) {
       return;
     }
 
@@ -255,11 +271,18 @@ function normalizeEmail(value: string): string {
   if (
     normalized.length < 3 ||
     normalized.length > 254 ||
+    normalized.includes(",") ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
   ) {
     throw new AccountInputError("invalid_email");
   }
   return normalized;
+}
+
+function assertDeliveryLimit(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive safe integer`);
+  }
 }
 
 function normalizeOrigin(value: string): string {

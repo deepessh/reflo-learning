@@ -26,6 +26,8 @@ function createFixture() {
     emailPort,
     idGenerator: new SequentialAccountIdGenerator(),
     lookupKey: key(2),
+    magicLinkDailyLimit: 200,
+    magicLinkTotalLimit: 2_000,
     repository,
     sessionDigestKey: key(3),
     tokenDigestKey: key(4),
@@ -128,5 +130,35 @@ describe("auth-v1 account service", () => {
       );
     }
     expect(emailPort.messages).toHaveLength(4);
+  });
+
+  it("stops before the configured delivery budget without revealing exhaustion", async () => {
+    const { emailPort, repository } = createFixture();
+    const budgeted = new AccountService({
+      abuseLimiter: new FixedWindowAuthAbuseLimiter(10, 10),
+      callbackOrigins: ["https://app.reflo.example"],
+      clock: new FixedAccountClock(new Date("2026-07-20T12:00:00.000Z")),
+      emailEncryptionKey: key(1),
+      emailPort,
+      idGenerator: new SequentialAccountIdGenerator(),
+      lookupKey: key(2),
+      magicLinkDailyLimit: 1,
+      magicLinkTotalLimit: 2,
+      repository,
+      sessionDigestKey: key(3),
+      tokenDigestKey: key(4),
+    });
+
+    await budgeted.requestMagicLink(
+      "first@example.com",
+      "https://app.reflo.example",
+    );
+    await budgeted.requestMagicLink(
+      "second@example.com",
+      "https://app.reflo.example",
+    );
+
+    expect(emailPort.messages).toHaveLength(1);
+    expect(repository.issues).toHaveLength(1);
   });
 });

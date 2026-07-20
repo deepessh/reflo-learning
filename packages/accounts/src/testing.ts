@@ -41,6 +41,27 @@ export class InMemoryAccountRepository implements AccountRepository {
   readonly history: SessionHistoryItem[] = [];
   readonly sessions = new Map<string, AuthenticatedAccount>();
   readonly deletedUsers = new Set<string>();
+  readonly magicLinkDeliveryReservations: Date[] = [];
+
+  async reserveMagicLinkDelivery(
+    now: Date,
+    dailyLimit: number,
+    totalLimit: number,
+  ): Promise<boolean> {
+    const dailyCount = this.magicLinkDeliveryReservations.filter(
+      (reservation) =>
+        reservation > new Date(now.getTime() - 24 * 60 * 60 * 1_000) &&
+        reservation <= now,
+    ).length;
+    if (
+      this.magicLinkDeliveryReservations.length >= totalLimit ||
+      dailyCount >= dailyLimit
+    ) {
+      return false;
+    }
+    this.magicLinkDeliveryReservations.push(new Date(now));
+    return true;
+  }
 
   async issueLoginToken(issue: LoginTokenIssue): Promise<void> {
     for (const candidate of this.issues) {

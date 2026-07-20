@@ -28,4 +28,11 @@ corepack pnpm package
 
 Copy `.env.example` to `.env` only when overriding local defaults. Never commit `.env` files or secret values.
 
+The API leaves authentication disabled only for local development. Staging and
+pilot composition require the allowlisted DirectMail adapter, exact HTTPS
+callback origins, an ECS RAM role, explicit limits within the verified free
+allowance, and four distinct 32-byte authentication keys. Production injects
+those keys and the database credential from KMS Secrets Manager; static Alibaba
+access keys are not accepted by the adapter.
+
 `pnpm package` stages independently deployable outputs under `.artifacts/`. The web artifact is static; API and jobs artifacts include their production workspace dependencies.

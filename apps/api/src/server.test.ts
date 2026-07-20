@@ -203,6 +203,8 @@ function createAccountFixture() {
     emailPort: email,
     idGenerator: new SequentialAccountIdGenerator(),
     lookupKey: key(2),
+    magicLinkDailyLimit: 200,
+    magicLinkTotalLimit: 2_000,
     repository,
     sessionDigestKey: key(3),
     tokenDigestKey: key(4),

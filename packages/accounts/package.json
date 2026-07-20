@@ -16,6 +16,10 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
+    },
+    "./directmail": {
+      "types": "./dist/adapters/directmail.d.ts",
+      "default": "./dist/adapters/directmail.js"
     }
   },
   "scripts": {
@@ -27,5 +31,9 @@
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "@alicloud/credentials": "2.4.5",
+    "@alicloud/dm20151123": "1.10.2"
   }
 }

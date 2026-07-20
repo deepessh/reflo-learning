@@ -178,3 +178,29 @@ test("allows private asset provider SDKs only inside asset adapter modules", () 
     assert.deepEqual(checkBoundaries(root), []);
   });
 });
+
+test("rejects transactional email provider SDK imports from domain code", () => {
+  withFixture((root) => {
+    mkdirSync(path.join(root, "packages/accounts/src"), { recursive: true });
+    writeFileSync(
+      path.join(root, "packages/accounts/src/service.ts"),
+      'import "@alicloud/dm20151123";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /transactional email provider SDK @alicloud\/dm20151123 is only allowed in packages\/accounts\/src\/adapters/,
+    );
+  });
+});
+
+test("allows transactional email SDKs only inside account adapter modules", () => {
+  withFixture((root) => {
+    const adapterDirectory = path.join(root, "packages/accounts/src/adapters");
+    mkdirSync(adapterDirectory, { recursive: true });
+    writeFileSync(
+      path.join(adapterDirectory, "directmail.ts"),
+      'import "@alicloud/credentials";\nimport "@alicloud/dm20151123";\n',
+    );
+    assert.deepEqual(checkBoundaries(root), []);
+  });
+});

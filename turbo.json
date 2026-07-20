@@ -19,7 +19,23 @@
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "DATABASE_URL",
+        "REFLO_AUTH_CALLBACK_ORIGINS",
+        "REFLO_AUTH_EMAIL_ADAPTER",
+        "REFLO_AUTH_EMAIL_ENCRYPTION_KEY",
+        "REFLO_AUTH_LOOKUP_KEY",
+        "REFLO_AUTH_SESSION_DIGEST_KEY",
+        "REFLO_AUTH_TOKEN_DIGEST_KEY",
+        "REFLO_DIRECTMAIL_DAILY_LIMIT",
+        "REFLO_DIRECTMAIL_ELIGIBILITY",
+        "REFLO_DIRECTMAIL_FROM_ALIAS",
+        "REFLO_DIRECTMAIL_RAM_ROLE_NAME",
+        "REFLO_DIRECTMAIL_REGION",
+        "REFLO_DIRECTMAIL_SENDER_ADDRESS",
+        "REFLO_DIRECTMAIL_TOTAL_LIMIT"
+      ]
     },
     "lint": {
       "dependsOn": ["^build"],

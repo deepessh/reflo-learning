@@ -35,6 +35,48 @@ Agents are stateless between sessions. All durable memory lives in GitHub Issues
 
 Do not store state in chat history, external docs, or your own head. If task state is not in an issue/PR, or an effective verdict is not in `DECISIONS.md`, it did not happen.
 
+### Evidence-backed contributor-agent improvements
+
+Reusable contributor-workflow improvements use the minimal protocol authorized by D-GH-83. This protocol is discovery evidence only: it never replaces immediate `bug`, `tech-debt`, `blocked`, `needs-human`, or `decision` routing, never changes claim or milestone rules, and never grants implementation or policy authority. Humans alone disposition or promote candidates, place work in milestones, authorize decisions, and change shared policy.
+
+Open one issue with the `triage` label for a reusable improvement. The issue number is its canonical identity. The reporter chooses one unique, immutable 3–64 character lowercase kebab-case discovery key and posts the candidate marker below as the issue's first comment. The standalone marker comment must never be edited. Its `source-issue` must be a distinct issue that has been claimed through `scripts/work-item.sh`; the evidence is a 20–240 character printable-ASCII summary of the reusable workflow observation, not a task transcript or reproduction payload.
+
+```text
+<!-- reflo-improvement-candidate:v1
+candidate-key: concise-discovery-alias
+category: ordinary
+eligibility-threshold: 2
+source-issue: 42
+evidence: A concise safe summary of the reusable contributor-workflow observation.
+-->
+```
+
+Allowed categories are `ordinary` (threshold `2`) and `security`, `privacy`, `authorization`, `data-loss`, or `release-governance` (threshold `1`). The one-occurrence path applies only when the marker safely evidences that category; an actual vulnerability, privacy or authorization failure, data-loss risk, or release-governance defect still follows its immediate defect/escalation route and must not wait for this protocol.
+
+For a recurrence, the observing agent posts one standalone, unedited marker on the candidate issue. The marker author owns that occurrence. `candidate-issue` is always the canonical issue number, never the discovery key. Each distinct claimed source issue may appear once across the candidate and occurrence markers; multiple observations from one task still count once.
+
+```text
+<!-- reflo-improvement-occurrence:v1
+candidate-issue: 100
+source-issue: 57
+evidence: A concise safe summary of the independently recurring workflow observation.
+-->
+```
+
+Evidence must exclude transcripts, secrets, PII, learner data, destructive live reproductions, and individual-agent rankings. Put only the minimum safe summary in the marker; keep ordinary task state in the attributed source issue. If safe evidence cannot be recorded, use the applicable immediate escalation path and do not weaken or bypass validation.
+
+Eligibility means only that the occurrence threshold has been met for human triage. A repository maintainer records disposition with a standalone, unedited marker. `promoted` and `implemented` must name the same separate implementation or decision issue; `declined` uses `none`. The valid sequences are `promoted` → `implemented`, or `declined`.
+
+```text
+<!-- reflo-improvement-disposition:v1
+candidate-issue: 100
+disposition: promoted
+linked-issue: 108
+-->
+```
+
+Use `python3 scripts/agent_improvements.py validate`, `search [query]`, or `status <issue-number>` to inspect candidates. The helper performs read-only GitHub `GET` requests and reports canonical identity, distinct occurrence count, eligibility, and human disposition; it never creates issues or comments, changes labels or milestones, records votes, promotes work, or edits policy. A recurrence after a candidate has an `implemented` disposition and closes is a regression: open a new linked `triage` issue with its own candidate marker instead of appending evidence to the closed candidate.
+
 ## 3. Labels & milestones (the vocabulary)
 
 | Label / milestone | Meaning |
@@ -68,7 +110,8 @@ Dev server:   corepack pnpm dev
 Tests:        corepack pnpm test
 Lint/format:  corepack pnpm lint / corepack pnpm format
 Decisions:    python3 scripts/validate_decisions.py
-Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py
+Improvements: python3 scripts/agent_improvements.py validate
+Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py scripts/test_agent_improvements.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build

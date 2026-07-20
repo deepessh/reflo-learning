@@ -11,6 +11,14 @@ const RAW_DATABASE_CLIENTS = new Set([
   "pg",
   "postgres",
 ]);
+const MODEL_PROVIDER_SDKS = new Set([
+  "@alicloud/dashscope",
+  "@anthropic-ai/sdk",
+  "@google/generative-ai",
+  "cohere-ai",
+  "dashscope",
+  "openai",
+]);
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
   ".cts",
@@ -70,6 +78,28 @@ function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
     if (databaseClient !== undefined && !isInsideDbPackage) {
       violations.push(
         `${file}: raw database client ${specifier} is only allowed in packages/db`,
+      );
+      continue;
+    }
+    const modelProviderSdk = [...MODEL_PROVIDER_SDKS].find(
+      (candidate) =>
+        specifier === candidate || specifier.startsWith(`${candidate}/`),
+    );
+    const modelAdapterRoot = path.join(
+      packagesRoot,
+      "model-router",
+      "src",
+      "adapters",
+    );
+    const relativeToModelAdapters = path.relative(modelAdapterRoot, file);
+    const isInsideModelAdapters =
+      relativeToModelAdapters !== "" &&
+      !relativeToModelAdapters.startsWith("..") &&
+      !path.isAbsolute(relativeToModelAdapters);
+
+    if (modelProviderSdk !== undefined && !isInsideModelAdapters) {
+      violations.push(
+        `${file}: model provider SDK ${specifier} is only allowed in packages/model-router/src/adapters`,
       );
       continue;
     }

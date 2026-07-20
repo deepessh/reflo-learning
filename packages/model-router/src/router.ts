@@ -75,6 +75,7 @@ export type RouterErrorCode =
   | "invalid_adapter_configuration"
   | "invalid_result"
   | "provider_failure"
+  | "trace_failure"
   | "unknown_task";
 
 export class ModelRouterError extends Error {
@@ -244,6 +245,7 @@ export function createModelRouter(options: ModelRouterOptions) {
             response,
           ),
         );
+        const traceAbortController = new AbortController();
         await withDeadline(
           recordTrace(
             options.traceSink,
@@ -256,9 +258,11 @@ export function createModelRouter(options: ModelRouterOptions) {
               prompt,
               task,
             }),
+            traceAbortController.signal,
           ),
           deadlineAt,
           now,
+          () => traceAbortController.abort(),
         );
         return {
           provenance: {
@@ -284,6 +288,13 @@ export function createModelRouter(options: ModelRouterOptions) {
           value: response.value as ModelTaskResult<Task>,
         };
       } catch (error) {
+        if (attempts.at(-1)?.outcome === "success") {
+          throw new ModelRouterError(
+            "trace_failure",
+            "model result succeeded but its logical trace was not accepted",
+            { cause: error },
+          );
+        }
         if (
           error instanceof ModelRouterError &&
           error.code === "deadline_exceeded"
@@ -336,6 +347,7 @@ export function createModelRouter(options: ModelRouterOptions) {
     }
 
     const finishedAt = now();
+    const traceAbortController = new AbortController();
     await withDeadline(
       recordTrace(
         options.traceSink,
@@ -348,9 +360,11 @@ export function createModelRouter(options: ModelRouterOptions) {
           prompt,
           task,
         }),
+        traceAbortController.signal,
       ),
       deadlineAt,
       now,
+      () => traceAbortController.abort(),
     );
     throw (
       failure ??
@@ -528,8 +542,9 @@ function traceEnvelope(options: {
 async function recordTrace(
   sink: ModelTraceSink,
   trace: ModelLogicalCallTrace,
+  signal: AbortSignal,
 ): Promise<void> {
-  await sink.record(trace);
+  await sink.record(trace, signal);
 }
 
 function withDeadline<Value>(

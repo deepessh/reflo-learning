@@ -365,6 +365,64 @@ describe("typed model router", () => {
     expect(scripted.invocations).toHaveLength(0);
   });
 
+  it("aborts a hanging trace write without emitting a second logical trace", async () => {
+    const scripted = createScriptedAdapterRegistry({
+      "curriculum.structure.v1": [
+        {
+          type: "result",
+          value: {
+            chapters: [
+              {
+                conceptNames: ["Concept"],
+                sourceSpanIds: ["span-1"],
+                title: "Chapter",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const receivedTraces: unknown[] = [];
+    let traceAborted = false;
+    const router = createModelRouter({
+      adapters: scripted.adapters,
+      traceSink: {
+        record(trace, signal) {
+          receivedTraces.push(trace);
+          return new Promise<void>((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                traceAborted = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+        },
+      },
+    });
+
+    await expect(
+      router.execute(
+        "curriculum.structure.v1",
+        {
+          courseTitle: "Course",
+          sourceSpans: [{ id: "span-1", text: "Source" }],
+        },
+        { deadlineMs: 25 },
+      ),
+    ).rejects.toMatchObject({ code: "trace_failure" });
+
+    expect(scripted.invocations).toHaveLength(1);
+    expect(receivedTraces).toHaveLength(1);
+    expect(receivedTraces[0]).toMatchObject({
+      attempts: [{ attempt: 1, outcome: "success" }],
+      outcome: "success",
+    });
+    expect(traceAborted).toBe(true);
+  });
+
   it("keeps the P1 video route unavailable unless the server guard admits it", async () => {
     const scripted = createScriptedAdapterRegistry({
       "media.video.v1": [

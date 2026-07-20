@@ -212,15 +212,22 @@ export function createP1FlagEvaluator(options: P1FlagEvaluatorOptions) {
         return disabled("admission_denied");
       }
 
+      const completedAtMs = now();
+      if (
+        baseValidUntilMs <= completedAtMs ||
+        operationValidUntilMs <= completedAtMs
+      ) {
+        return disabled("prerequisite_missing_or_stale");
+      }
       const result = {
         enabled: true,
-        evaluatedAtMs,
+        evaluatedAtMs: completedAtMs,
         requestedRevision: state.revision,
       } as const;
       trueSnapshots.set(cacheKey, {
         ...result,
         expiresAtMs: Math.min(
-          evaluatedAtMs + maxTrueSnapshotMs,
+          completedAtMs + maxTrueSnapshotMs,
           baseValidUntilMs,
           operationValidUntilMs,
         ),

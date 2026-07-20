@@ -36,7 +36,10 @@ export interface ModelLogicalCallTrace {
 }
 
 export interface ModelTraceSink {
-  record(trace: ModelLogicalCallTrace): Promise<void> | void;
+  record(
+    trace: ModelLogicalCallTrace,
+    signal: AbortSignal,
+  ): Promise<void> | void;
 }
 
 const LOGICAL_TRACE_KEYS = new Set([

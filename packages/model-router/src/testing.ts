@@ -140,7 +140,7 @@ export function createScriptedAdapterRegistry(
 export class InMemoryTraceSink implements ModelTraceSink {
   readonly traces: ModelLogicalCallTrace[] = [];
 
-  record(trace: ModelLogicalCallTrace): void {
+  record(trace: ModelLogicalCallTrace, _signal: AbortSignal): void {
     this.traces.push(trace);
   }
 }

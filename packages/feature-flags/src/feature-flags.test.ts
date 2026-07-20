@@ -211,6 +211,36 @@ describe("trusted server P1 evaluation", () => {
     });
   });
 
+  it("fails closed when prerequisite evidence expires during evaluation", async () => {
+    let now = 5_000;
+    const sources = sourcesFixture();
+    sources.requestedStateSource.set("dev", "p1.auth.oauth", {
+      requestedEnabled: true,
+      revision: 4,
+    });
+    sources.prerequisiteSource.read = async (policy) => {
+      now = 5_010;
+      return {
+        evidenceRefs: ["evidence:short-lived"],
+        policyId: policy.id,
+        policyVersion: policy.version,
+        satisfied: true,
+        validUntilMs: 5_005,
+      };
+    };
+    const evaluator = createP1FlagEvaluator({
+      ...sources,
+      deploymentCeiling: parseDeploymentCeiling("p1.auth.oauth"),
+      environment: "dev",
+      now: () => now,
+    });
+
+    await expect(evaluator.evaluate("p1.auth.oauth")).resolves.toEqual({
+      enabled: false,
+      reason: "prerequisite_missing_or_stale",
+    });
+  });
+
   it("rejects caller staleness bounds above the checked-in maximum", () => {
     const sources = sourcesFixture();
     expect(() =>

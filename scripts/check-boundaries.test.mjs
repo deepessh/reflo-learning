@@ -150,3 +150,31 @@ test("allows model provider SDK imports only inside model adapter modules", () =
     assert.deepEqual(checkBoundaries(root), []);
   });
 });
+
+test("rejects private asset provider SDK imports from feature code", () => {
+  withFixture((root) => {
+    writeFileSync(
+      path.join(root, "apps/api/src/index.ts"),
+      'import OSS from "ali-oss";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /private asset provider SDK ali-oss is only allowed in packages\/asset-delivery\/src\/adapters/,
+    );
+  });
+});
+
+test("allows private asset provider SDKs only inside asset adapter modules", () => {
+  withFixture((root) => {
+    const adapterDirectory = path.join(
+      root,
+      "packages/asset-delivery/src/adapters",
+    );
+    mkdirSync(adapterDirectory, { recursive: true });
+    writeFileSync(
+      path.join(adapterDirectory, "alibaba.ts"),
+      'import "@alicloud/cdn20180510";\n',
+    );
+    assert.deepEqual(checkBoundaries(root), []);
+  });
+});

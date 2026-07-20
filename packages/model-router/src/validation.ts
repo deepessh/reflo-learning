@@ -1,92 +1,163 @@
-import type { ModelTaskId } from "./contracts.js";
+import type {
+  AuthorizedSourceSpan,
+  EmbeddingInput,
+  LessonInput,
+  ModelTaskId,
+  ModelTaskInput,
+  TutorAnswerInput,
+} from "./contracts.js";
 
-type Validator = (value: unknown) => boolean;
+export const EMBEDDING_V1_DIMENSIONS = 1_024 as const;
+
+type Validator = (
+  value: unknown,
+  input: ModelTaskInput<ModelTaskId>,
+) => boolean;
 
 export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
-  "assessment.grade-short-answer.v1": (value) =>
-    isRecord(value) &&
-    isArrayOf(value.evidence, (entry) =>
-      isRecordWith(entry, {
-        conceptId: isString,
-        confidence: isUnitNumber,
-        rubricBand: isString,
-        score: isUnitNumber,
+  "assessment.grade-short-answer.v1":
+    validator<"assessment.grade-short-answer.v1">((value, input) =>
+      isRecordWith(value, {
+        evidence: (evidence) =>
+          Array.isArray(evidence) &&
+          evidence.length > 0 &&
+          evidence.every((entry) =>
+            isRecordWith(entry, {
+              conceptId: (conceptId) =>
+                isString(conceptId) && input.conceptIds.includes(conceptId),
+              confidence: isUnitNumber,
+              rubricBand: isString,
+              score: isUnitNumber,
+            }),
+          ),
       }),
     ),
-  "assessment.quiz.v1": (value) =>
-    isRecord(value) &&
-    isArrayOf(
-      value.items,
-      (entry) =>
-        isRecord(entry) &&
-        isStringArray(entry.conceptIds) &&
-        isString(entry.keyedAnswer) &&
-        isString(entry.prompt) &&
-        isStringArray(entry.sourceSpanIds),
-    ),
-  "curriculum.structure.v1": (value) =>
-    isRecord(value) &&
-    isArrayOf(
-      value.chapters,
-      (entry) =>
-        isRecord(entry) &&
-        isStringArray(entry.conceptNames) &&
-        isStringArray(entry.sourceSpanIds) &&
-        isString(entry.title),
-    ),
-  "embedding.document.v1": isEmbeddingResult,
-  "embedding.query.v1": isEmbeddingResult,
-  "lesson.audio-script.v1": (value) =>
-    isRecord(value) &&
-    isString(value.script) &&
-    isStringArray(value.sourceSpanIds),
-  "lesson.reteach.v1": isLessonResult,
-  "lesson.text.v1": isLessonResult,
-  "media.tts.v1": isMediaAssetResult,
-  "media.video.v1": isMediaAssetResult,
-  "tutor.answer.v1": (value) =>
-    isRecord(value) &&
-    (value.kind === "not_found" ||
-      (value.kind === "answer" &&
-        isString(value.content) &&
-        isStringArray(value.sourceSpanIds))),
+  "assessment.quiz.v1": validator<"assessment.quiz.v1">((value, input) =>
+    isRecordWith(value, {
+      items: (items) =>
+        Array.isArray(items) &&
+        items.length === input.count &&
+        items.every((entry) =>
+          isRecordWith(entry, {
+            conceptIds: (conceptIds) =>
+              isAuthorizedIds(conceptIds, input.conceptIds),
+            keyedAnswer: isString,
+            prompt: isString,
+            sourceSpanIds: (sourceSpanIds) =>
+              isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
+          }),
+        ),
+    }),
+  ),
+  "curriculum.structure.v1": validator<"curriculum.structure.v1">(
+    (value, input) =>
+      isRecordWith(value, {
+        chapters: (chapters) =>
+          Array.isArray(chapters) &&
+          chapters.length > 0 &&
+          chapters.every((entry) =>
+            isRecordWith(entry, {
+              conceptNames: isNonEmptyStringArray,
+              sourceSpanIds: (sourceSpanIds) =>
+                isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
+              title: isString,
+            }),
+          ),
+      }),
+  ),
+  "embedding.document.v1":
+    validator<"embedding.document.v1">(isEmbeddingResult),
+  "embedding.query.v1": validator<"embedding.query.v1">(isEmbeddingResult),
+  "lesson.audio-script.v1": validator<"lesson.audio-script.v1">(
+    (value, input) =>
+      isRecordWith(value, {
+        script: isString,
+        sourceSpanIds: (sourceSpanIds) =>
+          isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
+      }),
+  ),
+  "lesson.reteach.v1": validator<"lesson.reteach.v1">(isLessonResult),
+  "lesson.text.v1": validator<"lesson.text.v1">(isLessonResult),
+  "media.tts.v1": validator<"media.tts.v1">((value, input) =>
+    isMediaAssetResult(value, input.sourceSpanIds),
+  ),
+  "media.video.v1": validator<"media.video.v1">((value, input) =>
+    isMediaAssetResult(value, sourceIds(input.sourceSpans)),
+  ),
+  "tutor.answer.v1": validator<"tutor.answer.v1">(isTutorAnswerResult),
 };
 
-function isEmbeddingResult(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    isArrayOf(
-      value.vectors,
-      (vector) => Array.isArray(vector) && vector.every(isFiniteNumber),
-    )
-  );
+function validator<Task extends ModelTaskId>(
+  validate: (value: unknown, input: ModelTaskInput<Task>) => boolean,
+): Validator {
+  return validate as Validator;
 }
 
-function isLessonResult(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    isString(value.content) &&
-    isStringArray(value.sourceSpanIds) &&
-    isString(value.strategyTag)
-  );
+function isEmbeddingResult(value: unknown, input: EmbeddingInput): boolean {
+  return isRecordWith(value, {
+    vectors: (vectors) =>
+      input.texts.length > 0 &&
+      Array.isArray(vectors) &&
+      vectors.length === input.texts.length &&
+      vectors.every(
+        (vector) =>
+          Array.isArray(vector) &&
+          vector.length === EMBEDDING_V1_DIMENSIONS &&
+          vector.every(isFiniteNumber),
+      ),
+  });
 }
 
-function isMediaAssetResult(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    isFiniteNumber(value.durationSeconds) &&
-    value.durationSeconds > 0 &&
-    isString(value.mimeType) &&
-    isStringArray(value.sourceSpanIds) &&
-    isString(value.uri)
-  );
+function isLessonResult(value: unknown, input: LessonInput): boolean {
+  return isRecordWith(value, {
+    content: isString,
+    sourceSpanIds: (sourceSpanIds) =>
+      isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
+    strategyTag: isString,
+  });
 }
 
-function isArrayOf(
+function isMediaAssetResult(
   value: unknown,
-  predicate: (entry: unknown) => boolean,
+  authorizedSourceSpanIds: readonly string[],
 ): boolean {
-  return Array.isArray(value) && value.every(predicate);
+  return isRecordWith(value, {
+    durationSeconds: (durationSeconds) =>
+      isFiniteNumber(durationSeconds) && durationSeconds > 0,
+    mimeType: isString,
+    sourceSpanIds: (sourceSpanIds) =>
+      isAuthorizedIds(sourceSpanIds, authorizedSourceSpanIds),
+    uri: isString,
+  });
+}
+
+function isTutorAnswerResult(value: unknown, input: TutorAnswerInput): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.kind === "not_found") {
+    return hasExactKeys(value, ["kind"]);
+  }
+  return isRecordWith(value, {
+    content: isString,
+    kind: (kind) => kind === "answer",
+    sourceSpanIds: (sourceSpanIds) =>
+      isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
+  });
+}
+
+function isAuthorizedIds(
+  value: unknown,
+  authorizedIds: readonly string[],
+): value is readonly string[] {
+  return (
+    isNonEmptyStringArray(value) &&
+    value.every((id) => authorizedIds.includes(id))
+  );
+}
+
+function sourceIds(spans: readonly AuthorizedSourceSpan[]): readonly string[] {
+  return spans.map((span) => span.id);
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -103,7 +174,20 @@ function isRecordWith(
 ): boolean {
   return (
     isRecord(value) &&
+    hasExactKeys(value, Object.keys(fields)) &&
     Object.entries(fields).every(([key, predicate]) => predicate(value[key]))
+  );
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expectedKeys: readonly string[],
+): boolean {
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === sortedExpectedKeys[index])
   );
 }
 
@@ -111,8 +195,8 @@ function isString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-function isStringArray(value: unknown): value is readonly string[] {
-  return isArrayOf(value, isString);
+function isNonEmptyStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isString);
 }
 
 function isUnitNumber(value: unknown): value is number {

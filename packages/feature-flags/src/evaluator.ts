@@ -9,6 +9,8 @@ import {
 
 export type FlagEnvironment = "dev" | "pilot" | "staging";
 
+export const MAX_P1_TRUE_SNAPSHOT_MS = 30_000 as const;
+
 export interface RequestedFlagState {
   readonly requestedEnabled: boolean;
   readonly revision: number;
@@ -81,7 +83,7 @@ export interface P1FlagEvaluatorOptions {
   readonly admissionSource: ResourceAdmissionSource;
   readonly deploymentCeiling: DeploymentCeiling;
   readonly environment: FlagEnvironment;
-  readonly maxTrueSnapshotMs: number;
+  readonly maxTrueSnapshotMs?: number;
   readonly now?: () => number;
   readonly prerequisiteSource: PrerequisiteVerdictSource;
   readonly requestedStateSource: RequestedFlagStateSource;
@@ -105,11 +107,16 @@ export function parseDeploymentCeiling(
 }
 
 export function createP1FlagEvaluator(options: P1FlagEvaluatorOptions) {
+  const maxTrueSnapshotMs =
+    options.maxTrueSnapshotMs ?? MAX_P1_TRUE_SNAPSHOT_MS;
   if (
-    !Number.isFinite(options.maxTrueSnapshotMs) ||
-    options.maxTrueSnapshotMs <= 0
+    !Number.isInteger(maxTrueSnapshotMs) ||
+    maxTrueSnapshotMs < 1 ||
+    maxTrueSnapshotMs > MAX_P1_TRUE_SNAPSHOT_MS
   ) {
-    throw new Error("maxTrueSnapshotMs must be a positive finite duration");
+    throw new Error(
+      `maxTrueSnapshotMs must be between 1 and ${MAX_P1_TRUE_SNAPSHOT_MS}`,
+    );
   }
   const now = options.now ?? Date.now;
   const trueSnapshots = new Map<
@@ -175,18 +182,23 @@ export function createP1FlagEvaluator(options: P1FlagEvaluatorOptions) {
         return disabled("source_unavailable");
       }
 
-      const baseSatisfied = await prerequisitesSatisfied(
+      const baseValidUntilMs = await prerequisiteValidUntil(
         definition.prerequisitePolicy,
         evaluatedAtMs,
       );
-      if (!baseSatisfied) {
+      if (baseValidUntilMs === null) {
         return disabled("prerequisite_missing_or_stale");
       }
-      if (
-        operationPolicy !== undefined &&
-        !(await prerequisitesSatisfied(operationPolicy, evaluatedAtMs))
-      ) {
-        return disabled("prerequisite_missing_or_stale");
+      let operationValidUntilMs = Number.POSITIVE_INFINITY;
+      if (operationPolicy !== undefined) {
+        const validUntilMs = await prerequisiteValidUntil(
+          operationPolicy,
+          evaluatedAtMs,
+        );
+        if (validUntilMs === null) {
+          return disabled("prerequisite_missing_or_stale");
+        }
+        operationValidUntilMs = validUntilMs;
       }
 
       const resourcePolicy = definition.resourceAdmissionPolicy;
@@ -207,7 +219,11 @@ export function createP1FlagEvaluator(options: P1FlagEvaluatorOptions) {
       } as const;
       trueSnapshots.set(cacheKey, {
         ...result,
-        expiresAtMs: evaluatedAtMs + options.maxTrueSnapshotMs,
+        expiresAtMs: Math.min(
+          evaluatedAtMs + maxTrueSnapshotMs,
+          baseValidUntilMs,
+          operationValidUntilMs,
+        ),
       });
       return result;
     } catch {
@@ -215,23 +231,24 @@ export function createP1FlagEvaluator(options: P1FlagEvaluatorOptions) {
     }
   }
 
-  async function prerequisitesSatisfied(
+  async function prerequisiteValidUntil(
     policy: PrerequisitePolicyDefinition,
     evaluatedAtMs: number,
-  ): Promise<boolean> {
+  ): Promise<number | null> {
     const verdict = await options.prerequisiteSource.read(
       policy,
       options.environment,
     );
-    return (
+    const current =
       verdict !== null &&
       verdict.satisfied &&
       verdict.policyId === policy.id &&
       verdict.policyVersion === policy.version &&
+      Number.isFinite(verdict.validUntilMs) &&
       verdict.validUntilMs > evaluatedAtMs &&
       verdict.evidenceRefs.length > 0 &&
-      verdict.evidenceRefs.every((reference) => reference.trim().length > 0)
-    );
+      verdict.evidenceRefs.every((reference) => reference.trim().length > 0);
+    return current ? verdict.validUntilMs : null;
   }
 
   function invalidate(key?: P1FlagKey): void {

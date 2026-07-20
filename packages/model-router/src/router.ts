@@ -113,18 +113,34 @@ export function createModelRouter(options: ModelRouterOptions) {
       );
     }
 
+    const logicalStartedAt = now();
+    const deadlineAt = logicalStartedAt + executeOptions.deadlineMs;
     const route: RouteDefinition = ROUTE_POLICY_V1[task];
-    if (route.featureFlag !== undefined) {
+    const featureFlag = route.featureFlag;
+    if (featureFlag !== undefined) {
       const operationKind = executeOptions.videoOperationKind;
+      const isFeatureEnabled = options.isFeatureEnabled;
       let enabled = false;
       try {
         enabled =
           operationKind !== undefined &&
-          options.isFeatureEnabled !== undefined &&
-          (await options.isFeatureEnabled(route.featureFlag, {
-            videoOperationKind: operationKind,
-          }));
-      } catch {
+          isFeatureEnabled !== undefined &&
+          (await withDeadline(
+            Promise.resolve().then(() =>
+              isFeatureEnabled(featureFlag, {
+                videoOperationKind: operationKind,
+              }),
+            ),
+            deadlineAt,
+            now,
+          ));
+      } catch (error) {
+        if (
+          error instanceof ModelRouterError &&
+          error.code === "deadline_exceeded"
+        ) {
+          throw error;
+        }
         enabled = false;
       }
       if (!enabled) {
@@ -148,8 +164,6 @@ export function createModelRouter(options: ModelRouterOptions) {
       route.requestedSelector,
     );
 
-    const logicalStartedAt = now();
-    const deadlineAt = logicalStartedAt + executeOptions.deadlineMs;
     const attempts: ModelAttemptTrace[] = [];
     const maximumAttempts = Math.min(
       route.maxImmediateAttempts,
@@ -167,12 +181,19 @@ export function createModelRouter(options: ModelRouterOptions) {
         break;
       }
 
+      const abortController = new AbortController();
       try {
-        const response = await invokeAdapter(adapter, route.capability, {
-          input,
-          ...(prompt === undefined ? {} : { prompt }),
-          task,
-        });
+        const response = await withDeadline(
+          invokeAdapter(adapter, route.capability, {
+            input,
+            ...(prompt === undefined ? {} : { prompt }),
+            signal: abortController.signal,
+            task,
+          }),
+          deadlineAt,
+          now,
+          () => abortController.abort(),
+        );
         const finishedAt = now();
         if (finishedAt > deadlineAt) {
           attempts.push(
@@ -193,7 +214,7 @@ export function createModelRouter(options: ModelRouterOptions) {
           break;
         }
 
-        if (!RESULT_VALIDATORS[task](response.value)) {
+        if (!RESULT_VALIDATORS[task](response.value, input)) {
           attempts.push(
             attemptTrace(
               adapter.descriptor,
@@ -223,17 +244,21 @@ export function createModelRouter(options: ModelRouterOptions) {
             response,
           ),
         );
-        await recordTrace(
-          options.traceSink,
-          traceEnvelope({
-            attempts,
-            callId: callId(),
-            finishedAt,
-            logicalStartedAt,
-            outcome: "success",
-            prompt,
-            task,
-          }),
+        await withDeadline(
+          recordTrace(
+            options.traceSink,
+            traceEnvelope({
+              attempts,
+              callId: callId(),
+              finishedAt,
+              logicalStartedAt,
+              outcome: "success",
+              prompt,
+              task,
+            }),
+          ),
+          deadlineAt,
+          now,
         );
         return {
           provenance: {
@@ -259,6 +284,26 @@ export function createModelRouter(options: ModelRouterOptions) {
           value: response.value as ModelTaskResult<Task>,
         };
       } catch (error) {
+        if (
+          error instanceof ModelRouterError &&
+          error.code === "deadline_exceeded"
+        ) {
+          const finishedAt = now();
+          attempts.push({
+            adapterVersion: adapter.descriptor.adapterVersion,
+            attempt,
+            durationMs: Math.max(0, finishedAt - attemptStartedAt),
+            effectiveModel: adapter.descriptor.effectiveModel,
+            effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
+            outcome: "deadline_exceeded",
+            requestedSelector: route.requestedSelector,
+            retryReason: "timeout",
+            startedAt: toIso(attemptStartedAt),
+            validationStatus: "not_run",
+          });
+          failure = error;
+          break;
+        }
         if (!(error instanceof ModelAdapterError)) {
           throw error;
         }
@@ -291,17 +336,21 @@ export function createModelRouter(options: ModelRouterOptions) {
     }
 
     const finishedAt = now();
-    await recordTrace(
-      options.traceSink,
-      traceEnvelope({
-        attempts,
-        callId: callId(),
-        finishedAt,
-        logicalStartedAt,
-        outcome: "failure",
-        prompt,
-        task,
-      }),
+    await withDeadline(
+      recordTrace(
+        options.traceSink,
+        traceEnvelope({
+          attempts,
+          callId: callId(),
+          finishedAt,
+          logicalStartedAt,
+          outcome: "failure",
+          prompt,
+          task,
+        }),
+      ),
+      deadlineAt,
+      now,
     );
     throw (
       failure ??
@@ -481,6 +530,57 @@ async function recordTrace(
   trace: ModelLogicalCallTrace,
 ): Promise<void> {
   await sink.record(trace);
+}
+
+function withDeadline<Value>(
+  operation: PromiseLike<Value>,
+  deadlineAt: number,
+  now: () => number,
+  onTimeout?: () => void,
+): Promise<Value> {
+  const remainingMs = deadlineAt - now();
+  if (remainingMs <= 0) {
+    onTimeout?.();
+    return Promise.reject(deadlineError());
+  }
+
+  return new Promise<Value>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      onTimeout?.();
+      reject(deadlineError());
+    }, remainingMs);
+
+    void Promise.resolve(operation).then(
+      (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function deadlineError(): ModelRouterError {
+  return new ModelRouterError(
+    "deadline_exceeded",
+    "model call exceeded the caller's total deadline",
+  );
 }
 
 function toIso(milliseconds: number): string {

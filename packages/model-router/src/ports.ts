@@ -35,6 +35,7 @@ export interface AdapterResponse {
 export interface AdapterInvocation<Task extends ModelTaskId = ModelTaskId> {
   readonly input: ModelTaskInput<Task>;
   readonly prompt?: PromptBundle;
+  readonly signal: AbortSignal;
   readonly task: Task;
 }
 

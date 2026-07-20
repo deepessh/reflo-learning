@@ -4,6 +4,7 @@ import { createModelRouter } from "./router.js";
 import type { ModelRouterError } from "./router.js";
 import { assertSafeTraceEnvelope } from "./trace.js";
 import { createScriptedAdapterRegistry, InMemoryTraceSink } from "./testing.js";
+import { EMBEDDING_V1_DIMENSIONS } from "./validation.js";
 
 describe("typed model router", () => {
   it("routes a Qwen structured task and persists reproducible provenance", async () => {
@@ -192,6 +193,176 @@ describe("typed model router", () => {
       outcome: "validation_error",
       validationStatus: "failed",
     });
+  });
+
+  it("rejects unauthorized provenance and undeclared result fields", async () => {
+    for (const value of [
+      {
+        chapters: [
+          {
+            conceptNames: ["Networking"],
+            sourceSpanIds: ["span-not-authorized"],
+            title: "Chapter",
+          },
+        ],
+      },
+      {
+        chapters: [
+          {
+            conceptNames: ["Networking"],
+            providerPayload: "must not persist",
+            sourceSpanIds: ["span-1"],
+            title: "Chapter",
+          },
+        ],
+      },
+    ]) {
+      const scripted = createScriptedAdapterRegistry({
+        "curriculum.structure.v1": [{ type: "result", value }],
+      });
+      const router = createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      });
+
+      await expect(
+        router.execute(
+          "curriculum.structure.v1",
+          {
+            courseTitle: "Course",
+            sourceSpans: [{ id: "span-1", text: "Authorized source" }],
+          },
+          { deadlineMs: 1_000 },
+        ),
+      ).rejects.toMatchObject({ code: "invalid_result" });
+    }
+
+    const scripted = createScriptedAdapterRegistry({
+      "assessment.grade-short-answer.v1": [
+        {
+          type: "result",
+          value: {
+            evidence: [
+              {
+                conceptId: "concept-not-authorized",
+                confidence: 0.99,
+                rubricBand: "correct",
+                score: 1,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const router = createModelRouter({
+      adapters: scripted.adapters,
+      traceSink: new InMemoryTraceSink(),
+    });
+    await expect(
+      router.execute(
+        "assessment.grade-short-answer.v1",
+        {
+          answer: "Answer",
+          conceptIds: ["concept-1"],
+          question: "Question",
+          rubric: "Rubric",
+          sourceSpans: [{ id: "span-1", text: "Source" }],
+        },
+        { deadlineMs: 1_000 },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_result" });
+  });
+
+  it("requires one 1024-dimensional embedding per input text", async () => {
+    const validVector = Array.from(
+      { length: EMBEDDING_V1_DIMENSIONS },
+      () => 0.25,
+    );
+    for (const vectors of [[], [[0.25, 0.5]], [validVector, validVector]]) {
+      const scripted = createScriptedAdapterRegistry({
+        "embedding.document.v1": [{ type: "result", value: { vectors } }],
+      });
+      const router = createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      });
+
+      await expect(
+        router.execute(
+          "embedding.document.v1",
+          { texts: ["one source chunk"] },
+          { deadlineMs: 1_000 },
+        ),
+      ).rejects.toMatchObject({ code: "invalid_result" });
+    }
+
+    const scripted = createScriptedAdapterRegistry({
+      "embedding.document.v1": [
+        { type: "result", value: { vectors: [validVector] } },
+      ],
+    });
+    const router = createModelRouter({
+      adapters: scripted.adapters,
+      traceSink: new InMemoryTraceSink(),
+    });
+    await expect(
+      router.execute(
+        "embedding.document.v1",
+        { texts: ["one source chunk"] },
+        { deadlineMs: 1_000 },
+      ),
+    ).resolves.toMatchObject({ value: { vectors: [validVector] } });
+  });
+
+  it("bounds a never-settling provider call by the caller deadline and aborts it", async () => {
+    const scripted = createScriptedAdapterRegistry({
+      "curriculum.structure.v1": [{ type: "pending" }],
+    });
+    const traces = new InMemoryTraceSink();
+    const router = createModelRouter({
+      adapters: scripted.adapters,
+      traceSink: traces,
+    });
+    const startedAt = Date.now();
+
+    await expect(
+      router.execute(
+        "curriculum.structure.v1",
+        {
+          courseTitle: "Course",
+          sourceSpans: [{ id: "span-1", text: "Source" }],
+        },
+        { deadlineMs: 25 },
+      ),
+    ).rejects.toMatchObject({ code: "deadline_exceeded" });
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(scripted.invocations[0]?.signal.aborted).toBe(true);
+    expect(traces.traces[0]?.attempts[0]?.outcome).toBe("deadline_exceeded");
+  });
+
+  it("includes the feature guard in the caller's total deadline", async () => {
+    const scripted = createScriptedAdapterRegistry({});
+    const router = createModelRouter({
+      adapters: scripted.adapters,
+      isFeatureEnabled: () => new Promise<boolean>(() => undefined),
+      traceSink: new InMemoryTraceSink(),
+    });
+    const startedAt = Date.now();
+
+    await expect(
+      router.execute(
+        "media.video.v1",
+        {
+          conceptId: "concept-1",
+          sourceSpans: [{ id: "span-1", text: "Grounding" }],
+          visualBrief: "Explain visually",
+        },
+        { deadlineMs: 25, videoOperationKind: "chapter_explainer" },
+      ),
+    ).rejects.toMatchObject({ code: "deadline_exceeded" });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(scripted.invocations).toHaveLength(0);
   });
 
   it("keeps the P1 video route unavailable unless the server guard admits it", async () => {

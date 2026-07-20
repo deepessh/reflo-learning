@@ -20,6 +20,9 @@ export type ScriptedAdapterAction =
       readonly safeCode: string;
       readonly transient: boolean;
       readonly type: "failure";
+    }
+  | {
+      readonly type: "pending";
     };
 
 export type ScriptedAdapterPlan = Partial<
@@ -54,6 +57,21 @@ export function createScriptedAdapterRegistry(
         cause: action.cause,
         safeCode: action.safeCode,
         transient: action.transient,
+      });
+    }
+    if (action.type === "pending") {
+      return new Promise<AdapterResponse>((_resolve, reject) => {
+        invocation.signal.addEventListener(
+          "abort",
+          () =>
+            reject(
+              new ModelAdapterError({
+                safeCode: "timeout",
+                transient: true,
+              }),
+            ),
+          { once: true },
+        );
       });
     }
     return {

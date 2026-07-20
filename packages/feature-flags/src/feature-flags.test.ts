@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createP1FlagEvaluator, parseDeploymentCeiling } from "./evaluator.js";
+import {
+  createP1FlagEvaluator,
+  MAX_P1_TRUE_SNAPSHOT_MS,
+  parseDeploymentCeiling,
+} from "./evaluator.js";
 import {
   P1_FLAG_KEYS,
   P1_FLAG_REGISTRY,
@@ -176,6 +180,47 @@ describe("trusted server P1 evaluation", () => {
       enabled: false,
       reason: "source_unavailable",
     });
+  });
+
+  it("never caches true beyond the current prerequisite evidence", async () => {
+    let now = 4_000;
+    const sources = sourcesFixture();
+    const definition = P1_FLAG_REGISTRY["p1.auth.oauth"];
+    sources.requestedStateSource.set("dev", "p1.auth.oauth", {
+      requestedEnabled: true,
+      revision: 3,
+    });
+    sources.prerequisiteSource.satisfy(
+      "dev",
+      definition.prerequisitePolicy,
+      now + 10,
+    );
+    const evaluator = createP1FlagEvaluator({
+      ...sources,
+      deploymentCeiling: parseDeploymentCeiling("p1.auth.oauth"),
+      environment: "dev",
+      maxTrueSnapshotMs: 1_000,
+      now: () => now,
+    });
+
+    await expect(evaluator.isEnabled("p1.auth.oauth")).resolves.toBe(true);
+    now += 10;
+    await expect(evaluator.evaluate("p1.auth.oauth")).resolves.toEqual({
+      enabled: false,
+      reason: "prerequisite_missing_or_stale",
+    });
+  });
+
+  it("rejects caller staleness bounds above the checked-in maximum", () => {
+    const sources = sourcesFixture();
+    expect(() =>
+      createP1FlagEvaluator({
+        ...sources,
+        deploymentCeiling: parseDeploymentCeiling("p1.auth.oauth"),
+        environment: "dev",
+        maxTrueSnapshotMs: MAX_P1_TRUE_SNAPSHOT_MS + 1,
+      }),
+    ).toThrow(`between 1 and ${MAX_P1_TRUE_SNAPSHOT_MS}`);
   });
 });
 

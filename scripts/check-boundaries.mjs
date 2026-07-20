@@ -3,6 +3,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const APP_NAMES = new Set(["api", "jobs", "web"]);
+const RAW_DATABASE_CLIENTS = new Set([
+  "@prisma/client",
+  "drizzle-orm",
+  "knex",
+  "kysely",
+  "pg",
+  "postgres",
+]);
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
   ".cts",
@@ -33,21 +41,38 @@ export function checkBoundaries(rootDirectory) {
   for (const file of listSourceFiles(appsRoot)) {
     const relative = path.relative(appsRoot, file);
     const [sourceApp] = relative.split(path.sep);
-    inspectFile(file, sourceApp, appsRoot, violations);
+    inspectFile(file, sourceApp, appsRoot, packagesRoot, violations);
   }
 
   for (const file of listSourceFiles(packagesRoot)) {
-    inspectFile(file, undefined, appsRoot, violations);
+    inspectFile(file, undefined, appsRoot, packagesRoot, violations);
   }
 
   return violations;
 }
 
-function inspectFile(file, sourceApp, appsRoot, violations) {
+function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
   const source = readFileSync(file, "utf8");
 
   for (const match of source.matchAll(IMPORT_PATTERN)) {
     const specifier = match[1];
+    const databaseClient = [...RAW_DATABASE_CLIENTS].find(
+      (candidate) =>
+        specifier === candidate || specifier.startsWith(`${candidate}/`),
+    );
+    const dbPackageRoot = path.join(packagesRoot, "db");
+    const relativeToDb = path.relative(dbPackageRoot, file);
+    const isInsideDbPackage =
+      relativeToDb !== "" &&
+      !relativeToDb.startsWith("..") &&
+      !path.isAbsolute(relativeToDb);
+
+    if (databaseClient !== undefined && !isInsideDbPackage) {
+      violations.push(
+        `${file}: raw database client ${specifier} is only allowed in packages/db`,
+      );
+      continue;
+    }
     const packageTarget = specifier.match(
       /^@reflo\/(api|jobs|web)(?:\/|$)/,
     )?.[1];

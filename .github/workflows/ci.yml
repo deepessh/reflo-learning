@@ -13,8 +13,24 @@ jobs:
   workspace:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+    services:
+      postgres:
+        image: postgres:16.9-bookworm@sha256:253815cf7579ffa05e1673d92e78d37273e61be0e4414e9a1449337d7925be94
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
@@ -22,5 +38,11 @@ jobs:
         run: corepack enable && corepack prepare pnpm@10.34.5 --activate
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Install pinned PostgreSQL client major
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client-16
+      - name: Add PostgreSQL client to PATH
+        run: echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - name: Verify PostgreSQL client
+        run: pg_dump --version
       - name: Verify workspace
         run: pnpm check

@@ -72,7 +72,7 @@ Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build
 Package:      corepack pnpm package
-DB migrate:   Unavailable — schema issue #27 is not implemented
+DB migrate:   DATABASE_URL="..." corepack pnpm --filter @reflo/db db:migrate
 ```
 
 Current repo layout:

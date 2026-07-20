@@ -1,0 +1,14 @@
+{
+  "pullRequestChecks": [
+    {
+      "context": "workspace",
+      "workflow": ".github/workflows/ci.yml",
+      "job": "workspace"
+    },
+    {
+      "context": "validate",
+      "workflow": ".github/workflows/validate-decisions.yml",
+      "job": "validate"
+    }
+  ]
+}

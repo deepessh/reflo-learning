@@ -12,7 +12,12 @@ Shared packages live under `packages/` and expose public package entry points. A
 
 Node.js 24.18.0 LTS and pnpm 10.34.5 are pinned for repeatable local and CI behavior.
 
+Run the toolchain doctor before setup. It distinguishes missing tools from
+installed commands whose directory is absent from `PATH` and reports when exact
+PostgreSQL validation is available only in CI.
+
 ```sh
+scripts/doctor.sh
 corepack pnpm install --frozen-lockfile
 corepack pnpm dev
 corepack pnpm lint

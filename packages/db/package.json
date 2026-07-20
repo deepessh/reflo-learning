@@ -1,0 +1,22 @@
+{
+  "name": "@reflo/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "migrations",
+    "schema.sql",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "node scripts/check-migrations.mjs",
+    "db:dump": "node scripts/dump-schema.mjs",
+    "db:migrate": "node scripts/strict-migrate.mjs",
+    "lint": "eslint scripts test",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "dbmate": "2.34.1",
+    "pg": "8.16.3"
+  }
+}

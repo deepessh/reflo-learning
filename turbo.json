@@ -23,6 +23,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
+      "env": ["REFLO_SKIP_SCHEMA_DUMP", "TEST_DATABASE_URL"],
       "outputs": []
     }
   }

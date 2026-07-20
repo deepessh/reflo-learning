@@ -72,3 +72,40 @@ test("rejects shared-package imports from deployable applications", () => {
     );
   });
 });
+
+test("rejects raw database clients from applications", () => {
+  withFixture((root) => {
+    writeFileSync(
+      path.join(root, "apps/jobs/src/index.ts"),
+      'import pg from "pg";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /raw database client pg is only allowed in packages\/db/,
+    );
+  });
+});
+
+test("rejects raw database clients from other shared packages", () => {
+  withFixture((root) => {
+    writeFileSync(
+      path.join(root, "packages/shared/src/index.ts"),
+      'import postgres from "postgres";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /raw database client postgres is only allowed in packages\/db/,
+    );
+  });
+});
+
+test("allows database clients inside the owning db package", () => {
+  withFixture((root) => {
+    mkdirSync(path.join(root, "packages/db/test"), { recursive: true });
+    writeFileSync(
+      path.join(root, "packages/db/test/schema.test.mjs"),
+      'import pg from "pg";\n',
+    );
+    assert.deepEqual(checkBoundaries(root), []);
+  });
+});

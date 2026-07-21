@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@reflo/accounts": "workspace:*",
+    "@reflo/activation": "workspace:*",
     "@reflo/ingestion": "workspace:*",
     "@reflo/retrieval": "workspace:*",
     "dbmate": "2.34.1",

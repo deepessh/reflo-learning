@@ -31,10 +31,19 @@ export interface LessonInput {
   readonly priorStrategyTag?: string;
 }
 
+export const QUIZ_ITEM_TYPES = [
+  "multiple_choice",
+  "short_answer",
+  "concept_linking",
+] as const;
+
+export type QuizItemType = (typeof QUIZ_ITEM_TYPES)[number];
+
 export interface QuizGenerationInput {
   readonly courseId: string;
   readonly conceptIds: readonly string[];
   readonly count: number;
+  readonly requiredItemTypes?: readonly QuizItemType[];
   readonly sourceSpans: readonly AuthorizedSourceSpan[];
 }
 
@@ -94,8 +103,12 @@ export interface AudioScriptResult {
 export interface QuizGenerationResult {
   readonly items: readonly {
     readonly conceptIds: readonly string[];
+    readonly difficulty: 1 | 2 | 3 | 4 | 5;
+    readonly itemType: QuizItemType;
     readonly keyedAnswer: string;
     readonly prompt: string;
+    readonly responseOptions?: readonly string[];
+    readonly rubric?: string;
     readonly sourceSpanIds: readonly string[];
   }[];
 }

@@ -64,14 +64,16 @@ const definitions = {
   "assessment.quiz.v1": definePrompt({
     fixedInstructions: [
       ...COMMON_GROUNDING_INSTRUCTIONS,
-      "Generate answerable quiz items with keyed answers and source provenance.",
+      "Generate answerable quiz items with type, difficulty, keyed answers, and source provenance.",
+      "Multiple-choice and concept-linking items require unique response options containing the keyed answer; short-answer items require a grading rubric.",
+      "Cover every required item type supplied in the typed input.",
     ],
     generationParameters: { temperature: 0.2 },
     generationParametersVersion: "quiz-generation-parameters-v1",
     id: "assessment-quiz",
-    outputSchemaId: "quiz-generation-result-v1",
+    outputSchemaId: "quiz-generation-result-v2",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "curriculum.structure.v1": definePrompt({
     fixedInstructions: [

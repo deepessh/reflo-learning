@@ -186,6 +186,24 @@ $$;
 
 
 --
+-- Name: reflo_preserve_terminal_activation_operation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_preserve_terminal_activation_operation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD.status IN ('succeeded', 'failed_permanent', 'cancelled', 'expired')
+     AND NEW IS DISTINCT FROM OLD THEN
+    RAISE EXCEPTION 'terminal state on % is immutable', TG_TABLE_NAME
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+
+--
 -- Name: reflo_preserve_terminal_row(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -239,6 +257,46 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: activation_generation_operation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.activation_generation_operation (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    curriculum_generation_id uuid NOT NULL,
+    artifact_kind text NOT NULL,
+    chapter_id uuid,
+    concept_id uuid,
+    generation_version text NOT NULL,
+    idempotency_key text NOT NULL,
+    priority smallint NOT NULL,
+    status text DEFAULT 'queued'::text NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    retryable boolean DEFAULT false NOT NULL,
+    failure_class text,
+    artifact_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT activation_generation_operation_artifact_kind_check CHECK ((artifact_kind = ANY (ARRAY['first_text_lesson'::text, 'placement_quiz'::text, 'chapter_quiz'::text]))),
+    CONSTRAINT activation_generation_operation_attempt_count_check CHECK (((attempt_count >= 0) AND (attempt_count <= 5))),
+    CONSTRAINT activation_generation_operation_check CHECK ((((artifact_kind = 'first_text_lesson'::text) AND (chapter_id IS NOT NULL) AND (concept_id IS NOT NULL)) OR ((artifact_kind = 'placement_quiz'::text) AND (chapter_id IS NULL) AND (concept_id IS NULL)) OR ((artifact_kind = 'chapter_quiz'::text) AND (chapter_id IS NOT NULL) AND (concept_id IS NULL)))),
+    CONSTRAINT activation_generation_operation_check1 CHECK (((status = 'retry_scheduled'::text) = retryable)),
+    CONSTRAINT activation_generation_operation_check2 CHECK (((failure_class IS NOT NULL) = (status = ANY (ARRAY['retry_scheduled'::text, 'failed_permanent'::text])))),
+    CONSTRAINT activation_generation_operation_check3 CHECK (((artifact_id IS NOT NULL) = (status = 'succeeded'::text))),
+    CONSTRAINT activation_generation_operation_check4 CHECK (((completed_at IS NOT NULL) = (status = ANY (ARRAY['succeeded'::text, 'failed_permanent'::text, 'cancelled'::text, 'expired'::text])))),
+    CONSTRAINT activation_generation_operation_check5 CHECK (((status <> 'queued'::text) OR (attempt_count = 0))),
+    CONSTRAINT activation_generation_operation_generation_version_check CHECK ((generation_version = 'activation-generation-v1'::text)),
+    CONSTRAINT activation_generation_operation_idempotency_key_check CHECK ((idempotency_key ~ '^(dev|staging|pilot)/content[.]activation[.]generate/v1/[a-f0-9-]{36}$'::text)),
+    CONSTRAINT activation_generation_operation_priority_check CHECK (((priority >= 1) AND (priority <= 3))),
+    CONSTRAINT activation_generation_operation_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'processing'::text, 'retry_scheduled'::text, 'succeeded'::text, 'failed_permanent'::text, 'cancelled'::text, 'expired'::text])))
+);
+
+ALTER TABLE ONLY public.activation_generation_operation FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: app_user; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -272,8 +330,17 @@ CREATE TABLE public.asset (
     status text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    generation_operation_id uuid,
+    model_provenance jsonb,
+    content_hash text,
+    content_type text,
+    byte_size bigint,
+    etag text,
     CONSTRAINT asset_asset_type_check CHECK ((asset_type = ANY (ARRAY['audio'::text, 'video'::text, 'text'::text]))),
+    CONSTRAINT asset_byte_size_check CHECK (((byte_size IS NULL) OR (byte_size >= 0))),
     CONSTRAINT asset_check CHECK (((status <> 'ready'::text) OR (object_key IS NOT NULL))),
+    CONSTRAINT asset_content_hash_check CHECK (((content_hash IS NULL) OR (content_hash ~ '^[a-f0-9]{64}$'::text))),
+    CONSTRAINT asset_ready_text_metadata_check CHECK (((asset_type <> 'text'::text) OR (status <> 'ready'::text) OR ((generation_operation_id IS NOT NULL) AND (model_provenance IS NOT NULL) AND (content_hash IS NOT NULL) AND (content_type IS NOT NULL) AND (byte_size IS NOT NULL) AND (etag IS NOT NULL)))),
     CONSTRAINT asset_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'generating'::text, 'ready'::text, 'failed'::text, 'tombstoned'::text])))
 );
 
@@ -788,6 +855,32 @@ CREATE TABLE public.owner_scope (
 
 
 --
+-- Name: quiz_bank; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.quiz_bank (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    chapter_id uuid,
+    generation_operation_id uuid NOT NULL,
+    bank_kind text NOT NULL,
+    generation_version text NOT NULL,
+    model_provenance jsonb NOT NULL,
+    result_hash text NOT NULL,
+    item_count integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT quiz_bank_bank_kind_check CHECK ((bank_kind = ANY (ARRAY['placement'::text, 'chapter'::text]))),
+    CONSTRAINT quiz_bank_check CHECK ((((bank_kind = 'placement'::text) AND (chapter_id IS NULL) AND (item_count = 10)) OR ((bank_kind = 'chapter'::text) AND (chapter_id IS NOT NULL) AND (item_count = 5)))),
+    CONSTRAINT quiz_bank_generation_version_check CHECK ((generation_version = 'activation-generation-v1'::text)),
+    CONSTRAINT quiz_bank_item_count_check CHECK ((item_count = ANY (ARRAY[5, 10]))),
+    CONSTRAINT quiz_bank_result_hash_check CHECK ((result_hash ~ '^[a-f0-9]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.quiz_bank FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: quiz_delivery; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -827,8 +920,15 @@ CREATE TABLE public.quiz_item (
     rubric jsonb,
     version text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    quiz_bank_id uuid,
+    item_order integer,
+    normalized_prompt_hash text,
+    response_options jsonb,
     CONSTRAINT quiz_item_difficulty_check CHECK (((difficulty >= 1) AND (difficulty <= 5))),
-    CONSTRAINT quiz_item_item_type_check CHECK ((item_type = ANY (ARRAY['multiple_choice'::text, 'short_answer'::text, 'concept_linking'::text])))
+    CONSTRAINT quiz_item_generated_shape_check CHECK (((quiz_bank_id IS NULL) OR ((item_order IS NOT NULL) AND (normalized_prompt_hash IS NOT NULL) AND (((item_type = 'short_answer'::text) AND (rubric IS NOT NULL) AND (response_options IS NULL)) OR ((item_type = ANY (ARRAY['multiple_choice'::text, 'concept_linking'::text])) AND (rubric IS NULL) AND (jsonb_typeof(response_options) = 'array'::text) AND (jsonb_array_length(response_options) >= 2)))))),
+    CONSTRAINT quiz_item_item_order_check CHECK (((item_order IS NULL) OR (item_order >= 0))),
+    CONSTRAINT quiz_item_item_type_check CHECK ((item_type = ANY (ARRAY['multiple_choice'::text, 'short_answer'::text, 'concept_linking'::text]))),
+    CONSTRAINT quiz_item_normalized_prompt_hash_check CHECK (((normalized_prompt_hash IS NULL) OR (normalized_prompt_hash ~ '^[a-f0-9]{64}$'::text)))
 );
 
 ALTER TABLE ONLY public.quiz_item FORCE ROW LEVEL SECURITY;
@@ -1041,6 +1141,30 @@ ALTER TABLE ONLY public.study_session FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: activation_generation_operation activation_generation_operation_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operation_idempotency_key_key UNIQUE (idempotency_key);
+
+
+--
+-- Name: activation_generation_operation activation_generation_operation_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operation_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: activation_generation_operation activation_generation_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operation_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: app_user app_user_email_lookup_digest_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1241,6 +1365,14 @@ ALTER TABLE ONLY public.chapter
 
 
 --
+-- Name: chapter chapter_scope_course_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chapter
+    ADD CONSTRAINT chapter_scope_course_id_unique UNIQUE (owner_scope_id, course_id, id);
+
+
+--
 -- Name: chapter_source_span chapter_source_span_owner_scope_id_chapter_id_span_order_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1286,6 +1418,14 @@ ALTER TABLE ONLY public.concept
 
 ALTER TABLE ONLY public.concept_prerequisite
     ADD CONSTRAINT concept_prerequisite_pkey PRIMARY KEY (owner_scope_id, concept_id, prerequisite_concept_id);
+
+
+--
+-- Name: concept concept_scope_chapter_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.concept
+    ADD CONSTRAINT concept_scope_chapter_id_unique UNIQUE (owner_scope_id, chapter_id, id);
 
 
 --
@@ -1470,6 +1610,30 @@ ALTER TABLE ONLY public.owner_scope
 
 ALTER TABLE ONLY public.owner_scope
     ADD CONSTRAINT owner_scope_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: quiz_bank quiz_bank_owner_scope_id_generation_operation_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_bank
+    ADD CONSTRAINT quiz_bank_owner_scope_id_generation_operation_id_key UNIQUE (owner_scope_id, generation_operation_id);
+
+
+--
+-- Name: quiz_bank quiz_bank_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_bank
+    ADD CONSTRAINT quiz_bank_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: quiz_bank quiz_bank_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_bank
+    ADD CONSTRAINT quiz_bank_pkey PRIMARY KEY (id);
 
 
 --
@@ -1673,6 +1837,27 @@ ALTER TABLE ONLY public.study_session
 
 
 --
+-- Name: activation_generation_operation_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX activation_generation_operation_pending_idx ON public.activation_generation_operation USING btree (status, priority, updated_at) WHERE (status = ANY (ARRAY['queued'::text, 'retry_scheduled'::text]));
+
+
+--
+-- Name: activation_generation_operation_target_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX activation_generation_operation_target_idx ON public.activation_generation_operation USING btree (owner_scope_id, course_id, curriculum_generation_id, artifact_kind, chapter_id, concept_id, generation_version) NULLS NOT DISTINCT;
+
+
+--
+-- Name: asset_generation_operation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX asset_generation_operation_idx ON public.asset USING btree (owner_scope_id, generation_operation_id) WHERE (generation_operation_id IS NOT NULL);
+
+
+--
 -- Name: attempt_provider_submission_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1764,6 +1949,20 @@ CREATE UNIQUE INDEX quiz_delivery_provider_message_idx ON public.quiz_delivery U
 
 
 --
+-- Name: quiz_item_bank_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX quiz_item_bank_order_idx ON public.quiz_item USING btree (owner_scope_id, quiz_bank_id, item_order) WHERE (quiz_bank_id IS NOT NULL);
+
+
+--
+-- Name: quiz_item_bank_prompt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX quiz_item_bank_prompt_idx ON public.quiz_item USING btree (owner_scope_id, quiz_bank_id, normalized_prompt_hash) WHERE (quiz_bank_id IS NOT NULL);
+
+
+--
 -- Name: review_schedule_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1792,6 +1991,13 @@ CREATE UNIQUE INDEX source_span_chunk_order_idx ON public.source_span USING btre
 
 
 --
+-- Name: activation_generation_operation activation_generation_operation_terminal_is_final; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER activation_generation_operation_terminal_is_final BEFORE UPDATE ON public.activation_generation_operation FOR EACH ROW EXECUTE FUNCTION public.reflo_preserve_terminal_activation_operation();
+
+
+--
 -- Name: async_operation async_operation_terminal_is_final; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1817,6 +2023,38 @@ CREATE CONSTRAINT TRIGGER membership_preserves_scope_owner AFTER INSERT OR DELET
 --
 
 CREATE CONSTRAINT TRIGGER owner_scope_requires_owner AFTER INSERT OR UPDATE OF status, retired_at ON public.owner_scope DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_check_scope_owner_from_scope();
+
+
+--
+-- Name: activation_generation_operation activation_generation_operati_owner_scope_id_chapter_id_co_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operati_owner_scope_id_chapter_id_co_fkey FOREIGN KEY (owner_scope_id, chapter_id, concept_id) REFERENCES public.concept(owner_scope_id, chapter_id, id);
+
+
+--
+-- Name: activation_generation_operation activation_generation_operati_owner_scope_id_course_id_cha_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operati_owner_scope_id_course_id_cha_fkey FOREIGN KEY (owner_scope_id, course_id, chapter_id) REFERENCES public.chapter(owner_scope_id, course_id, id);
+
+
+--
+-- Name: activation_generation_operation activation_generation_operati_owner_scope_id_course_id_cur_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operati_owner_scope_id_course_id_cur_fkey FOREIGN KEY (owner_scope_id, course_id, curriculum_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, course_id, id);
+
+
+--
+-- Name: asset asset_generation_operation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asset
+    ADD CONSTRAINT asset_generation_operation_fk FOREIGN KEY (owner_scope_id, generation_operation_id) REFERENCES public.activation_generation_operation(owner_scope_id, id);
 
 
 --
@@ -2196,11 +2434,43 @@ ALTER TABLE ONLY public.outbox_message
 
 
 --
+-- Name: quiz_bank quiz_bank_owner_scope_id_course_id_chapter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_bank
+    ADD CONSTRAINT quiz_bank_owner_scope_id_course_id_chapter_id_fkey FOREIGN KEY (owner_scope_id, course_id, chapter_id) REFERENCES public.chapter(owner_scope_id, course_id, id);
+
+
+--
+-- Name: quiz_bank quiz_bank_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_bank
+    ADD CONSTRAINT quiz_bank_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
+-- Name: quiz_bank quiz_bank_owner_scope_id_generation_operation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_bank
+    ADD CONSTRAINT quiz_bank_owner_scope_id_generation_operation_id_fkey FOREIGN KEY (owner_scope_id, generation_operation_id) REFERENCES public.activation_generation_operation(owner_scope_id, id);
+
+
+--
 -- Name: quiz_delivery quiz_delivery_owner_scope_id_channel_identity_id_provider_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.quiz_delivery
     ADD CONSTRAINT quiz_delivery_owner_scope_id_channel_identity_id_provider_fkey FOREIGN KEY (owner_scope_id, channel_identity_id, provider) REFERENCES public.channel_identity(owner_scope_id, id, provider);
+
+
+--
+-- Name: quiz_item quiz_item_bank_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.quiz_item
+    ADD CONSTRAINT quiz_item_bank_fk FOREIGN KEY (owner_scope_id, quiz_bank_id) REFERENCES public.quiz_bank(owner_scope_id, id);
 
 
 --
@@ -2337,6 +2607,19 @@ ALTER TABLE ONLY public.study_session
 
 ALTER TABLE ONLY public.study_session
     ADD CONSTRAINT study_session_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: activation_generation_operation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.activation_generation_operation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: activation_generation_operation activation_generation_operation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY activation_generation_operation_active_membership ON public.activation_generation_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
 
 
 --
@@ -2532,6 +2815,19 @@ ALTER TABLE public.owner_scope ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY owner_scope_active_membership ON public.owner_scope USING (public.reflo_has_active_membership(id)) WITH CHECK (public.reflo_has_active_membership(id));
+
+
+--
+-- Name: quiz_bank; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.quiz_bank ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: quiz_bank quiz_bank_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY quiz_bank_active_membership ON public.quiz_bank USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
 
 
 --
@@ -2803,4 +3099,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260720000100'),
     ('20260720000200'),
     ('20260721000100'),
-    ('20260721000200');
+    ('20260721000200'),
+    ('20260721000300');

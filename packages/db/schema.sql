@@ -514,6 +514,7 @@ CREATE TABLE public.chapter (
     title text NOT NULL,
     generation_status text DEFAULT 'pending'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    curriculum_generation_id uuid,
     CONSTRAINT chapter_chapter_order_check CHECK ((chapter_order > 0)),
     CONSTRAINT chapter_generation_status_check CHECK ((generation_status = ANY (ARRAY['pending'::text, 'generating'::text, 'ready'::text, 'failed'::text])))
 );
@@ -546,7 +547,11 @@ CREATE TABLE public.concept (
     chapter_id uuid NOT NULL,
     name text NOT NULL,
     generation_version text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    curriculum_generation_id uuid,
+    concept_key text,
+    concept_order integer,
+    CONSTRAINT concept_concept_order_check CHECK (((concept_order IS NULL) OR (concept_order >= 0)))
 );
 
 ALTER TABLE ONLY public.concept FORCE ROW LEVEL SECURITY;
@@ -592,10 +597,37 @@ CREATE TABLE public.course (
     target_exam_blueprint_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    active_curriculum_generation_id uuid,
     CONSTRAINT course_status_check CHECK ((status = ANY (ARRAY['generating'::text, 'ready'::text, 'failed'::text, 'archived'::text])))
 );
 
 ALTER TABLE ONLY public.course FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: curriculum_generation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.curriculum_generation (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    source_document_id uuid NOT NULL,
+    embedding_generation_id uuid NOT NULL,
+    generation_version text NOT NULL,
+    result_hash text NOT NULL,
+    model_provenance jsonb NOT NULL,
+    structure jsonb NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    activated_at timestamp with time zone,
+    CONSTRAINT curriculum_generation_check CHECK (((status = ANY (ARRAY['active'::text, 'retired'::text])) = (activated_at IS NOT NULL))),
+    CONSTRAINT curriculum_generation_generation_version_check CHECK ((generation_version = 'curriculum-v1'::text)),
+    CONSTRAINT curriculum_generation_result_hash_check CHECK ((result_hash ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT curriculum_generation_status_check CHECK ((status = ANY (ARRAY['building'::text, 'active'::text, 'retired'::text, 'failed'::text])))
+);
+
+ALTER TABLE ONLY public.curriculum_generation FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -901,6 +933,56 @@ ALTER TABLE ONLY public.source_document FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: source_embedding_generation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.source_embedding_generation (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    source_document_id uuid NOT NULL,
+    profile_version text NOT NULL,
+    dimensions integer NOT NULL,
+    input_mode text NOT NULL,
+    adapter_version text NOT NULL,
+    effective_model text NOT NULL,
+    effective_model_version text NOT NULL,
+    provider_identifier text NOT NULL,
+    provider_request_ids jsonb NOT NULL,
+    region text NOT NULL,
+    endpoint text NOT NULL,
+    span_count integer NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    activated_at timestamp with time zone,
+    CONSTRAINT source_embedding_generation_check CHECK (((status = ANY (ARRAY['active'::text, 'retired'::text])) = (activated_at IS NOT NULL))),
+    CONSTRAINT source_embedding_generation_dimensions_check CHECK ((dimensions = 1024)),
+    CONSTRAINT source_embedding_generation_input_mode_check CHECK ((input_mode = 'document'::text)),
+    CONSTRAINT source_embedding_generation_profile_version_check CHECK ((profile_version = 'embedding-v1'::text)),
+    CONSTRAINT source_embedding_generation_span_count_check CHECK ((span_count > 0)),
+    CONSTRAINT source_embedding_generation_status_check CHECK ((status = ANY (ARRAY['building'::text, 'active'::text, 'retired'::text, 'failed'::text])))
+);
+
+ALTER TABLE ONLY public.source_embedding_generation FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: source_embedding_generation_span; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.source_embedding_generation_span (
+    owner_scope_id uuid NOT NULL,
+    embedding_generation_id uuid NOT NULL,
+    source_span_id uuid NOT NULL,
+    span_order integer NOT NULL,
+    embedding_input_hash text NOT NULL,
+    CONSTRAINT source_embedding_generation_span_embedding_input_hash_check CHECK ((embedding_input_hash ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT source_embedding_generation_span_span_order_check CHECK ((span_order >= 0))
+);
+
+ALTER TABLE ONLY public.source_embedding_generation_span FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: source_span; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -919,10 +1001,18 @@ CREATE TABLE public.source_span (
     chunker_version text NOT NULL,
     tokenizer_version text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    contract_version text,
+    chunk_order integer,
+    native_mappings jsonb,
+    embedding_input text,
+    embedding_input_hash text,
+    embedding_input_profile_version text,
     CONSTRAINT source_span_canonical_start_check CHECK ((canonical_start >= 0)),
     CONSTRAINT source_span_check CHECK ((canonical_end > canonical_start)),
     CONSTRAINT source_span_check1 CHECK (((page_start IS NULL) = (page_end IS NULL))),
     CONSTRAINT source_span_check2 CHECK (((page_end IS NULL) OR (page_end >= page_start))),
+    CONSTRAINT source_span_chunk_order_check CHECK ((chunk_order >= 0)),
+    CONSTRAINT source_span_embedding_input_hash_check CHECK (((embedding_input_hash IS NULL) OR (embedding_input_hash ~ '^[a-f0-9]{64}$'::text))),
     CONSTRAINT source_span_page_start_check CHECK (((page_start IS NULL) OR (page_start > 0)))
 );
 
@@ -1135,14 +1225,6 @@ ALTER TABLE ONLY public.channel_identity
 
 
 --
--- Name: chapter chapter_owner_scope_id_course_id_chapter_order_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.chapter
-    ADD CONSTRAINT chapter_owner_scope_id_course_id_chapter_order_key UNIQUE (owner_scope_id, course_id, chapter_order);
-
-
---
 -- Name: chapter chapter_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1228,6 +1310,30 @@ ALTER TABLE ONLY public.course
 
 ALTER TABLE ONLY public.course
     ADD CONSTRAINT course_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: curriculum_generation curriculum_generation_owner_scope_id_course_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_generation
+    ADD CONSTRAINT curriculum_generation_owner_scope_id_course_id_id_key UNIQUE (owner_scope_id, course_id, id);
+
+
+--
+-- Name: curriculum_generation curriculum_generation_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_generation
+    ADD CONSTRAINT curriculum_generation_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: curriculum_generation curriculum_generation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_generation
+    ADD CONSTRAINT curriculum_generation_pkey PRIMARY KEY (id);
 
 
 --
@@ -1487,6 +1593,46 @@ ALTER TABLE ONLY public.source_document
 
 
 --
+-- Name: source_embedding_generation source_embedding_generation_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation
+    ADD CONSTRAINT source_embedding_generation_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: source_embedding_generation source_embedding_generation_owner_scope_id_source_document__key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation
+    ADD CONSTRAINT source_embedding_generation_owner_scope_id_source_document__key UNIQUE (owner_scope_id, source_document_id, id);
+
+
+--
+-- Name: source_embedding_generation source_embedding_generation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation
+    ADD CONSTRAINT source_embedding_generation_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: source_embedding_generation_span source_embedding_generation_s_owner_scope_id_embedding_gene_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation_span
+    ADD CONSTRAINT source_embedding_generation_s_owner_scope_id_embedding_gene_key UNIQUE (owner_scope_id, embedding_generation_id, span_order);
+
+
+--
+-- Name: source_embedding_generation_span source_embedding_generation_span_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation_span
+    ADD CONSTRAINT source_embedding_generation_span_pkey PRIMARY KEY (owner_scope_id, embedding_generation_id, source_span_id);
+
+
+--
 -- Name: source_span source_span_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1562,6 +1708,27 @@ CREATE INDEX auth_session_user_active_idx ON public.auth_session USING btree (us
 
 
 --
+-- Name: chapter_generation_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX chapter_generation_order_idx ON public.chapter USING btree (owner_scope_id, curriculum_generation_id, chapter_order) WHERE (curriculum_generation_id IS NOT NULL);
+
+
+--
+-- Name: concept_chapter_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX concept_chapter_order_idx ON public.concept USING btree (owner_scope_id, chapter_id, concept_order) WHERE (concept_order IS NOT NULL);
+
+
+--
+-- Name: concept_generation_key_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX concept_generation_key_idx ON public.concept USING btree (owner_scope_id, curriculum_generation_id, concept_key) WHERE (curriculum_generation_id IS NOT NULL);
+
+
+--
 -- Name: ingestion_operation_source_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1615,6 +1782,13 @@ CREATE UNIQUE INDEX scope_membership_one_active_owner_idx ON public.scope_member
 --
 
 CREATE UNIQUE INDEX scope_membership_one_active_personal_scope_per_user_idx ON public.scope_membership USING btree (user_id) WHERE ((role = 'owner'::text) AND (revoked_at IS NULL));
+
+
+--
+-- Name: source_span_chunk_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX source_span_chunk_order_idx ON public.source_span USING btree (owner_scope_id, source_document_id, chunker_version, tokenizer_version, chunk_order) WHERE (chunk_order IS NOT NULL);
 
 
 --
@@ -1782,6 +1956,14 @@ ALTER TABLE ONLY public.channel_identity
 
 
 --
+-- Name: chapter chapter_curriculum_generation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chapter
+    ADD CONSTRAINT chapter_curriculum_generation_fk FOREIGN KEY (owner_scope_id, curriculum_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, id);
+
+
+--
 -- Name: chapter chapter_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1803,6 +1985,14 @@ ALTER TABLE ONLY public.chapter_source_span
 
 ALTER TABLE ONLY public.chapter_source_span
     ADD CONSTRAINT chapter_source_span_owner_scope_id_source_span_id_fkey FOREIGN KEY (owner_scope_id, source_span_id) REFERENCES public.source_span(owner_scope_id, id);
+
+
+--
+-- Name: concept concept_curriculum_generation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.concept
+    ADD CONSTRAINT concept_curriculum_generation_fk FOREIGN KEY (owner_scope_id, curriculum_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, id);
 
 
 --
@@ -1846,11 +2036,43 @@ ALTER TABLE ONLY public.concept_source_span
 
 
 --
+-- Name: course course_active_curriculum_generation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.course
+    ADD CONSTRAINT course_active_curriculum_generation_fk FOREIGN KEY (owner_scope_id, active_curriculum_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
 -- Name: course course_owner_scope_id_source_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.course
     ADD CONSTRAINT course_owner_scope_id_source_document_id_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_generation curriculum_generation_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_generation
+    ADD CONSTRAINT curriculum_generation_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_generation curriculum_generation_owner_scope_id_embedding_generation__fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_generation
+    ADD CONSTRAINT curriculum_generation_owner_scope_id_embedding_generation__fkey FOREIGN KEY (owner_scope_id, embedding_generation_id) REFERENCES public.source_embedding_generation(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_generation curriculum_generation_owner_scope_id_source_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_generation
+    ADD CONSTRAINT curriculum_generation_owner_scope_id_source_document_id_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
 
 
 --
@@ -2054,11 +2276,43 @@ ALTER TABLE ONLY public.scope_membership
 
 
 --
+-- Name: source_document source_document_active_embedding_generation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_document
+    ADD CONSTRAINT source_document_active_embedding_generation_fk FOREIGN KEY (owner_scope_id, active_embedding_generation_id) REFERENCES public.source_embedding_generation(owner_scope_id, id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
 -- Name: source_document source_document_owner_scope_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.source_document
     ADD CONSTRAINT source_document_owner_scope_id_fkey FOREIGN KEY (owner_scope_id) REFERENCES public.owner_scope(id);
+
+
+--
+-- Name: source_embedding_generation source_embedding_generation_owner_scope_id_source_document_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation
+    ADD CONSTRAINT source_embedding_generation_owner_scope_id_source_document_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
+
+
+--
+-- Name: source_embedding_generation_span source_embedding_generation_s_owner_scope_id_embedding_gen_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation_span
+    ADD CONSTRAINT source_embedding_generation_s_owner_scope_id_embedding_gen_fkey FOREIGN KEY (owner_scope_id, embedding_generation_id) REFERENCES public.source_embedding_generation(owner_scope_id, id);
+
+
+--
+-- Name: source_embedding_generation_span source_embedding_generation_s_owner_scope_id_source_span_i_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_embedding_generation_span
+    ADD CONSTRAINT source_embedding_generation_s_owner_scope_id_source_span_i_fkey FOREIGN KEY (owner_scope_id, source_span_id) REFERENCES public.source_span(owner_scope_id, id);
 
 
 --
@@ -2176,6 +2430,19 @@ ALTER TABLE public.concept_source_span ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.course ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: curriculum_generation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.curriculum_generation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: curriculum_generation curriculum_generation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY curriculum_generation_active_membership ON public.curriculum_generation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
 
 --
 -- Name: delivery_item; Type: ROW SECURITY; Schema: public; Owner: -
@@ -2485,6 +2752,32 @@ CREATE POLICY scoped_active_membership ON public.study_session USING (public.ref
 ALTER TABLE public.source_document ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: source_embedding_generation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.source_embedding_generation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: source_embedding_generation source_embedding_generation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY source_embedding_generation_active_membership ON public.source_embedding_generation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: source_embedding_generation_span; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.source_embedding_generation_span ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: source_embedding_generation_span source_embedding_generation_span_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY source_embedding_generation_span_active_membership ON public.source_embedding_generation_span USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: source_span; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2509,4 +2802,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260719000100'),
     ('20260720000100'),
     ('20260720000200'),
-    ('20260721000100');
+    ('20260721000100'),
+    ('20260721000200');

@@ -77,6 +77,7 @@ const definitions = {
     fixedInstructions: [
       ...COMMON_GROUNDING_INSTRUCTIONS,
       "Structure chapters and concepts without adding material absent from the source.",
+      "Give every concept a stable lowercase key, concept-level source spans, and prerequisites that reference only earlier concept keys.",
     ],
     generationParameters: { temperature: 0.1 },
     generationParametersVersion: "curriculum-generation-parameters-v1",

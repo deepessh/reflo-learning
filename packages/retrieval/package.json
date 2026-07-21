@@ -1,12 +1,13 @@
 {
-  "name": "@reflo/model-router",
+  "name": "@reflo/retrieval",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "sql"
   ],
   "exports": {
     ".": {
@@ -16,16 +17,16 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
-    },
-    "./model-studio-embedding": {
-      "types": "./dist/adapters/model-studio-embedding.d.ts",
-      "default": "./dist/adapters/model-studio-embedding.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@reflo/ingestion": "workspace:*",
+    "@reflo/model-router": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

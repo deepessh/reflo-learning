@@ -12,7 +12,7 @@ import type {
 } from "./ports.js";
 import { ModelAdapterError } from "./ports.js";
 import {
-  ROUTE_POLICY_V1,
+  ROUTE_POLICY_V2,
   ROUTE_POLICY_VERSION,
   type RouteDefinition,
 } from "./policy.js";
@@ -116,7 +116,7 @@ export function createModelRouter(options: ModelRouterOptions) {
 
     const logicalStartedAt = now();
     const deadlineAt = logicalStartedAt + executeOptions.deadlineMs;
-    const route: RouteDefinition = ROUTE_POLICY_V1[task];
+    const route: RouteDefinition = ROUTE_POLICY_V2[task];
     const featureFlag = route.featureFlag;
     if (featureFlag !== undefined) {
       const operationKind = executeOptions.videoOperationKind;

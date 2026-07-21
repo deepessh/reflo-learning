@@ -55,7 +55,7 @@ describe("typed model router", () => {
       effectiveModel: "qwen-plus",
       promptId: "curriculum-structure",
       requestedSelector: "qwen.structured",
-      routePolicyVersion: "route-policy-v1",
+      routePolicyVersion: "route-policy-v2",
       validationOutcome: "passed",
     });
     expect(result.provenance.promptDigest).toMatch(/^[a-f0-9]{64}$/);
@@ -606,7 +606,7 @@ describe("trace allowlist", () => {
           durationMs: 1,
           finishedAt: "2026-07-19T00:00:00.001Z",
           outcome: "success",
-          routePolicyVersion: "route-policy-v1",
+          routePolicyVersion: "route-policy-v2",
           startedAt: "2026-07-19T00:00:00.000Z",
           task: "curriculum.structure.v1",
           [field]: "secret",

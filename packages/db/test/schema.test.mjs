@@ -315,6 +315,169 @@ test(
       );
 
       await suite.test(
+        "persists idempotent activation operations and provenance-backed artifacts",
+        async () => {
+          const curriculum = "00000000-0000-5000-8000-000000000313";
+          const chapter = "00000000-0000-5000-8000-000000000314";
+          const concept = "00000000-0000-5000-8000-000000000315";
+          const placementOperation = "00000000-0000-5000-8000-000000000321";
+          await client.query(
+            `INSERT INTO activation_generation_operation
+               (id, owner_scope_id, course_id, curriculum_generation_id,
+                artifact_kind, generation_version, idempotency_key, priority)
+             VALUES ($1, $2, $3, $4, 'placement_quiz',
+                     'activation-generation-v1', $5, 2)`,
+            [
+              placementOperation,
+              ids.scopeA,
+              ids.courseA,
+              curriculum,
+              `dev/content.activation.generate/v1/${placementOperation}`,
+            ],
+          );
+          await expectSqlState(
+            client,
+            "23505",
+            `INSERT INTO activation_generation_operation
+               (id, owner_scope_id, course_id, curriculum_generation_id,
+                artifact_kind, generation_version, idempotency_key, priority)
+             VALUES ('00000000-0000-5000-8000-000000000329', $1, $2, $3,
+                     'placement_quiz', 'activation-generation-v1',
+                     'dev/content.activation.generate/v1/00000000-0000-5000-8000-000000000329', 2)`,
+            [ids.scopeA, ids.courseA, curriculum],
+          );
+
+          const lessonOperation = "00000000-0000-5000-8000-000000000322";
+          const asset = "00000000-0000-5000-8000-000000000323";
+          await client.query(
+            `INSERT INTO activation_generation_operation
+               (id, owner_scope_id, course_id, curriculum_generation_id,
+                artifact_kind, chapter_id, concept_id, generation_version,
+                idempotency_key, priority, status, attempt_count, artifact_id,
+                completed_at)
+             VALUES ($1, $2, $3, $4, 'first_text_lesson', $5, $6,
+                     'activation-generation-v1', $7, 1, 'succeeded', 1, $8,
+                     now())`,
+            [
+              lessonOperation,
+              ids.scopeA,
+              ids.courseA,
+              curriculum,
+              chapter,
+              concept,
+              `dev/content.activation.generate/v1/${lessonOperation}`,
+              asset,
+            ],
+          );
+          await expectSqlState(
+            client,
+            "23514",
+            `INSERT INTO asset
+               (id, owner_scope_id, course_id, chapter_id, concept_id,
+                asset_type, object_key, generation_version, status,
+                generation_operation_id)
+             VALUES ($1, $2, $3, $4, $5, 'text', 'owners/test/invalid.md',
+                     'activation-generation-v1', 'ready', $6)`,
+            [asset, ids.scopeA, ids.courseA, chapter, concept, lessonOperation],
+          );
+          await client.query(
+            `INSERT INTO asset
+               (id, owner_scope_id, course_id, chapter_id, concept_id,
+                asset_type, object_key, model_id, prompt_id,
+                generation_version, strategy_tag, status,
+                generation_operation_id, model_provenance, content_hash,
+                content_type, byte_size, etag)
+             VALUES ($1, $2, $3, $4, $5, 'text', $6, 'qwen-plus',
+                     'lesson-text', 'activation-generation-v1', 'example-v1',
+                     'ready', $7, '{"task":"lesson.text.v1"}'::jsonb, $8,
+                     'text/markdown; charset=utf-8', 400, 'etag-1')`,
+            [
+              asset,
+              ids.scopeA,
+              ids.courseA,
+              chapter,
+              concept,
+              `owners/${ids.scopeA}/courses/${ids.courseA}/assets/${asset}/generations/${lessonOperation}/payload.md`,
+              lessonOperation,
+              "d".repeat(64),
+            ],
+          );
+          await expectSqlState(
+            client,
+            "23514",
+            `UPDATE activation_generation_operation
+             SET status = 'failed_permanent', artifact_id = NULL,
+                 failure_class = 'late_failure', completed_at = now()
+             WHERE id = $1`,
+            [lessonOperation],
+          );
+
+          const chapterOperation = "00000000-0000-5000-8000-000000000324";
+          const bank = "00000000-0000-5000-8000-000000000325";
+          await client.query(
+            `INSERT INTO activation_generation_operation
+               (id, owner_scope_id, course_id, curriculum_generation_id,
+                artifact_kind, chapter_id, generation_version,
+                idempotency_key, priority, status, attempt_count, artifact_id,
+                completed_at)
+             VALUES ($1, $2, $3, $4, 'chapter_quiz', $5,
+                     'activation-generation-v1', $6, 3, 'succeeded', 1, $7,
+                     now())`,
+            [
+              chapterOperation,
+              ids.scopeA,
+              ids.courseA,
+              curriculum,
+              chapter,
+              `dev/content.activation.generate/v1/${chapterOperation}`,
+              bank,
+            ],
+          );
+          await client.query(
+            `INSERT INTO quiz_bank
+               (id, owner_scope_id, course_id, chapter_id,
+                generation_operation_id, bank_kind, generation_version,
+                model_provenance, result_hash, item_count)
+             VALUES ($1, $2, $3, $4, $5, 'chapter',
+                     'activation-generation-v1',
+                     '{"task":"assessment.quiz.v1"}'::jsonb, $6, 5)`,
+            [
+              bank,
+              ids.scopeA,
+              ids.courseA,
+              chapter,
+              chapterOperation,
+              "e".repeat(64),
+            ],
+          );
+          await client.query(
+            `INSERT INTO quiz_item
+               (id, owner_scope_id, course_id, item_type, difficulty, prompt,
+                keyed_answer, version, quiz_bank_id, item_order,
+                normalized_prompt_hash, response_options)
+             VALUES ('00000000-0000-5000-8000-000000000326', $1, $2,
+                     'multiple_choice', 2, 'Question one?', '"correct"'::jsonb,
+                     'activation-generation-v1', $3, 0, $4,
+                     '["correct","incorrect"]'::jsonb)`,
+            [ids.scopeA, ids.courseA, bank, "f".repeat(64)],
+          );
+          await expectSqlState(
+            client,
+            "23505",
+            `INSERT INTO quiz_item
+               (id, owner_scope_id, course_id, item_type, difficulty, prompt,
+                keyed_answer, version, quiz_bank_id, item_order,
+                normalized_prompt_hash, response_options)
+             VALUES ('00000000-0000-5000-8000-000000000327', $1, $2,
+                     'multiple_choice', 2, 'Question one!', '"correct"'::jsonb,
+                     'activation-generation-v1', $3, 1, $4,
+                     '["correct","incorrect"]'::jsonb)`,
+            [ids.scopeA, ids.courseA, bank, "f".repeat(64)],
+          );
+        },
+      );
+
+      await suite.test(
         "enforces provider and logical idempotency uniqueness",
         async () => {
           const channel = "00000000-0000-4000-8000-000000000501";
@@ -398,6 +561,10 @@ test(
             "SELECT operation_id FROM ingestion_operation ORDER BY operation_id",
           );
           assert.deepEqual(result.rows, []);
+          result = await client.query(
+            "SELECT id FROM activation_generation_operation ORDER BY id",
+          );
+          assert.deepEqual(result.rows, []);
           await client.query("ROLLBACK");
 
           await client.query("BEGIN");
@@ -422,6 +589,14 @@ test(
           );
           assert.deepEqual(result.rows, [
             { id: "00000000-0000-5000-8000-000000000312" },
+          ]);
+          result = await client.query(
+            "SELECT id FROM activation_generation_operation ORDER BY id",
+          );
+          assert.deepEqual(result.rows, [
+            { id: "00000000-0000-5000-8000-000000000321" },
+            { id: "00000000-0000-5000-8000-000000000322" },
+            { id: "00000000-0000-5000-8000-000000000324" },
           ]);
           await assert.rejects(
             client.query(

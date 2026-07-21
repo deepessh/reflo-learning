@@ -6,6 +6,7 @@ import type {
   ModelTaskInput,
   TutorAnswerInput,
 } from "./contracts.js";
+import { QUIZ_ITEM_TYPES } from "./contracts.js";
 
 export const EMBEDDING_V1_DIMENSIONS = 1_024 as const;
 
@@ -33,21 +34,7 @@ export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
       }),
     ),
   "assessment.quiz.v1": validator<"assessment.quiz.v1">((value, input) =>
-    isRecordWith(value, {
-      items: (items) =>
-        Array.isArray(items) &&
-        items.length === input.count &&
-        items.every((entry) =>
-          isRecordWith(entry, {
-            conceptIds: (conceptIds) =>
-              isAuthorizedIds(conceptIds, input.conceptIds),
-            keyedAnswer: isString,
-            prompt: isString,
-            sourceSpanIds: (sourceSpanIds) =>
-              isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
-          }),
-        ),
-    }),
+    isQuizGenerationResult(value, input),
   ),
   "curriculum.structure.v1": validator<"curriculum.structure.v1">(
     isCurriculumStructureResult,
@@ -158,6 +145,77 @@ function isCurriculumStructureResult(
     }
   }
   return true;
+}
+
+function isQuizGenerationResult(
+  value: unknown,
+  input: ModelTaskInput<"assessment.quiz.v1">,
+): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ["items"])) {
+    return false;
+  }
+  if (!Array.isArray(value.items) || value.items.length !== input.count) {
+    return false;
+  }
+  const itemTypes = new Set<string>();
+  for (const entry of value.items) {
+    if (!isRecord(entry)) {
+      return false;
+    }
+    const optionalKeys = [
+      ...(entry.responseOptions === undefined ? [] : ["responseOptions"]),
+      ...(entry.rubric === undefined ? [] : ["rubric"]),
+    ];
+    if (
+      !hasExactKeys(entry, [
+        "conceptIds",
+        "difficulty",
+        "itemType",
+        "keyedAnswer",
+        "prompt",
+        "sourceSpanIds",
+        ...optionalKeys,
+      ]) ||
+      !isAuthorizedIds(entry.conceptIds, input.conceptIds) ||
+      !isQuizDifficulty(entry.difficulty) ||
+      !isQuizItemType(entry.itemType) ||
+      !isString(entry.keyedAnswer) ||
+      !isString(entry.prompt) ||
+      !isAuthorizedIds(entry.sourceSpanIds, sourceIds(input.sourceSpans)) ||
+      !isValidQuizShape(entry)
+    ) {
+      return false;
+    }
+    itemTypes.add(entry.itemType);
+  }
+  return (input.requiredItemTypes ?? []).every((type) => itemTypes.has(type));
+}
+
+function isValidQuizShape(entry: Record<string, unknown>): boolean {
+  if (entry.itemType === "short_answer") {
+    return isString(entry.rubric) && entry.responseOptions === undefined;
+  }
+  if (
+    !Array.isArray(entry.responseOptions) ||
+    entry.responseOptions.length < 2 ||
+    !entry.responseOptions.every(isString) ||
+    new Set(entry.responseOptions).size !== entry.responseOptions.length
+  ) {
+    return false;
+  }
+  return (
+    entry.rubric === undefined &&
+    typeof entry.keyedAnswer === "string" &&
+    entry.responseOptions.includes(entry.keyedAnswer)
+  );
+}
+
+function isQuizDifficulty(value: unknown): value is 1 | 2 | 3 | 4 | 5 {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5;
+}
+
+function isQuizItemType(value: unknown): value is string {
+  return (QUIZ_ITEM_TYPES as readonly unknown[]).includes(value);
 }
 
 function isLessonResult(value: unknown, input: LessonInput): boolean {

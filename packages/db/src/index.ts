@@ -3,6 +3,7 @@ import pg, { type PoolClient } from "pg";
 export { PostgresIngestionOperationStore } from "./ingestion-operation-store.js";
 export type { PostgresIngestionOperationStoreOptions } from "./ingestion-operation-store.js";
 export { PostgresContentRepository } from "./content-repository.js";
+export { PostgresActivationRepository } from "./activation-repository.js";
 
 import type {
   AccountRepository,

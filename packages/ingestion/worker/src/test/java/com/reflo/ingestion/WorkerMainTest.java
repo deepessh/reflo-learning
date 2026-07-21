@@ -85,6 +85,7 @@ final class WorkerMainTest {
         assertNull(result.pageCount());
         assertEquals("digital", result.scan().classification());
         assertEquals(2, result.blocks().size());
+        assertEquals("Grounded EPUB lesson text", result.blocks().get(0).text());
         assertEquals("OPS/text/chapter.xhtml", result.blocks().get(0).locator().get("resource"));
         assertEquals(0, result.blocks().get(0).locator().get("spineItem"));
         assertEquals("OPS/appendix.xhtml", result.blocks().get(1).locator().get("resource"));

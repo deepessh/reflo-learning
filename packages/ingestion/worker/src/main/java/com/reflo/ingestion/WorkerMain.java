@@ -304,9 +304,13 @@ public final class WorkerMain {
         return resource;
     }
 
-    private static String extractDocumentText(Document document) {
+    private static String extractDocumentText(Document document) throws WorkerFailure {
+        NodeList bodies = document.getElementsByTagNameNS("*", "body");
+        if (bodies.getLength() != 1) {
+            throw new WorkerFailure("malformed_document");
+        }
         StringBuilder text = new StringBuilder();
-        appendText(document.getDocumentElement(), text);
+        appendText(bodies.item(0), text);
         return text.toString();
     }
 

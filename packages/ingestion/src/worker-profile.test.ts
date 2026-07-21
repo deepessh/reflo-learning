@@ -34,6 +34,7 @@ describe("createPodmanWorkerLaunch", () => {
         "--security-opt=no-new-privileges",
         "--read-only",
         "--user=65532:65532",
+        "--userns=keep-id:uid=65532,gid=65532",
         "--cpus=2",
         `--memory=${4 * 1_024 * 1_024 * 1_024}`,
         "--pids-limit=256",

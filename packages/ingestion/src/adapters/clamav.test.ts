@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProcessResult, ProcessRunnerPort } from "../ports.js";
 import { ClamAvScannerAdapter } from "./clamav.js";
+import {
+  CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+  PinnedP256SnapshotSignatureVerifier,
+} from "./clamav-signature.js";
 
 const scratch: string[] = [];
 
@@ -19,6 +23,21 @@ afterEach(async () => {
 });
 
 describe("ClamAvScannerAdapter", () => {
+  it("accepts the pinned runtime version without a database suffix", async () => {
+    const fixture = await snapshotFixture();
+    const adapter = fixture.adapter(
+      new SequencedRunner([
+        processResult(0, "ClamAV 1.4.5\n"),
+        processResult(0, ""),
+      ]),
+    );
+    const snapshot = await adapter.currentSnapshot();
+
+    await expect(
+      adapter.scan(staged(fixture.directory), snapshot!),
+    ).resolves.toEqual({ clean: true });
+  });
+
   it("verifies the signed immutable database before scanning", async () => {
     const fixture = await snapshotFixture();
     const runner = new SequencedRunner([
@@ -81,6 +100,31 @@ describe("ClamAvScannerAdapter", () => {
     ).resolves.toBeNull();
   });
 
+  it("rejects noncanonical Base64 and an unknown manifest key", async () => {
+    const fixture = await snapshotFixture();
+    const signature = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(fixture.signaturePath, "ascii"),
+    );
+    await writeFile(fixture.signaturePath, `${signature}\n`);
+    await expect(
+      fixture.adapter(new SequencedRunner([])).currentSnapshot(),
+    ).resolves.toBeNull();
+
+    const second = await snapshotFixture();
+    const manifest = JSON.parse(
+      await import("node:fs/promises").then(({ readFile }) =>
+        readFile(second.manifestPath, "utf8"),
+      ),
+    ) as Record<string, unknown>;
+    await writeFile(
+      second.manifestPath,
+      JSON.stringify({ ...manifest, kid: "unknown-key" }),
+    );
+    await expect(
+      second.adapter(new SequencedRunner([])).currentSnapshot(),
+    ).resolves.toBeNull();
+  });
+
   it("rejects a scanner whose runtime version is not exactly pinned", async () => {
     const fixture = await snapshotFixture();
     const adapter = fixture.adapter(
@@ -97,6 +141,7 @@ async function snapshotFixture(): Promise<{
   adapter(runner: ProcessRunnerPort): ClamAvScannerAdapter;
   directory: string;
   manifestPath: string;
+  signaturePath: string;
 }> {
   const directory = await mkdtemp(path.join(tmpdir(), "reflo-clamav-"));
   scratch.push(directory);
@@ -104,10 +149,18 @@ async function snapshotFixture(): Promise<{
   await writeFile(path.join(directory, "daily.cvd"), database);
   const manifestPath = path.join(directory, "snapshot.json");
   const signaturePath = path.join(directory, "snapshot.sig");
+  const keys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const publicKeyDer = keys.publicKey.export({ type: "spki", format: "der" });
+  const publicKeySpkiSha256 = createHash("sha256")
+    .update(publicKeyDer)
+    .digest("hex");
+  const publicKeyPem = keys.publicKey
+    .export({ type: "spki", format: "pem" })
+    .toString();
   const manifest = Buffer.from(
     JSON.stringify({
       clamAvVersion: "1.4.5",
-      contractVersion: "clamav-signature-snapshot-v1",
+      contractVersion: "snapshot-manifest-v1",
       files: [
         {
           byteLength: database.byteLength,
@@ -115,39 +168,43 @@ async function snapshotFixture(): Promise<{
           sha256: createHash("sha256").update(database).digest("hex"),
         },
       ],
+      kid: "fixture-p256-v1",
       publishedAt: "2026-07-21T00:00:00.000Z",
-      signatureProfile: "test-ed25519-v1",
-      signatureVersion: "daily-27100",
+      publicKeySpkiSha256,
+      signatureProfile: CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+      snapshotId: "daily-27100",
     }),
     "utf8",
   );
-  const keys = generateKeyPairSync("ed25519");
   await writeFile(manifestPath, manifest);
   await writeFile(
     signaturePath,
-    sign(null, manifest, keys.privateKey).toString("base64"),
+    sign("sha256", manifest, {
+      dsaEncoding: "der",
+      key: keys.privateKey,
+    }).toString("base64"),
   );
-  const publicKeyPem = keys.publicKey
-    .export({ type: "spki", format: "pem" })
-    .toString();
   return {
     adapter(runner) {
       return new ClamAvScannerAdapter({
         databaseDirectory: directory,
         executable: "clamscan",
-        expectedSignatureProfile: "test-ed25519-v1",
+        expectedSignatureProfile: CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
         manifestPath,
         runner,
         signaturePath,
-        signatureVerifier: {
-          async verify(input) {
-            return verify(null, input.payload, publicKeyPem, input.signature);
+        signatureVerifier: new PinnedP256SnapshotSignatureVerifier([
+          {
+            kid: "fixture-p256-v1",
+            spkiPem: publicKeyPem,
+            spkiSha256: publicKeySpkiSha256,
           },
-        },
+        ]),
       });
     },
     directory,
     manifestPath,
+    signaturePath,
   };
 }
 

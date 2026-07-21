@@ -10,8 +10,12 @@ import {
 } from "../contracts.js";
 import { IngestionError } from "../errors.js";
 import type { MalwareScannerPort, ProcessRunnerPort } from "../ports.js";
+import {
+  CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+  decodeStrictPaddedBase64P256Der,
+} from "./clamav-signature.js";
 
-const SNAPSHOT_CONTRACT = "clamav-signature-snapshot-v1";
+export const CLAMAV_SNAPSHOT_MANIFEST_CONTRACT = "snapshot-manifest-v1";
 const MAX_MANIFEST_BYTES = 256 * 1_024;
 const MAX_DIAGNOSTIC_BYTES = 8 * 1_024;
 
@@ -23,17 +27,21 @@ interface SnapshotFile {
 
 interface SnapshotManifest {
   readonly clamAvVersion: string;
-  readonly contractVersion: typeof SNAPSHOT_CONTRACT;
+  readonly contractVersion: typeof CLAMAV_SNAPSHOT_MANIFEST_CONTRACT;
   readonly files: readonly SnapshotFile[];
+  readonly kid: string;
   readonly publishedAt: string;
-  readonly signatureProfile: string;
-  readonly signatureVersion: string;
+  readonly publicKeySpkiSha256: string;
+  readonly signatureProfile: typeof CLAMAV_SNAPSHOT_SIGNATURE_PROFILE;
+  readonly snapshotId: string;
 }
 
 export interface SnapshotSignatureVerifierPort {
   verify(input: {
+    readonly kid: string;
     readonly payload: Uint8Array;
     readonly profile: string;
+    readonly publicKeySpkiSha256: string;
     readonly signature: Uint8Array;
   }): Promise<boolean>;
 }
@@ -76,23 +84,23 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
       const signatureText = (
         await readRegularFile(this.#options.signaturePath, 16 * 1_024)
       ).toString("ascii");
-      if (!/^[A-Za-z0-9+/]+={0,2}\n?$/.test(signatureText)) {
-        return null;
-      }
-      const signature = Buffer.from(signatureText.trim(), "base64");
+      const signature = decodeStrictPaddedBase64P256Der(signatureText);
+      const manifest = parseManifest(manifestBytes);
       if (
-        signature.byteLength === 0 ||
+        signature === null ||
         !(await this.#options.signatureVerifier.verify({
+          kid: manifest.kid,
           payload: manifestBytes,
           profile: this.#options.expectedSignatureProfile,
+          publicKeySpkiSha256: manifest.publicKeySpkiSha256,
           signature,
         }))
       ) {
         return null;
       }
-      const manifest = parseManifest(manifestBytes);
       if (
-        manifest.signatureProfile !== this.#options.expectedSignatureProfile
+        manifest.signatureProfile !== this.#options.expectedSignatureProfile ||
+        manifest.signatureProfile !== CLAMAV_SNAPSHOT_SIGNATURE_PROFILE
       ) {
         return null;
       }
@@ -110,11 +118,11 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
       }
       this.#verifiedSnapshotIdentity = snapshotIdentity(
         publishedAt,
-        manifest.signatureVersion,
+        manifest.snapshotId,
       );
       return {
         publishedAt,
-        signatureVersion: manifest.signatureVersion,
+        signatureVersion: manifest.snapshotId,
         verified: true,
       };
     } catch {
@@ -141,9 +149,9 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
     if (
       version.timedOut ||
       version.exitCode !== 0 ||
-      !new RegExp(`^ClamAV ${escapeRegex(INGESTION_COMPONENTS.clamAv)}/`).test(
-        version.stdout,
-      )
+      !new RegExp(
+        `^ClamAV ${escapeRegex(INGESTION_COMPONENTS.clamAv)}(?:/|\\s|$)`,
+      ).test(version.stdout)
     ) {
       throw new IngestionError("infrastructure_unavailable");
     }
@@ -180,21 +188,26 @@ function parseManifest(bytes: Buffer): SnapshotManifest {
       "clamAvVersion",
       "contractVersion",
       "files",
+      "kid",
       "publishedAt",
+      "publicKeySpkiSha256",
       "signatureProfile",
-      "signatureVersion",
+      "snapshotId",
     ])
   ) {
     throw new Error("invalid snapshot manifest");
   }
   if (
-    value.contractVersion !== SNAPSHOT_CONTRACT ||
+    value.contractVersion !== CLAMAV_SNAPSHOT_MANIFEST_CONTRACT ||
     value.clamAvVersion !== INGESTION_COMPONENTS.clamAv ||
-    typeof value.signatureProfile !== "string" ||
-    !/^[a-z0-9._-]{1,128}$/.test(value.signatureProfile) ||
+    value.signatureProfile !== CLAMAV_SNAPSHOT_SIGNATURE_PROFILE ||
+    typeof value.kid !== "string" ||
+    !/^[A-Za-z0-9._-]{1,128}$/.test(value.kid) ||
+    typeof value.publicKeySpkiSha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.publicKeySpkiSha256) ||
     typeof value.publishedAt !== "string" ||
-    typeof value.signatureVersion !== "string" ||
-    !/^[A-Za-z0-9._-]{1,128}$/.test(value.signatureVersion) ||
+    typeof value.snapshotId !== "string" ||
+    !/^[A-Za-z0-9._-]{1,128}$/.test(value.snapshotId) ||
     !Array.isArray(value.files) ||
     value.files.length < 1 ||
     value.files.length > 128

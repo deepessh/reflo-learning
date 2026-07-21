@@ -49,6 +49,7 @@ export function createPodmanWorkerLaunch(
       "--security-opt=no-new-privileges",
       "--read-only",
       "--user=65532:65532",
+      "--userns=keep-id:uid=65532,gid=65532",
       `--cpus=${INGESTION_LIMITS.worker.cpuCount}`,
       `--memory=${INGESTION_LIMITS.worker.memoryBytes}`,
       `--pids-limit=${INGESTION_LIMITS.worker.maxPids}`,

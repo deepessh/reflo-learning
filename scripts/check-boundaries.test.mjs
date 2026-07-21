@@ -179,6 +179,32 @@ test("allows private asset provider SDKs only inside asset adapter modules", () 
   });
 });
 
+test("rejects cloud credential providers outside approved adapter modules", () => {
+  withFixture((root) => {
+    mkdirSync(path.join(root, "packages/ingestion/src"), { recursive: true });
+    writeFileSync(
+      path.join(root, "packages/ingestion/src/service.ts"),
+      'import "@alicloud/credentials";\n',
+    );
+    assert.match(
+      checkBoundaries(root)[0],
+      /cloud credential provider SDK @alicloud\/credentials is only allowed in approved provider adapter modules/,
+    );
+  });
+});
+
+test("allows cloud credential providers in the authorized KMS adapter boundary", () => {
+  withFixture((root) => {
+    const adapterDirectory = path.join(root, "packages/ingestion/src/adapters");
+    mkdirSync(adapterDirectory, { recursive: true });
+    writeFileSync(
+      path.join(adapterDirectory, "alibaba-kms.ts"),
+      'import "@alicloud/credentials";\n',
+    );
+    assert.deepEqual(checkBoundaries(root), []);
+  });
+});
+
 test("rejects transactional email provider SDK imports from domain code", () => {
   withFixture((root) => {
     mkdirSync(path.join(root, "packages/accounts/src"), { recursive: true });

@@ -23,10 +23,8 @@ const PRIVATE_ASSET_PROVIDER_SDKS = new Set([
   "@alicloud/cdn20180510",
   "ali-oss",
 ]);
-const TRANSACTIONAL_EMAIL_PROVIDER_SDKS = new Set([
-  "@alicloud/credentials",
-  "@alicloud/dm20151123",
-]);
+const CLOUD_CREDENTIAL_PROVIDER_SDKS = new Set(["@alicloud/credentials"]);
+const TRANSACTIONAL_EMAIL_PROVIDER_SDKS = new Set(["@alicloud/dm20151123"]);
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
   ".cts",
@@ -136,6 +134,33 @@ function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
     ) {
       violations.push(
         `${file}: private asset provider SDK ${specifier} is only allowed in packages/asset-delivery/src/adapters`,
+      );
+      continue;
+    }
+    const cloudCredentialProviderSdk = [...CLOUD_CREDENTIAL_PROVIDER_SDKS].find(
+      (candidate) =>
+        specifier === candidate || specifier.startsWith(`${candidate}/`),
+    );
+    const approvedCredentialAdapterRoots = [
+      path.join(packagesRoot, "accounts", "src", "adapters"),
+      path.join(packagesRoot, "ingestion", "src", "adapters"),
+    ];
+    const isInsideApprovedCredentialAdapter =
+      approvedCredentialAdapterRoots.some((adapterRoot) => {
+        const relative = path.relative(adapterRoot, file);
+        return (
+          relative !== "" &&
+          !relative.startsWith("..") &&
+          !path.isAbsolute(relative)
+        );
+      });
+
+    if (
+      cloudCredentialProviderSdk !== undefined &&
+      !isInsideApprovedCredentialAdapter
+    ) {
+      violations.push(
+        `${file}: cloud credential provider SDK ${specifier} is only allowed in approved provider adapter modules`,
       );
       continue;
     }

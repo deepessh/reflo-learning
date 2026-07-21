@@ -1,0 +1,135 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+FROM --platform=linux/amd64 eclipse-temurin:25.0.3_9-jdk-jammy@sha256:8f5909797786d657cfb5232c43179d35fd2ca27f8c91f03fa55b727fbfd744dd AS build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential=12.9ubuntu3 \
+      ca-certificates=20260601~22.04.1 \
+      cmake=3.22.1-1ubuntu1.22.04.2 \
+      curl=7.81.0-1ubuntu1.25 \
+      libleptonica-dev=1.82.0-3build1 \
+      pkg-config=0.29.2-1ubuntu3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/build
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://archive.apache.org/dist/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz \
+      --output apache-maven-3.9.11-bin.tar.gz \
+    && echo 'bcfe4fe305c962ace56ac7b5fc7a08b87d5abd8b7e89027ab251069faebee516b0ded8961445d6d91ec1985dfe30f8153268843c89aa392733d1a3ec956c9978  apache-maven-3.9.11-bin.tar.gz' | sha512sum --check --strict \
+    && tar --extract --gzip --file apache-maven-3.9.11-bin.tar.gz \
+    && rm apache-maven-3.9.11-bin.tar.gz
+ENV PATH="/opt/build/apache-maven-3.9.11/bin:${PATH}"
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.2.tar.gz \
+      --output tesseract-5.5.2.tar.gz \
+    && echo '6235ea0dae45ea137f59c09320406f5888383741924d98855bd2ce0d16b54f21  tesseract-5.5.2.tar.gz' | sha256sum --check --strict \
+    && tar --extract --gzip --file tesseract-5.5.2.tar.gz \
+    && cmake -S tesseract-5.5.2 -B tesseract-build \
+      -DBUILD_TESTS=OFF \
+      -DBUILD_TRAINING_TOOLS=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/opt/tesseract \
+      -DDISABLE_ARCHIVE=ON \
+      -DDISABLE_CURL=ON \
+      -DDISABLE_TIFF=ON \
+      -DGRAPHICS_DISABLED=ON \
+      -DSW_BUILD=OFF \
+    && cmake --build tesseract-build --parallel 2 \
+    && cmake --install tesseract-build \
+    && install -D -m 0644 tesseract-5.5.2/LICENSE /opt/licenses/tesseract/LICENSE \
+    && rm -rf tesseract-5.5.2 tesseract-5.5.2.tar.gz tesseract-build
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.4.5/clamav-1.4.5.linux.x86_64.deb \
+      --output clamav-1.4.5.linux.x86_64.deb \
+    && echo '49b7d9592c13e8834fd1e2339bf22b2fabe378317393b51b3879de8520c5b01f  clamav-1.4.5.linux.x86_64.deb' | sha256sum --check --strict \
+    && dpkg-deb --extract clamav-1.4.5.linux.x86_64.deb /opt/clamav-package \
+    && install -D -m 0755 /opt/clamav-package/usr/local/bin/clamscan /opt/clamav/bin/clamscan \
+    && install -D -m 0755 /opt/clamav-package/usr/local/bin/sigtool /opt/clamav/bin/sigtool \
+    && mkdir -p /opt/clamav/lib \
+    && cp -a /opt/clamav-package/usr/local/lib/libclamav.so* /opt/clamav/lib/ \
+    && cp -a /opt/clamav-package/usr/local/lib/libclammspack.so* /opt/clamav/lib/ \
+    && rm -rf clamav-1.4.5.linux.x86_64.deb /opt/clamav-package
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.4.5/clamav-1.4.5.tar.gz \
+      --output clamav-1.4.5.tar.gz \
+    && echo '2c555fc448b0ad2db950c65f0a7a1a060cf0a0fb9e4ed1d61b222a94293b95e1  clamav-1.4.5.tar.gz' | sha256sum --check --strict \
+    && tar --extract --gzip --file clamav-1.4.5.tar.gz \
+    && mkdir -p /opt/licenses/clamav \
+    && cp clamav-1.4.5/COPYING.txt /opt/licenses/clamav/COPYING.txt \
+    && cp -a clamav-1.4.5/COPYING /opt/licenses/clamav/COPYING \
+    && rm -rf clamav-1.4.5 clamav-1.4.5.tar.gz
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata \
+      --output eng.traineddata \
+    && echo '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2  eng.traineddata' | sha256sum --check --strict \
+    && install -D -m 0644 eng.traineddata /opt/tessdata/eng.traineddata \
+    && rm eng.traineddata \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+      https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/LICENSE \
+      --output tessdata-fast-LICENSE \
+    && echo 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30  tessdata-fast-LICENSE' | sha256sum --check --strict \
+    && install -D -m 0644 tessdata-fast-LICENSE /opt/licenses/tessdata-fast/LICENSE \
+    && rm tessdata-fast-LICENSE
+
+# Keep the application build after the native toolchain so routine Java source
+# changes cannot invalidate the expensive, checksum-pinned native build layers.
+COPY pom.xml /opt/build/worker/pom.xml
+RUN mvn --batch-mode --errors --file /opt/build/worker/pom.xml dependency:go-offline
+COPY src /opt/build/worker/src
+RUN mvn --batch-mode --errors --file /opt/build/worker/pom.xml verify
+RUN set +e; \
+    worker_output="$(java -jar /opt/build/worker/target/isolated-ingestion-worker.jar 2>&1)"; \
+    worker_status=$?; \
+    set -e; \
+    test "${worker_status}" -eq 42; \
+    test "${worker_output}" = "REFLO_FAILURE:invalid_output"
+
+FROM --platform=linux/amd64 eclipse-temurin:25.0.3_9-jre-jammy@sha256:fbae06a5dad7ec55dac9db087c9fa007a3d6009818175486a24bfa3014c806c5 AS runtime
+
+ARG REFLO_SOURCE_COMMIT
+RUN printf '%s' "${REFLO_SOURCE_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'
+LABEL org.opencontainers.image.source="https://github.com/deepessh/reflo-learning" \
+      org.opencontainers.image.revision="${REFLO_SOURCE_COMMIT}" \
+      org.opencontainers.image.version="isolated-ingestion-v1"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      liblept5=1.82.0-3build1 \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+COPY --from=build /opt/build/worker/target/isolated-ingestion-worker.jar /opt/reflo/worker.jar
+COPY --from=build /opt/clamav/bin /usr/local/bin
+COPY --from=build /opt/clamav/lib /usr/local/lib
+COPY --from=build /opt/tesseract/bin/tesseract /usr/local/bin/tesseract
+COPY --from=build /opt/tessdata /opt/tessdata
+COPY --from=build /opt/licenses /opt/reflo/licenses
+COPY manifest.json /opt/reflo/worker-manifest.json
+
+ENV JAVA_TOOL_OPTIONS="-Djava.awt.headless=true" \
+    LD_LIBRARY_PATH="/usr/local/lib" \
+    TESSDATA_PREFIX="/opt/tessdata"
+
+RUN ldconfig \
+    && java -version \
+    && clamscan --version \
+    && sigtool --version \
+    && tesseract --version \
+    && test ! -e /usr/local/bin/freshclam \
+    && test ! -e /opt/java/openjdk/bin/javac \
+    && test ! -e /usr/bin/curl \
+    && test ! -e /usr/bin/gcc \
+    && test ! -e /usr/bin/cmake \
+    && test ! -e /usr/bin/mvn \
+    && find /opt/reflo /opt/tessdata /usr/local/bin /usr/local/lib \
+      -xdev -type d -exec chmod 0555 {} + \
+    && find /opt/reflo /opt/tessdata /usr/local/bin /usr/local/lib \
+      -xdev -type f -exec chmod go-w {} +
+
+USER 65532:65532
+ENTRYPOINT ["java", "-jar", "/opt/reflo/worker.jar"]

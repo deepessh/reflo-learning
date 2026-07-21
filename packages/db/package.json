@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@reflo/accounts": "workspace:*",
+    "@reflo/ingestion": "workspace:*",
     "dbmate": "2.34.1",
     "pg": "8.16.3"
   },

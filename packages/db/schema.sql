@@ -203,6 +203,37 @@ END
 $$;
 
 
+--
+-- Name: reflo_resolve_ingestion_authorization(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_resolve_ingestion_authorization(candidate_operation_id uuid) RETURNS TABLE(actor_id uuid, owner_scope_id uuid)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+  SELECT ingestion.requested_by_user_id, ingestion.owner_scope_id
+  FROM ingestion_operation AS ingestion
+  JOIN async_operation AS operation
+    ON operation.owner_scope_id = ingestion.owner_scope_id
+   AND operation.id = ingestion.operation_id
+  JOIN source_document AS source
+    ON source.owner_scope_id = ingestion.owner_scope_id
+   AND source.id = ingestion.source_document_id
+  JOIN owner_scope AS scope ON scope.id = ingestion.owner_scope_id
+  JOIN app_user AS actor ON actor.id = ingestion.requested_by_user_id
+  JOIN scope_membership AS membership
+    ON membership.owner_scope_id = ingestion.owner_scope_id
+   AND membership.user_id = ingestion.requested_by_user_id
+  WHERE ingestion.operation_id = candidate_operation_id
+    AND operation.operation_name = 'ingestion.parse'
+    AND operation.operation_version = 1
+    AND scope.status = 'active'
+    AND actor.status = 'active'
+    AND membership.role = 'owner'
+    AND membership.revoked_at IS NULL
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -604,6 +635,21 @@ CREATE TABLE public.inbox_claim (
 );
 
 ALTER TABLE ONLY public.inbox_claim FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ingestion_operation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ingestion_operation (
+    operation_id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    requested_by_user_id uuid NOT NULL,
+    source_document_id uuid NOT NULL,
+    input_sha256 text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ingestion_operation_input_sha256_check CHECK ((input_sha256 ~ '^[a-f0-9]{64}$'::text))
+);
 
 
 --
@@ -1233,6 +1279,22 @@ ALTER TABLE ONLY public.inbox_claim
 
 
 --
+-- Name: ingestion_operation ingestion_operation_owner_scope_id_operation_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingestion_operation
+    ADD CONSTRAINT ingestion_operation_owner_scope_id_operation_id_key UNIQUE (owner_scope_id, operation_id);
+
+
+--
+-- Name: ingestion_operation ingestion_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingestion_operation
+    ADD CONSTRAINT ingestion_operation_pkey PRIMARY KEY (operation_id);
+
+
+--
 -- Name: knowledge_state knowledge_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1497,6 +1559,13 @@ CREATE INDEX auth_login_token_identity_idx ON public.auth_login_token USING btre
 --
 
 CREATE INDEX auth_session_user_active_idx ON public.auth_session USING btree (user_id, absolute_expires_at) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: ingestion_operation_source_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ingestion_operation_source_idx ON public.ingestion_operation USING btree (owner_scope_id, source_document_id);
 
 
 --
@@ -1817,6 +1886,30 @@ ALTER TABLE ONLY public.inbox_claim
 
 
 --
+-- Name: ingestion_operation ingestion_operation_owner_scope_id_operation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingestion_operation
+    ADD CONSTRAINT ingestion_operation_owner_scope_id_operation_id_fkey FOREIGN KEY (owner_scope_id, operation_id) REFERENCES public.async_operation(owner_scope_id, id);
+
+
+--
+-- Name: ingestion_operation ingestion_operation_owner_scope_id_requested_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingestion_operation
+    ADD CONSTRAINT ingestion_operation_owner_scope_id_requested_by_user_id_fkey FOREIGN KEY (owner_scope_id, requested_by_user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: ingestion_operation ingestion_operation_owner_scope_id_source_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingestion_operation
+    ADD CONSTRAINT ingestion_operation_owner_scope_id_source_document_id_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
+
+
+--
 -- Name: knowledge_state knowledge_state_owner_scope_id_concept_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2095,6 +2188,19 @@ ALTER TABLE public.delivery_item ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.inbox_claim ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ingestion_operation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.ingestion_operation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ingestion_operation ingestion_operation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY ingestion_operation_active_membership ON public.ingestion_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
 
 --
 -- Name: knowledge_state; Type: ROW SECURITY; Schema: public; Owner: -
@@ -2402,4 +2508,5 @@ ALTER TABLE public.study_session ENABLE ROW LEVEL SECURITY;
 INSERT INTO public.schema_migrations (version) VALUES
     ('20260719000100'),
     ('20260720000100'),
-    ('20260720000200');
+    ('20260720000200'),
+    ('20260721000100');

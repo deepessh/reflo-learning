@@ -18,8 +18,6 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.apache.tika.parser.epub.EpubParser;
-import org.apache.tika.parser.microsoft.ooxml.OOXMLParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -73,10 +71,7 @@ final class WorkerMainTest {
             document.createParagraph().createRun().setText("Grounded DOCX lesson text");
             document.write(output);
         }
-        WorkerMain.Parsed result = WorkerMain.parseReflowable(
-                docx,
-                "docx",
-                new OOXMLParser());
+        WorkerMain.Parsed result = WorkerMain.parseDocx(docx);
         assertNull(result.pageCount());
         assertEquals("digital", result.scan().classification());
         assertTrue(result.blocks().size() >= 1);
@@ -86,13 +81,14 @@ final class WorkerMainTest {
     void parsesEpubWithoutInventingPages() throws Exception {
         Path epub = temporaryDirectory.resolve("fixture.epub");
         writeEpub(epub);
-        WorkerMain.Parsed result = WorkerMain.parseReflowable(
-                epub,
-                "epub",
-                new EpubParser());
+        WorkerMain.Parsed result = WorkerMain.parseEpub(epub);
         assertNull(result.pageCount());
         assertEquals("digital", result.scan().classification());
-        assertTrue(result.blocks().size() >= 1);
+        assertEquals(2, result.blocks().size());
+        assertEquals("OPS/text/chapter.xhtml", result.blocks().get(0).locator().get("resource"));
+        assertEquals(0, result.blocks().get(0).locator().get("spineItem"));
+        assertEquals("OPS/appendix.xhtml", result.blocks().get(1).locator().get("resource"));
+        assertEquals(1, result.blocks().get(1).locator().get("spineItem"));
     }
 
     private static void writeEpub(Path target) throws IOException {
@@ -111,20 +107,27 @@ final class WorkerMainTest {
             add(zip, "META-INF/container.xml", """
                     <?xml version="1.0"?>
                     <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-                      <rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+                      <rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
                     </container>
                     """);
-            add(zip, "content.opf", """
+            add(zip, "OPS/content.opf", """
                     <?xml version="1.0" encoding="UTF-8"?>
                     <package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id">
                       <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">fixture</dc:identifier><dc:title>Fixture</dc:title><dc:language>en</dc:language></metadata>
-                      <manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest>
-                      <spine><itemref idref="chapter"/></spine>
+                      <manifest>
+                        <item id="chapter" href="text/chapter.xhtml" media-type="application/xhtml+xml"/>
+                        <item id="appendix" href="appendix.xhtml" media-type="application/xhtml+xml"/>
+                      </manifest>
+                      <spine><itemref idref="chapter"/><itemref idref="appendix"/></spine>
                     </package>
                     """);
-            add(zip, "chapter.xhtml", """
+            add(zip, "OPS/text/chapter.xhtml", """
                     <?xml version="1.0" encoding="UTF-8"?>
                     <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Lesson</title></head><body><p>Grounded EPUB lesson text</p></body></html>
+                    """);
+            add(zip, "OPS/appendix.xhtml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>Grounded appendix text</p></body></html>
                     """);
         }
     }

@@ -50,6 +50,16 @@ export interface QuarantineObjectPort {
   ): Promise<StagedUpload>;
 }
 
+export interface QuarantineDownloadPort {
+  getObject(input: {
+    readonly maximumBytes: number;
+    readonly objectKey: string;
+  }): Promise<{
+    readonly bytes: Uint8Array;
+    readonly objectKey: string;
+  }>;
+}
+
 export interface MalwareScannerPort {
   currentSnapshot(): Promise<MalwareSignatureSnapshot | null>;
   scan(
@@ -71,6 +81,19 @@ export interface NormalizedDocumentPublisherPort {
     readonly command: IngestionCommand;
     readonly document: NormalizedDocument;
   }): Promise<NormalizedDocumentArtifact>;
+}
+
+export interface InternalArtifactObjectPort {
+  /** Creates one immutable object or verifies the already-present object. */
+  putIfAbsent(input: {
+    readonly bytes: Uint8Array;
+    readonly objectKey: string;
+    readonly sha256: string;
+  }): Promise<{
+    readonly byteLength: number;
+    readonly objectKey: string;
+    readonly sha256: string;
+  }>;
 }
 
 export interface ProcessResult {

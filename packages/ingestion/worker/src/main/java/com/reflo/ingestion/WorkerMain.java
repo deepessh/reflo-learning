@@ -17,6 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.ImageType;
@@ -35,6 +39,10 @@ import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 public final class WorkerMain {
     private static final String CONTRACT_VERSION = "normalized-document-v1";
@@ -53,6 +61,7 @@ public final class WorkerMain {
     private WorkerMain() {}
 
     public static void main(String[] args) {
+        System.setProperty("java.awt.headless", "true");
         try {
             run();
         } catch (WorkerFailure failure) {
@@ -83,8 +92,8 @@ public final class WorkerMain {
 
         Parsed parsed = switch (environment.documentKind) {
             case "pdf" -> parsePdf(input);
-            case "epub" -> parseReflowable(input, "epub", new EpubParser());
-            case "docx" -> parseReflowable(input, "docx", new OOXMLParser());
+            case "epub" -> parseEpub(input);
+            case "docx" -> parseDocx(input);
             default -> throw new WorkerFailure("unsupported_type");
         };
         NormalizedDocument document = new NormalizedDocument(
@@ -155,27 +164,18 @@ public final class WorkerMain {
         }
     }
 
-    static Parsed parseReflowable(Path input, String kind, Parser parser)
-            throws Exception {
+    static Parsed parseDocx(Path input) throws Exception {
         BodyContentHandler handler = new BodyContentHandler(-1);
-        parseWithTika(input, parser, handler, restrictedContext(null));
+        parseWithTika(input, new OOXMLParser(), handler, restrictedContext(null));
         List<Block> blocks = new ArrayList<>();
         int canonicalOffset = 0;
         for (String paragraph : paragraphs(handler.toString())) {
             Map<String, Object> locator = new LinkedHashMap<>();
-            if (kind.equals("epub")) {
-                locator.put("kind", "epub");
-                locator.put("page", null);
-                locator.put("resource", "epub-root");
-                locator.put("sectionPath", List.of());
-                locator.put("spineItem", 0);
-            } else {
-                locator.put("bodyElement", blocks.size());
-                locator.put("headingPath", List.of());
-                locator.put("kind", "docx");
-                locator.put("page", null);
-                locator.put("section", 0);
-            }
+            locator.put("bodyElement", blocks.size());
+            locator.put("headingPath", List.of());
+            locator.put("kind", "docx");
+            locator.put("page", null);
+            locator.put("section", 0);
             blocks.add(block(blocks.size(), canonicalOffset, paragraph, locator));
             canonicalOffset += paragraph.length() + 2;
         }
@@ -184,6 +184,149 @@ public final class WorkerMain {
                 List.of(),
                 null,
                 new Scan(List.of(), "digital", RASTER_DPI));
+    }
+
+    static Parsed parseEpub(Path input) throws Exception {
+        parseWithTika(
+                input,
+                new EpubParser(),
+                new BodyContentHandler(-1),
+                restrictedContext(null));
+        List<Block> blocks = new ArrayList<>();
+        int canonicalOffset = 0;
+        try (ZipFile archive = new ZipFile(input.toFile(), StandardCharsets.UTF_8)) {
+            Document container = parseXml(requiredEntry(archive, "META-INF/container.xml"));
+            NodeList rootfiles = container.getElementsByTagNameNS("*", "rootfile");
+            if (rootfiles.getLength() != 1) {
+                throw new WorkerFailure("malformed_document");
+            }
+            String packagePath = safeResourcePath(
+                    null,
+                    ((Element) rootfiles.item(0)).getAttribute("full-path"));
+            Document packageDocument = parseXml(requiredEntry(archive, packagePath));
+            Map<String, String> manifest = new LinkedHashMap<>();
+            NodeList items = packageDocument.getElementsByTagNameNS("*", "item");
+            for (int index = 0; index < items.getLength(); index++) {
+                Element item = (Element) items.item(index);
+                String id = item.getAttribute("id");
+                String mediaType = item.getAttribute("media-type");
+                if (!id.isBlank() && "application/xhtml+xml".equals(mediaType)) {
+                    if (manifest.put(id, item.getAttribute("href")) != null) {
+                        throw new WorkerFailure("malformed_document");
+                    }
+                }
+            }
+            NodeList spineItems = packageDocument.getElementsByTagNameNS("*", "itemref");
+            if (spineItems.getLength() < 1 || spineItems.getLength() > 10_000) {
+                throw new WorkerFailure("malformed_document");
+            }
+            for (int spineIndex = 0; spineIndex < spineItems.getLength(); spineIndex++) {
+                Element item = (Element) spineItems.item(spineIndex);
+                String href = manifest.get(item.getAttribute("idref"));
+                if (href == null) {
+                    throw new WorkerFailure("malformed_document");
+                }
+                String resource = safeResourcePath(packagePath, href);
+                Document content = parseXml(requiredEntry(archive, resource));
+                String text = extractDocumentText(content);
+                for (String paragraph : paragraphs(text)) {
+                    Map<String, Object> locator = new LinkedHashMap<>();
+                    locator.put("kind", "epub");
+                    locator.put("page", null);
+                    locator.put("resource", resource);
+                    locator.put("sectionPath", List.of());
+                    locator.put("spineItem", spineIndex);
+                    blocks.add(block(blocks.size(), canonicalOffset, paragraph, locator));
+                    canonicalOffset += paragraph.length() + 2;
+                }
+            }
+        } catch (WorkerFailure error) {
+            throw error;
+        } catch (IOException | SAXException error) {
+            throw new WorkerFailure("malformed_document");
+        }
+        return new Parsed(
+                blocks,
+                List.of(),
+                null,
+                new Scan(List.of(), "digital", RASTER_DPI));
+    }
+
+    private static InputStream requiredEntry(ZipFile archive, String name)
+            throws IOException, WorkerFailure {
+        ZipEntry entry = archive.getEntry(name);
+        if (entry == null || entry.isDirectory() || entry.getSize() > 100L * 1024L * 1024L) {
+            throw new WorkerFailure("malformed_document");
+        }
+        return archive.getInputStream(entry);
+    }
+
+    private static Document parseXml(InputStream stream)
+            throws Exception {
+        try (stream) {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            return factory.newDocumentBuilder().parse(stream);
+        }
+    }
+
+    private static String safeResourcePath(String packagePath, String href)
+            throws WorkerFailure {
+        String withoutFragment = href.split("#", 2)[0];
+        if (withoutFragment.isBlank()
+                || withoutFragment.contains("?")
+                || withoutFragment.contains("\\")
+                || withoutFragment.startsWith("/")
+                || withoutFragment.matches("^[A-Za-z][A-Za-z0-9+.-]*:.*")) {
+            throw new WorkerFailure("malformed_document");
+        }
+        Path base = packagePath == null
+                ? Path.of("")
+                : Path.of(packagePath).getParent();
+        Path resolved = (base == null ? Path.of("") : base)
+                .resolve(withoutFragment)
+                .normalize();
+        String resource = resolved.toString().replace('\\', '/');
+        if (resource.isBlank()
+                || resource.equals("..")
+                || resource.startsWith("../")
+                || resource.contains("/../")) {
+            throw new WorkerFailure("malformed_document");
+        }
+        return resource;
+    }
+
+    private static String extractDocumentText(Document document) {
+        StringBuilder text = new StringBuilder();
+        appendText(document.getDocumentElement(), text);
+        return text.toString();
+    }
+
+    private static void appendText(Node node, StringBuilder output) {
+        if (node.getNodeType() == Node.TEXT_NODE) {
+            output.append(node.getNodeValue());
+            return;
+        }
+        NodeList children = node.getChildNodes();
+        for (int index = 0; index < children.getLength(); index++) {
+            appendText(children.item(index), output);
+        }
+        String name = node.getLocalName();
+        if (name != null && Set.of(
+                "address", "article", "aside", "blockquote", "div", "figcaption",
+                "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+                "li", "main", "nav", "p", "pre", "section", "table", "tr")
+                .contains(name.toLowerCase())) {
+            output.append("\n\n");
+        }
     }
 
     private static void parseWithTika(

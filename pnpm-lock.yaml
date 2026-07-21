@@ -171,6 +171,9 @@ importers:
       "@reflo/accounts":
         specifier: workspace:*
         version: link:../accounts
+      "@reflo/ingestion":
+        specifier: workspace:*
+        version: link:../ingestion
       dbmate:
         specifier: 2.34.1
         version: 2.34.1

@@ -103,6 +103,29 @@ describe("IngestionSupervisor", () => {
     expect(harness.worker.requests).toHaveLength(0);
   });
 
+  it("reauthorizes after parsing and before publishing", async () => {
+    const harness = createHarness();
+    const resolve = harness.operations.resolveAuthorizedSource.bind(
+      harness.operations,
+    );
+    let resolveCalls = 0;
+    harness.operations.resolveAuthorizedSource = async (command) => {
+      resolveCalls += 1;
+      return resolveCalls === 1 ? resolve(command) : null;
+    };
+
+    await expect(
+      harness.supervisor.execute(harness.command),
+    ).resolves.toMatchObject({
+      outcome: {
+        failure: { code: "authorization_denied", retryable: false },
+        kind: "failed",
+      },
+    });
+    expect(harness.worker.requests).toHaveLength(1);
+    expect(harness.publisher.published).toHaveLength(0);
+  });
+
   it("fails closed for missing, invalid, future, or older-than-24h scan databases", async () => {
     for (const snapshot of [
       null,
@@ -252,6 +275,7 @@ function createHarness(
       sourceDocumentId: source.sourceDocumentId,
     },
     operations,
+    publisher,
     quarantine,
     scanner,
     supervisor,

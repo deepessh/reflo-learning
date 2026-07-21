@@ -247,6 +247,13 @@ test(
                      'dev/ingestion.parse/v1/a', 'succeeded', now())`,
             [ids.scopeA],
           );
+          await client.query(
+            `INSERT INTO ingestion_operation
+               (operation_id, owner_scope_id, requested_by_user_id,
+                source_document_id, input_sha256)
+             VALUES ('00000000-0000-4000-8000-000000000601', $1, $2, $3, $4)`,
+            [ids.scopeA, ids.userA, ids.documentA, "a".repeat(64)],
+          );
           await expectSqlState(
             client,
             "23514",
@@ -275,6 +282,10 @@ test(
           await client.query(`SET LOCAL ROLE ${runtimeRole}`);
           let result = await client.query("SELECT id FROM course ORDER BY id");
           assert.deepEqual(result.rows, []);
+          result = await client.query(
+            "SELECT operation_id FROM ingestion_operation ORDER BY operation_id",
+          );
+          assert.deepEqual(result.rows, []);
           await client.query("ROLLBACK");
 
           await client.query("BEGIN");
@@ -288,6 +299,12 @@ test(
           );
           result = await client.query("SELECT id FROM course ORDER BY id");
           assert.deepEqual(result.rows, [{ id: ids.courseA }]);
+          result = await client.query(
+            "SELECT operation_id FROM ingestion_operation ORDER BY operation_id",
+          );
+          assert.deepEqual(result.rows, [
+            { operation_id: "00000000-0000-4000-8000-000000000601" },
+          ]);
           await assert.rejects(
             client.query(
               `INSERT INTO course (id, owner_scope_id, source_document_id, title, status)

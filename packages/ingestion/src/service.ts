@@ -85,6 +85,11 @@ export class IngestionSupervisor {
         inputSha256: staged.sha256,
       });
       assertPageWithinLimit(document);
+      const stillAuthorized =
+        await this.dependencies.operations.resolveAuthorizedSource(command);
+      if (stillAuthorized === null) {
+        throw new IngestionError("authorization_denied");
+      }
       const artifact = await this.dependencies.publisher.publish({
         command,
         document,

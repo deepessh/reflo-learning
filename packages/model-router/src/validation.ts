@@ -50,24 +50,14 @@ export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
     }),
   ),
   "curriculum.structure.v1": validator<"curriculum.structure.v1">(
-    (value, input) =>
-      isRecordWith(value, {
-        chapters: (chapters) =>
-          Array.isArray(chapters) &&
-          chapters.length > 0 &&
-          chapters.every((entry) =>
-            isRecordWith(entry, {
-              conceptNames: isNonEmptyStringArray,
-              sourceSpanIds: (sourceSpanIds) =>
-                isAuthorizedIds(sourceSpanIds, sourceIds(input.sourceSpans)),
-              title: isString,
-            }),
-          ),
-      }),
+    isCurriculumStructureResult,
   ),
-  "embedding.document.v1":
-    validator<"embedding.document.v1">(isEmbeddingResult),
-  "embedding.query.v1": validator<"embedding.query.v1">(isEmbeddingResult),
+  "embedding.document.v1": validator<"embedding.document.v1">((value, input) =>
+    isEmbeddingResult(value, input, "document"),
+  ),
+  "embedding.query.v1": validator<"embedding.query.v1">((value, input) =>
+    isEmbeddingResult(value, input, "query"),
+  ),
   "lesson.audio-script.v1": validator<"lesson.audio-script.v1">(
     (value, input) =>
       isRecordWith(value, {
@@ -93,8 +83,21 @@ function validator<Task extends ModelTaskId>(
   return validate as Validator;
 }
 
-function isEmbeddingResult(value: unknown, input: EmbeddingInput): boolean {
+function isEmbeddingResult(
+  value: unknown,
+  input: EmbeddingInput,
+  expectedInputMode: "document" | "query",
+): boolean {
   return isRecordWith(value, {
+    metadata: (metadata) =>
+      isRecordWith(metadata, {
+        dimensions: (dimensions) => dimensions === EMBEDDING_V1_DIMENSIONS,
+        endpoint: isSafeProviderMetadata,
+        inputMode: (inputMode) => inputMode === expectedInputMode,
+        providerIdentifier: isSafeProviderMetadata,
+        providerRequestId: isSafeProviderMetadata,
+        region: isSafeProviderMetadata,
+      }),
     vectors: (vectors) =>
       input.texts.length > 0 &&
       Array.isArray(vectors) &&
@@ -106,6 +109,55 @@ function isEmbeddingResult(value: unknown, input: EmbeddingInput): boolean {
           vector.every(isFiniteNumber),
       ),
   });
+}
+
+function isCurriculumStructureResult(
+  value: unknown,
+  input: ModelTaskInput<"curriculum.structure.v1">,
+): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ["chapters"])) {
+    return false;
+  }
+  if (!Array.isArray(value.chapters) || value.chapters.length === 0) {
+    return false;
+  }
+  const authorizedSpanIds = sourceIds(input.sourceSpans);
+  const seenConceptKeys = new Set<string>();
+  for (const chapter of value.chapters) {
+    if (
+      !isRecord(chapter) ||
+      !hasExactKeys(chapter, ["concepts", "sourceSpanIds", "title"]) ||
+      !isString(chapter.title) ||
+      !isAuthorizedIds(chapter.sourceSpanIds, authorizedSpanIds) ||
+      !Array.isArray(chapter.concepts) ||
+      chapter.concepts.length === 0
+    ) {
+      return false;
+    }
+    for (const concept of chapter.concepts) {
+      if (
+        !isRecord(concept) ||
+        !hasExactKeys(concept, [
+          "key",
+          "name",
+          "prerequisiteKeys",
+          "sourceSpanIds",
+        ]) ||
+        !isSafeConceptKey(concept.key) ||
+        seenConceptKeys.has(concept.key) ||
+        !isString(concept.name) ||
+        !Array.isArray(concept.prerequisiteKeys) ||
+        concept.prerequisiteKeys.some(
+          (key) => !isSafeConceptKey(key) || !seenConceptKeys.has(key),
+        ) ||
+        !isAuthorizedIds(concept.sourceSpanIds, authorizedSpanIds)
+      ) {
+        return false;
+      }
+      seenConceptKeys.add(concept.key);
+    }
+  }
+  return true;
 }
 
 function isLessonResult(value: unknown, input: LessonInput): boolean {
@@ -162,6 +214,19 @@ function sourceIds(spans: readonly AuthorizedSourceSpan[]): readonly string[] {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isSafeConceptKey(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
+}
+
+function isSafeProviderMetadata(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    !/[\r\n]/.test(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

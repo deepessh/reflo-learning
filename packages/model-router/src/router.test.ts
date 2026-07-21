@@ -16,7 +16,14 @@ describe("typed model router", () => {
           value: {
             chapters: [
               {
-                conceptNames: ["Virtual networks"],
+                concepts: [
+                  {
+                    key: "virtual-networks",
+                    name: "Virtual networks",
+                    prerequisiteKeys: [],
+                    sourceSpanIds: ["span-1"],
+                  },
+                ],
                 sourceSpanIds: ["span-1"],
                 title: "Networking",
               },
@@ -200,7 +207,14 @@ describe("typed model router", () => {
       {
         chapters: [
           {
-            conceptNames: ["Networking"],
+            concepts: [
+              {
+                key: "networking",
+                name: "Networking",
+                prerequisiteKeys: [],
+                sourceSpanIds: ["span-1"],
+              },
+            ],
             sourceSpanIds: ["span-not-authorized"],
             title: "Chapter",
           },
@@ -209,7 +223,14 @@ describe("typed model router", () => {
       {
         chapters: [
           {
-            conceptNames: ["Networking"],
+            concepts: [
+              {
+                key: "networking",
+                name: "Networking",
+                prerequisiteKeys: [],
+                sourceSpanIds: ["span-1"],
+              },
+            ],
             providerPayload: "must not persist",
             sourceSpanIds: ["span-1"],
             title: "Chapter",
@@ -280,7 +301,15 @@ describe("typed model router", () => {
     );
     for (const vectors of [[], [[0.25, 0.5]], [validVector, validVector]]) {
       const scripted = createScriptedAdapterRegistry({
-        "embedding.document.v1": [{ type: "result", value: { vectors } }],
+        "embedding.document.v1": [
+          {
+            type: "result",
+            value: {
+              metadata: embeddingMetadata("document"),
+              vectors,
+            },
+          },
+        ],
       });
       const router = createModelRouter({
         adapters: scripted.adapters,
@@ -298,7 +327,13 @@ describe("typed model router", () => {
 
     const scripted = createScriptedAdapterRegistry({
       "embedding.document.v1": [
-        { type: "result", value: { vectors: [validVector] } },
+        {
+          type: "result",
+          value: {
+            metadata: embeddingMetadata("document"),
+            vectors: [validVector],
+          },
+        },
       ],
     });
     const router = createModelRouter({
@@ -312,6 +347,68 @@ describe("typed model router", () => {
         { deadlineMs: 1_000 },
       ),
     ).resolves.toMatchObject({ value: { vectors: [validVector] } });
+
+    const wrongMode = createScriptedAdapterRegistry({
+      "embedding.document.v1": [
+        {
+          type: "result",
+          value: {
+            metadata: embeddingMetadata("query"),
+            vectors: [validVector],
+          },
+        },
+      ],
+    });
+    await expect(
+      createModelRouter({
+        adapters: wrongMode.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }).execute(
+        "embedding.document.v1",
+        { texts: ["one source chunk"] },
+        { deadlineMs: 1_000 },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_result" });
+  });
+
+  it("requires concept provenance and backward-only prerequisite keys", async () => {
+    const scripted = createScriptedAdapterRegistry({
+      "curriculum.structure.v1": [
+        {
+          type: "result",
+          value: {
+            chapters: [
+              {
+                concepts: [
+                  {
+                    key: "advanced",
+                    name: "Advanced",
+                    prerequisiteKeys: ["not-seen-yet"],
+                    sourceSpanIds: ["span-1"],
+                  },
+                ],
+                sourceSpanIds: ["span-1"],
+                title: "Chapter",
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await expect(
+      createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }).execute(
+        "curriculum.structure.v1",
+        {
+          courseTitle: "Course",
+          sourceSpans: [{ id: "span-1", text: "Authorized source" }],
+        },
+        { deadlineMs: 1_000 },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_result" });
   });
 
   it("bounds a never-settling provider call by the caller deadline and aborts it", async () => {
@@ -373,7 +470,14 @@ describe("typed model router", () => {
           value: {
             chapters: [
               {
-                conceptNames: ["Concept"],
+                concepts: [
+                  {
+                    key: "concept",
+                    name: "Concept",
+                    prerequisiteKeys: [],
+                    sourceSpanIds: ["span-1"],
+                  },
+                ],
                 sourceSpanIds: ["span-1"],
                 title: "Chapter",
               },
@@ -511,6 +615,17 @@ describe("trace allowlist", () => {
     }
   });
 });
+
+function embeddingMetadata(inputMode: "document" | "query") {
+  return {
+    dimensions: EMBEDDING_V1_DIMENSIONS,
+    endpoint: "model-studio.example.invalid",
+    inputMode,
+    providerIdentifier: "model-studio",
+    providerRequestId: "request-fixture-1",
+    region: "fixture-region-1",
+  } as const;
+}
 
 function monotonicClock(): () => number {
   let value = Date.parse("2026-07-19T00:00:00.000Z");

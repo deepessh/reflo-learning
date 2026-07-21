@@ -22,6 +22,8 @@ import type {
   QuarantineObjectPort,
 } from "./ports.js";
 
+export * from "./testing-fixtures.js";
+
 export class FixedIngestionClock implements IngestionClock {
   constructor(private readonly value: Date) {}
 

@@ -2,6 +2,7 @@ import pg, { type PoolClient } from "pg";
 
 export { PostgresIngestionOperationStore } from "./ingestion-operation-store.js";
 export type { PostgresIngestionOperationStoreOptions } from "./ingestion-operation-store.js";
+export { PostgresContentRepository } from "./content-repository.js";
 
 import type {
   AccountRepository,
@@ -324,6 +325,13 @@ export class PostgresAccountRepository implements AccountRepository {
          LEFT JOIN chapter
            ON chapter.owner_scope_id = course.owner_scope_id
           AND chapter.course_id = course.id
+          AND (
+            chapter.curriculum_generation_id = course.active_curriculum_generation_id
+            OR (
+              chapter.curriculum_generation_id IS NULL
+              AND course.active_curriculum_generation_id IS NULL
+            )
+          )
          WHERE course.owner_scope_id = $1
            AND course.status <> 'archived'
          GROUP BY course.id, source_document.parse_status

@@ -203,6 +203,118 @@ test(
       });
 
       await suite.test(
+        "versions source spans, embeddings, and source-backed curricula",
+        async () => {
+          const span = "00000000-0000-5000-8000-000000000311";
+          const embeddingGeneration = "00000000-0000-5000-8000-000000000312";
+          const curriculumGeneration = "00000000-0000-5000-8000-000000000313";
+          const chapter = "00000000-0000-5000-8000-000000000314";
+          const concept = "00000000-0000-5000-8000-000000000315";
+          await client.query(
+            `INSERT INTO source_span
+               (id, owner_scope_id, source_document_id, canonical_text,
+                text_hash, page_start, page_end, section_path,
+                canonical_start, canonical_end, parser_version,
+                chunker_version, tokenizer_version, contract_version,
+                chunk_order, native_mappings, embedding_input,
+                embedding_input_hash, embedding_input_profile_version)
+             VALUES ($1, $2, $3, 'Grounded text', $4, 1, 1,
+                     ARRAY['Introduction'], 0, 13, 'parser-v1', 'chunk-v1',
+                     'reflo-unicode-tokenizer-v1', 'source-span-v1', 0,
+                     '[]'::jsonb, '[Section: Introduction] Grounded text',
+                     $5, 'embedding-input-v1')`,
+            [span, ids.scopeA, ids.documentA, "a".repeat(64), "b".repeat(64)],
+          );
+          await client.query(
+            `INSERT INTO source_embedding_generation
+               (id, owner_scope_id, source_document_id, profile_version,
+                dimensions, input_mode, adapter_version, effective_model,
+                effective_model_version, provider_identifier,
+                provider_request_ids, region, endpoint, span_count, status,
+                activated_at)
+             VALUES ($1, $2, $3, 'embedding-v1', 1024, 'document',
+                     'adapter-v1', 'text-embedding-v4', 'canary-v1',
+                     'alibaba-model-studio', '["request-1"]'::jsonb,
+                     'ap-southeast-1', 'https://workspace.invalid', 1,
+                     'active', now())`,
+            [embeddingGeneration, ids.scopeA, ids.documentA],
+          );
+          await client.query(
+            `INSERT INTO source_embedding_generation_span
+               (owner_scope_id, embedding_generation_id, source_span_id,
+                span_order, embedding_input_hash)
+             VALUES ($1, $2, $3, 0, $4)`,
+            [ids.scopeA, embeddingGeneration, span, "b".repeat(64)],
+          );
+          await client.query(
+            `UPDATE source_document
+             SET active_embedding_generation_id = $1
+             WHERE owner_scope_id = $2 AND id = $3`,
+            [embeddingGeneration, ids.scopeA, ids.documentA],
+          );
+          await client.query(
+            `INSERT INTO curriculum_generation
+               (id, owner_scope_id, course_id, source_document_id,
+                embedding_generation_id, generation_version, result_hash,
+                model_provenance, structure, status, activated_at)
+             VALUES ($1, $2, $3, $4, $5, 'curriculum-v1', $6,
+                     '{}'::jsonb, '{"chapters":[]}'::jsonb, 'active', now())`,
+            [
+              curriculumGeneration,
+              ids.scopeA,
+              ids.courseA,
+              ids.documentA,
+              embeddingGeneration,
+              "c".repeat(64),
+            ],
+          );
+          await client.query(
+            `UPDATE course SET active_curriculum_generation_id = $1
+             WHERE owner_scope_id = $2 AND id = $3`,
+            [curriculumGeneration, ids.scopeA, ids.courseA],
+          );
+          await client.query(
+            `INSERT INTO chapter
+               (id, owner_scope_id, course_id, chapter_order, title,
+                generation_status, curriculum_generation_id)
+             VALUES ($1, $2, $3, 1, 'Introduction', 'ready', $4)`,
+            [chapter, ids.scopeA, ids.courseA, curriculumGeneration],
+          );
+          await client.query(
+            `INSERT INTO concept
+               (id, owner_scope_id, chapter_id, name, generation_version,
+                curriculum_generation_id, concept_key, concept_order)
+             VALUES ($1, $2, $3, 'Grounding', 'curriculum-v1', $4,
+                     'grounding', 0)`,
+            [concept, ids.scopeA, chapter, curriculumGeneration],
+          );
+          await client.query(
+            `INSERT INTO concept_source_span
+               (owner_scope_id, concept_id, source_span_id)
+             VALUES ($1, $2, $3)`,
+            [ids.scopeA, concept, span],
+          );
+
+          await expectSqlState(
+            client,
+            "23503",
+            `INSERT INTO source_embedding_generation
+               (id, owner_scope_id, source_document_id, profile_version,
+                dimensions, input_mode, adapter_version, effective_model,
+                effective_model_version, provider_identifier,
+                provider_request_ids, region, endpoint, span_count, status)
+             VALUES ('00000000-0000-5000-8000-000000000399', $1, $2,
+                     'embedding-v1', 1024, 'document', 'adapter-v1',
+                     'text-embedding-v4', 'canary-v1',
+                     'alibaba-model-studio', '[]'::jsonb,
+                     'ap-southeast-1', 'https://workspace.invalid', 1,
+                     'building')`,
+            [ids.scopeA, ids.documentB],
+          );
+        },
+      );
+
+      await suite.test(
         "enforces provider and logical idempotency uniqueness",
         async () => {
           const channel = "00000000-0000-4000-8000-000000000501";
@@ -304,6 +416,12 @@ test(
           );
           assert.deepEqual(result.rows, [
             { operation_id: "00000000-0000-4000-8000-000000000601" },
+          ]);
+          result = await client.query(
+            "SELECT id FROM source_embedding_generation ORDER BY id",
+          );
+          assert.deepEqual(result.rows, [
+            { id: "00000000-0000-5000-8000-000000000312" },
           ]);
           await assert.rejects(
             client.query(

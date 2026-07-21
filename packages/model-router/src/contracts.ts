@@ -69,7 +69,12 @@ export interface VideoGenerationInput {
 
 export interface CurriculumStructureResult {
   readonly chapters: readonly {
-    readonly conceptNames: readonly string[];
+    readonly concepts: readonly {
+      readonly key: string;
+      readonly name: string;
+      readonly prerequisiteKeys: readonly string[];
+      readonly sourceSpanIds: readonly string[];
+    }[];
     readonly sourceSpanIds: readonly string[];
     readonly title: string;
   }[];
@@ -115,6 +120,14 @@ export type TutorAnswerResult =
     };
 
 export interface EmbeddingResult {
+  readonly metadata: {
+    readonly dimensions: 1024;
+    readonly endpoint: string;
+    readonly inputMode: "document" | "query";
+    readonly providerIdentifier: string;
+    readonly providerRequestId: string;
+    readonly region: string;
+  };
   readonly vectors: readonly (readonly number[])[];
 }
 

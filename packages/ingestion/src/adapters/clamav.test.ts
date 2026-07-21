@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -116,7 +116,7 @@ async function snapshotFixture(): Promise<{
         },
       ],
       publishedAt: "2026-07-21T00:00:00.000Z",
-      signatureAlgorithm: "ed25519",
+      signatureProfile: "test-ed25519-v1",
       signatureVersion: "daily-27100",
     }),
     "utf8",
@@ -135,10 +135,15 @@ async function snapshotFixture(): Promise<{
       return new ClamAvScannerAdapter({
         databaseDirectory: directory,
         executable: "clamscan",
+        expectedSignatureProfile: "test-ed25519-v1",
         manifestPath,
-        publicKeyPem,
         runner,
         signaturePath,
+        signatureVerifier: {
+          async verify(input) {
+            return verify(null, input.payload, publicKeyPem, input.signature);
+          },
+        },
       });
     },
     directory,

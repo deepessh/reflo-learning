@@ -1,4 +1,4 @@
-import { createHash, verify } from "node:crypto";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, readdir } from "node:fs/promises";
 import path from "node:path";
@@ -26,17 +26,26 @@ interface SnapshotManifest {
   readonly contractVersion: typeof SNAPSHOT_CONTRACT;
   readonly files: readonly SnapshotFile[];
   readonly publishedAt: string;
-  readonly signatureAlgorithm: "ed25519";
+  readonly signatureProfile: string;
   readonly signatureVersion: string;
+}
+
+export interface SnapshotSignatureVerifierPort {
+  verify(input: {
+    readonly payload: Uint8Array;
+    readonly profile: string;
+    readonly signature: Uint8Array;
+  }): Promise<boolean>;
 }
 
 export interface ClamAvScannerOptions {
   readonly databaseDirectory: string;
   readonly executable: "clamscan";
+  readonly expectedSignatureProfile: string;
   readonly manifestPath: string;
-  readonly publicKeyPem: string;
   readonly runner: ProcessRunnerPort;
   readonly signaturePath: string;
+  readonly signatureVerifier: SnapshotSignatureVerifierPort;
 }
 
 export class ClamAvScannerAdapter implements MalwareScannerPort {
@@ -51,7 +60,7 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
       !path.isAbsolute(options.signaturePath) ||
       path.dirname(options.manifestPath) !== options.databaseDirectory ||
       path.dirname(options.signaturePath) !== options.databaseDirectory ||
-      options.publicKeyPem.length < 32
+      !/^[a-z0-9._-]{1,128}$/.test(options.expectedSignatureProfile)
     ) {
       throw new IngestionError("infrastructure_unavailable");
     }
@@ -73,11 +82,20 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
       const signature = Buffer.from(signatureText.trim(), "base64");
       if (
         signature.byteLength === 0 ||
-        !verify(null, manifestBytes, this.#options.publicKeyPem, signature)
+        !(await this.#options.signatureVerifier.verify({
+          payload: manifestBytes,
+          profile: this.#options.expectedSignatureProfile,
+          signature,
+        }))
       ) {
         return null;
       }
       const manifest = parseManifest(manifestBytes);
+      if (
+        manifest.signatureProfile !== this.#options.expectedSignatureProfile
+      ) {
+        return null;
+      }
       await verifySnapshotFiles(
         this.#options.databaseDirectory,
         manifest.files,
@@ -163,7 +181,7 @@ function parseManifest(bytes: Buffer): SnapshotManifest {
       "contractVersion",
       "files",
       "publishedAt",
-      "signatureAlgorithm",
+      "signatureProfile",
       "signatureVersion",
     ])
   ) {
@@ -172,7 +190,8 @@ function parseManifest(bytes: Buffer): SnapshotManifest {
   if (
     value.contractVersion !== SNAPSHOT_CONTRACT ||
     value.clamAvVersion !== INGESTION_COMPONENTS.clamAv ||
-    value.signatureAlgorithm !== "ed25519" ||
+    typeof value.signatureProfile !== "string" ||
+    !/^[a-z0-9._-]{1,128}$/.test(value.signatureProfile) ||
     typeof value.publishedAt !== "string" ||
     typeof value.signatureVersion !== "string" ||
     !/^[A-Za-z0-9._-]{1,128}$/.test(value.signatureVersion) ||

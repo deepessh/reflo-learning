@@ -28,8 +28,9 @@ diagnostics, and the `scan-detect-v1` candidate-page classification.
 Concrete trusted-side adapters now include bounded Alibaba OSS quarantine reads,
 overwrite-protected internal artifact writes, exclusive private-file staging, a
 content-addressed immutable normalized-document publisher, and a ClamAV adapter
-that verifies an Ed25519-signed exact file manifest plus every database file
-before accepting the snapshot. The scanner checks the runtime is exactly ClamAV
+that delegates detached-signature verification for an exact file manifest and
+then verifies every database file before accepting the snapshot. The production
+signing profile is gated by decision issue `#96`. The scanner checks the runtime is exactly ClamAV
 1.4.5 and treats only its documented clean/infected exit statuses as results.
 `@reflo/db` provides the production RDS operation store: it claims only a
 pre-existing `ingestion_operation` binding, rechecks active scope ownership and

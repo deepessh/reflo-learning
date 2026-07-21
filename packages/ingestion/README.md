@@ -1,0 +1,37 @@
+# `@reflo/ingestion`
+
+Trusted supervision and isolation contracts for `isolated-ingestion-v1`.
+
+The package validates PDF/EPUB/DOCX uploads before parser execution, rejects
+MIME/signature/container disagreement, encrypted or active content, unsafe XML,
+and archive expansion hazards, requires a verified ClamAV snapshot no older
+than 24 hours, and launches the parser through a digest-pinned rootless Podman
+image with no network, capabilities, inherited container environment, writable
+root, host socket, or service identity. The worker result is accepted only when
+it satisfies `normalized-document-v1`, including exact parser/config/classifier
+versions, native locators, text hashes, a digest-pinned worker image, bounded
+diagnostics, and the `scan-detect-v1` candidate-page classification.
+
+`IngestionSupervisor` is intentionally composed from narrow ports:
+
+- `IngestionOperationStore` owns authorization rechecks and D-GH-12 claim/CAS
+  finalization. Queue values are never authority.
+- `QuarantineObjectPort` alone stages the authorized object into job-scoped
+  ephemeral storage.
+- `MalwareScannerPort` exposes only a signed snapshot and clean/infected result.
+- `IsolatedDocumentWorkerPort` has no storage, queue, database, or cloud access.
+- `NormalizedDocumentPublisherPort` idempotently publishes the validated
+  internal artifact and returns a text-free opaque reference for durable state.
+- `EphemeralWorkspacePort` must remove input and output before terminal
+  finalization. Cleanup failure prevents success.
+
+The concrete worker image is unavailable until its exact base image, Tika,
+ClamAV signature snapshot, English `tessdata_fast` artifact, licenses, SBOM,
+vulnerability results, and final image digest are recorded and pass the frozen
+fixtures. Non-development configuration rejects mutable image references.
+Contract tests and deterministic fakes do not satisfy that deployment gate.
+
+EPUB and DOCX never receive invented page numbers. Their byte, archive,
+content, and resource ceilings are enforced, but their PRD 200/800-page
+requirement remains unresolved as recorded in D-GH-8 and must not be reported
+as passing.

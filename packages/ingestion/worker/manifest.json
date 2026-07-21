@@ -1,0 +1,38 @@
+{
+  "contractVersion": "isolated-ingestion-worker-manifest-v1",
+  "profile": "isolated-ingestion-v1",
+  "components": {
+    "parser": "apache-tika-3.3.1",
+    "scanner": "clamav-1.4.5",
+    "ocrEngine": "tesseract-5.5.2",
+    "ocrLanguage": "eng-tessdata_fast-checksum-pinned",
+    "ociRuntime": "podman-6.0.1"
+  },
+  "allowedParsers": ["pdf", "epub", "ooxml"],
+  "disabledCapabilities": [
+    "ambient-credentials",
+    "embedded-execution",
+    "external-resources",
+    "inline-ocr",
+    "network",
+    "remote-fetchers",
+    "tika-server"
+  ],
+  "runtime": {
+    "capabilities": [],
+    "cpuCount": 2,
+    "memoryBytes": 4294967296,
+    "network": "none",
+    "pids": 256,
+    "readOnlyRoot": true,
+    "seccomp": "podman-default",
+    "temporaryStorageBytes": 4294967296,
+    "user": "65532:65532"
+  },
+  "limits": {
+    "largeDocumentWallTimeMs": 1800000,
+    "normalizedOutputBytes": 536870912,
+    "ocrPageTimeMs": 60000,
+    "standardDocumentWallTimeMs": 90000
+  }
+}

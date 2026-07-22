@@ -110,13 +110,22 @@ class DecisionValidationTests(unittest.TestCase):
     def test_pending_id_cannot_be_effective_authority(self) -> None:
         altered = self.valid_text.replace(
             "- **Options considered:**",
-            "- **Options considered:** `P-001` as binding authority;",
+            "- **Options considered:** `P-005` as binding authority;",
             1,
         )
         self.assertIn(
             "effective records cannot use pending IDs as authority",
             self.messages_for(altered),
         )
+
+    def test_technical_p_256_identifier_is_allowed(self) -> None:
+        altered = self.valid_text.replace(
+            "- **Options considered:**",
+            "- **Options considered:** A `P-256` signature profile;",
+            1,
+        )
+        errors, _ = validator.validate_document(altered)
+        self.assertEqual([], errors)
 
 
 if __name__ == "__main__":

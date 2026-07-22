@@ -45,6 +45,8 @@
       "dependsOn": ["^build"],
       "env": [
         "REFLO_POSTGRES_CONTAINER_ID",
+        "REFLO_POSTGRES_CONTAINER_REWRITE_FROM",
+        "REFLO_POSTGRES_CONTAINER_REWRITE_TO",
         "REFLO_SKIP_SCHEMA_DUMP",
         "TEST_DATABASE_URL"
       ],

@@ -50,6 +50,41 @@ test("pinned pg_dump wrapper delegates to the service container", async (t) => {
   ]);
 });
 
+test("pinned pg_dump wrapper rewrites only the configured local authority", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "reflo-pg-dump-rewrite-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+
+  const fakeDocker = path.join(scratch, "docker");
+  await writeFile(fakeDocker, '#!/usr/bin/env sh\nprintf "%s\\n" "$@"\n');
+  await chmod(fakeDocker, 0o755);
+
+  const hostUrl =
+    "postgresql://reflo:local@127.0.0.1:55432/reflo_schema_123?sslmode=disable";
+  const containerUrl =
+    "postgresql://reflo:local@127.0.0.1:5432/reflo_schema_123?sslmode=disable";
+  const { stdout } = await execFileAsync(
+    wrapper,
+    ["--schema-only", `--dbname=${hostUrl}`],
+    {
+      env: {
+        ...process.env,
+        PATH: `${scratch}:${process.env.PATH ?? ""}`,
+        REFLO_POSTGRES_CONTAINER_ID: "abc123",
+        REFLO_POSTGRES_CONTAINER_REWRITE_FROM: "127.0.0.1:55432",
+        REFLO_POSTGRES_CONTAINER_REWRITE_TO: "127.0.0.1:5432",
+      },
+    },
+  );
+
+  assert.deepEqual(stdout.trimEnd().split("\n"), [
+    "exec",
+    "abc123",
+    "pg_dump",
+    "--schema-only",
+    `--dbname=${containerUrl}`,
+  ]);
+});
+
 test("pinned pg_dump wrapper requires a service container", async () => {
   await assert.rejects(
     execFileAsync(wrapper, [], {

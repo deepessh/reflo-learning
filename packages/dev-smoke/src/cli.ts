@@ -350,20 +350,27 @@ async function runSmoke(
       clockValue,
       deadlineAt,
     );
-    await audio.plan({
+    const registeredAudio = await audio.plan({
       authorization: AUTHORIZATION,
       courseId: IDS.course,
       deadlineAt,
       environment: "dev",
     });
-    for (const operation of plannedAudio) {
-      const result = await audio.consume({
-        authorization: AUTHORIZATION,
-        envelope: operation.envelope,
-      });
-      if (result.status !== "succeeded") {
-        throw new Error("Piper audio generation did not succeed");
+    const audioStartedEmpty = snapshotAtStart.audioAssetCount === 0;
+    if (audioStartedEmpty) {
+      for (const operation of plannedAudio) {
+        const result = await audio.consume({
+          authorization: AUTHORIZATION,
+          envelope: operation.envelope,
+        });
+        if (result.status !== "succeeded") {
+          throw new Error("Piper audio generation did not succeed");
+        }
       }
+    } else if (
+      registeredAudio.some((operation) => operation.status !== "succeeded")
+    ) {
+      throw new Error("persisted Piper audio operation lost terminal success");
     }
     components.push({
       detail:
@@ -396,7 +403,7 @@ async function runSmoke(
       activation,
       activationOperations,
       audio,
-      plannedAudio,
+      audioStartedEmpty ? plannedAudio : [],
       fixtureSha256,
     );
     const replayed = await smokeRepository.snapshot(
@@ -467,7 +474,7 @@ function withDevelopmentSpeech(
       modelPath: configuration.piper.modelPath,
       modelSha256: configuration.piper.modelSha256,
       pythonExecutable: configuration.piper.pythonExecutable,
-      scratchRoot: path.join(configuration.scratchRoot, "piper"),
+      scratchRoot: path.join(configuration.scratchRoot, "piper-work"),
       workerPath: configuration.piper.workerPath,
     }),
     profile: {

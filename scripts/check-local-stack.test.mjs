@@ -67,4 +67,13 @@ describe("local supporting-service stack policy", () => {
       ),
     );
   });
+
+  it("requires the explicit development-compatible Podman allowlist", () => {
+    const scriptSource = valid.scriptSource.replace("5.8.3 | 6.0.1", "6.0.1");
+    const errors = collectLocalStackViolations({ ...valid, scriptSource });
+
+    assert.ok(
+      errors.includes("missing development-compatible Podman allowlist"),
+    );
+  });
 });

@@ -76,9 +76,13 @@ scripts/local-stack.sh teardown   # remove containers/network, preserve data
 scripts/local-stack.sh reset      # also remove only reflo-local named data volumes
 ```
 
-The ingestion worker remains outside Docker Compose because D-GH-8 requires
-rootless Podman 6.0.1, a signed ClamAV snapshot, and job-scoped networkless
-mounts. Piper production activation remains unavailable while its checked-in
+The ingestion worker remains outside Docker Compose because D-GH-8 pins
+rootless Podman 6.0.1 for the production ECS parser pool and requires a signed
+ClamAV snapshot plus job-scoped networkless mounts. The connected development
+smoke accepts only Podman 5.8.3 or 6.0.1: 5.8.3 is the newest official release
+with a Darwin AMD64 installer, while 6.0.x macOS artifacts are ARM64-only. This
+compatibility allowance never changes the production runtime pin or release
+evidence. Piper production activation remains unavailable while its checked-in
 manifest is `blocked` and lacks an admitted image and voice bundle. The
 connected development smoke below may exercise the candidate through explicit
 local Python and voice paths without changing that status. `worker-status`
@@ -138,8 +142,9 @@ artifact counts change.
 
 Prepare these local-only prerequisites first:
 
-- exact Podman 6.0.1, the locally built pinned ingestion image, its inspected
-  digest, the verified ClamAV snapshot directory, and pinned English tessdata;
+- development-compatible Podman 5.8.3 or production-pinned 6.0.1, the locally
+  built pinned ingestion image, its inspected digest, the verified ClamAV
+  snapshot directory, and pinned English tessdata;
 - a reachable development LiteLLM gateway with JSON-capable text and exactly
   1,024-dimensional embedding aliases;
 - an absolute Python environment containing `piper-tts==1.4.2` plus the

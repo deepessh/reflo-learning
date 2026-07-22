@@ -99,6 +99,9 @@ describe("LiteLLM development adapters", () => {
         "user",
       ]);
       expect(system.fixedInstructions).toBeInstanceOf(Array);
+      expect(system.outputContract).toEqual(
+        expect.stringMatching(/^Return exactly this JSON shape/),
+      );
       expect(system).not.toHaveProperty("sourceMaterial");
       expect(user.sourceMaterial).toEqual(
         "sourceSpans" in input ? input.sourceSpans : [],

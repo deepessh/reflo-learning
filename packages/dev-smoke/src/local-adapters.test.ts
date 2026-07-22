@@ -5,7 +5,12 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { LocalSmokeObjectStore, readLocalSmokeConfiguration } from "./index.js";
+import {
+  LOCAL_SMOKE_PODMAN_VERSIONS,
+  LocalSmokeObjectStore,
+  isSupportedLocalSmokePodmanVersion,
+  readLocalSmokeConfiguration,
+} from "./index.js";
 import type { SmokePreflightError } from "./index.js";
 
 const scratch: string[] = [];
@@ -19,6 +24,26 @@ afterEach(async () => {
 });
 
 describe("local smoke boundaries", () => {
+  it("accepts only the explicit development Podman compatibility set", () => {
+    expect(LOCAL_SMOKE_PODMAN_VERSIONS).toEqual(["5.8.3", "6.0.1"]);
+    expect(isSupportedLocalSmokePodmanVersion("podman version 5.8.3")).toBe(
+      true,
+    );
+    expect(isSupportedLocalSmokePodmanVersion("podman version 6.0.1")).toBe(
+      true,
+    );
+    for (const output of [
+      "podman version 5.8.0",
+      "podman version 5.8.1",
+      "podman version 5.8.2",
+      "podman version 6.0.0",
+      "podman version 6.0.2",
+      "docker version 5.8.3",
+    ]) {
+      expect(isSupportedLocalSmokePodmanVersion(output)).toBe(false);
+    }
+  });
+
   it("rejects activation outside development with an actionable component", () => {
     expect(() =>
       readLocalSmokeConfiguration({ REFLO_ENV: "pilot" }, process.cwd()),

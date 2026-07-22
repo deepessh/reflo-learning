@@ -37,6 +37,22 @@ const TEXT_TASKS = {
   ]),
 } as const;
 
+const TEXT_OUTPUT_CONTRACTS = Object.freeze({
+  "assessment.grade-short-answer.v1":
+    '{"evidence":[{"conceptId":string,"confidence":number,"rubricBand":string,"score":number}]}',
+  "assessment.quiz.v1":
+    '{"items":[{"conceptIds":string[],"difficulty":1|2|3|4|5,"itemType":"multiple_choice"|"short_answer"|"concept_linking","keyedAnswer":string,"prompt":string,"sourceSpanIds":string[],"responseOptions"?:string[],"rubric"?:string}]}',
+  "curriculum.structure.v1":
+    '{"chapters":[{"concepts":[{"key":string,"name":string,"prerequisiteKeys":string[],"sourceSpanIds":string[]}],"sourceSpanIds":string[],"title":string}]}',
+  "lesson.audio-script.v1": '{"script":string,"sourceSpanIds":string[]}',
+  "lesson.reteach.v1":
+    '{"content":string,"sourceSpanIds":string[],"strategyTag":string}',
+  "lesson.text.v1":
+    '{"content":string (400-600 words),"sourceSpanIds":string[],"strategyTag":string}',
+  "tutor.answer.v1":
+    '{"kind":"answer","content":string,"sourceSpanIds":string[]} | {"kind":"not_found","reason":string}',
+} as const satisfies Partial<Record<ModelTaskId, string>>);
+
 export interface LiteLlmDevEnvironment {
   readonly REFLO_ENV?: string;
   readonly REFLO_LITELLM_API_KEY?: string;
@@ -173,6 +189,7 @@ class LiteLlmHttpClient {
               fixedInstructions: prompt.fixedInstructions,
               generationParametersVersion: prompt.generationParametersVersion,
               outputSchemaId: prompt.outputSchemaId,
+              outputContract: textOutputContract(invocation.task),
               promptDigest: prompt.digest,
               promptId: prompt.id,
               promptVersion: prompt.version,
@@ -305,6 +322,19 @@ class LiteLlmHttpClient {
       payload,
     };
   }
+}
+
+function textOutputContract(task: ModelTaskId): string {
+  const contract =
+    TEXT_OUTPUT_CONTRACTS[task as keyof typeof TEXT_OUTPUT_CONTRACTS];
+  if (contract === undefined) {
+    throw adapterFailure("invalid_request", false);
+  }
+  const requirements =
+    task === "lesson.text.v1"
+      ? " The content string must contain 400 to 600 words; fewer than 400 or more than 600 words is invalid."
+      : "";
+  return `Return exactly this JSON shape with no additional keys: ${contract}.${requirements}`;
 }
 
 interface ParsedHttpResponse {

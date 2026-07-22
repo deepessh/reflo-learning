@@ -10,6 +10,8 @@ REFLO_LOCAL_APP_ENV="$REFLO_LOCAL_STATE_DIR/app.env"
 REFLO_LOCAL_PROJECT=reflo-local
 REFLO_LOCAL_RDS_CONTAINER=reflo-local-rds-1
 REFLO_LOCAL_RETRIEVAL_SQL="$REFLO_LOCAL_ROOT/packages/retrieval/sql/20260721000100_vector_namespace_v1.sql"
+REFLO_LOCAL_DEV_RETRIEVAL_SQL="$REFLO_LOCAL_ROOT/packages/retrieval/sql/20260722000100_litellm_dev_vector_namespace_v1.sql"
+REFLO_LOCAL_DEV_RDS_SQL="$REFLO_LOCAL_ROOT/packages/db/sql/local-smoke-development-profile.sql"
 REFLO_LOCAL_NODE_VERSION=24.18.0
 REFLO_LOCAL_PNPM_VERSION=10.34.5
 
@@ -155,12 +157,18 @@ setup_databases() {
   REFLO_LOCAL_DATABASE_PORT=$(env_value REFLO_LOCAL_RDS_PORT)
   DATABASE_URL="postgresql://reflo:$REFLO_LOCAL_DATABASE_URL@127.0.0.1:$REFLO_LOCAL_DATABASE_PORT/reflo?sslmode=disable" \
     corepack pnpm --filter @reflo/db db:migrate
+  run_compose exec --no-TTY rds \
+    psql --set ON_ERROR_STOP=1 --username reflo --dbname reflo \
+    <"$REFLO_LOCAL_DEV_RDS_SQL"
   run_compose exec --no-TTY vector \
     psql --set ON_ERROR_STOP=1 --username reflo_vectors --dbname reflo_vectors \
     <"$REFLO_LOCAL_RETRIEVAL_SQL"
   run_compose exec --no-TTY vector \
+    psql --set ON_ERROR_STOP=1 --username reflo_vectors --dbname reflo_vectors \
+    <"$REFLO_LOCAL_DEV_RETRIEVAL_SQL"
+  run_compose exec --no-TTY vector \
     psql --set ON_ERROR_STOP=1 --tuples-only --username reflo_vectors --dbname reflo_vectors \
-    --command "SELECT extversion FROM pg_extension WHERE extname = 'vector'; SELECT to_regclass('public.reflo_source_span_embedding_v1');"
+    --command "SELECT extversion FROM pg_extension WHERE extname = 'vector'; SELECT to_regclass('public.reflo_source_span_embedding_v1'); SELECT to_regclass('public.reflo_source_span_embedding_litellm_dev_v1');"
   echo "Local schemas are ready"
   echo "Application environment: $REFLO_LOCAL_APP_ENV"
 }
@@ -181,7 +189,7 @@ worker_status() {
     fi
   fi
 
-  echo "SKIPPED piper-worker: packages/audio/piper-worker/manifest.json remains blocked and has no admitted image or mounted voice bundle; complete its listed license, image, SBOM, capacity, and listening gates first."
+  echo "SKIPPED piper-worker production activation: packages/audio/piper-worker/manifest.json remains blocked; the connected development smoke can use explicit local Python and pinned voice paths, but cannot satisfy its listed license, image, SBOM, capacity, or listening gates."
 }
 
 status_services() {

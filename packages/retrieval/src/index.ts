@@ -1,6 +1,7 @@
 export * from "./analyticdb.js";
 export * from "./chunker.js";
 export * from "./contracts.js";
+export * from "./development-pgvector.js";
 export * from "./errors.js";
 export * from "./identity.js";
 export * from "./ports.js";

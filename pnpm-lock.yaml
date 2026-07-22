@@ -233,6 +233,9 @@ importers:
       "@reflo/ingestion":
         specifier: workspace:*
         version: link:../ingestion
+      "@reflo/model-router":
+        specifier: workspace:*
+        version: link:../model-router
       "@reflo/retrieval":
         specifier: workspace:*
         version: link:../retrieval
@@ -249,6 +252,37 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+
+  packages/dev-smoke:
+    dependencies:
+      "@reflo/activation":
+        specifier: workspace:*
+        version: link:../activation
+      "@reflo/audio":
+        specifier: workspace:*
+        version: link:../audio
+      "@reflo/db":
+        specifier: workspace:*
+        version: link:../db
+      "@reflo/ingestion":
+        specifier: workspace:*
+        version: link:../ingestion
+      "@reflo/model-router":
+        specifier: workspace:*
+        version: link:../model-router
+      "@reflo/retrieval":
+        specifier: workspace:*
+        version: link:../retrieval
+    devDependencies:
+      "@types/node":
+        specifier: 24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
 
   packages/evaluation:
     devDependencies:

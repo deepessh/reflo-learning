@@ -15,6 +15,9 @@ import {
   type SpeechModelPort,
 } from "../ports.js";
 
+export { NodePiperSynthesisProcess } from "./piper-process.js";
+export type { NodePiperProcessOptions } from "./piper-process.js";
+
 export const QWEN_TTS_ADAPTER_VERSION = "qwen-tts-adapter-v1" as const;
 export const PIPER_TTS_ADAPTER_VERSION = "piper-tts-adapter-v1" as const;
 export const PIPER_ENGINE_VERSION = "1.4.2" as const;

@@ -82,8 +82,15 @@ describe("clamav-snapshot-signature-v1", () => {
     const encoded = signature.toString("base64");
     expect(decodeStrictPaddedBase64P256Der(encoded)).toEqual(signature);
     expect(decodeStrictPaddedBase64P256Der(`${encoded}\n`)).toBeNull();
+
+    const paddedDer = Buffer.from(
+      `30440220${"01".repeat(32)}0220${"02".repeat(32)}`,
+      "hex",
+    );
+    const paddedEncoded = paddedDer.toString("base64");
+    expect(paddedEncoded.endsWith("==")).toBe(true);
     expect(
-      decodeStrictPaddedBase64P256Der(encoded.replace(/=+$/, "")),
+      decodeStrictPaddedBase64P256Der(paddedEncoded.replace(/=+$/, "")),
     ).toBeNull();
 
     const trailing = Buffer.concat([signature, Buffer.from([0])]);

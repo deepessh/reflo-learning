@@ -2,7 +2,15 @@ import pg, { type PoolClient } from "pg";
 
 export { PostgresIngestionOperationStore } from "./ingestion-operation-store.js";
 export type { PostgresIngestionOperationStoreOptions } from "./ingestion-operation-store.js";
+export { PostgresAnalyticDbPool } from "./analyticdb-pool.js";
 export { PostgresContentRepository } from "./content-repository.js";
+export { PostgresDevelopmentSmokeRepository } from "./development-smoke-repository.js";
+export type {
+  DevelopmentSmokeArtifactEvidence,
+  DevelopmentNarrationWrite,
+  DevelopmentSmokeSeed,
+  DevelopmentSmokeSnapshot,
+} from "./development-smoke-repository.js";
 export { PostgresActivationRepository } from "./activation-repository.js";
 export { PostgresAudioGenerationRepository } from "./audio-generation-repository.js";
 export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generation-repository.js";

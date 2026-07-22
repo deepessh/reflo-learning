@@ -18,6 +18,7 @@
     "infra:check": "node scripts/check-infra-policy.mjs",
     "lint": "turbo run lint && pnpm boundaries && pnpm infra:check && pnpm local-stack:check && pnpm toolchain:check && pnpm workflows:check && pnpm format:check",
     "local-stack:check": "node scripts/check-local-stack.mjs",
+    "smoke:local": "scripts/local-smoke.sh",
     "package": "pnpm build && pnpm package:web && pnpm package:api && pnpm package:jobs",
     "package:api": "node scripts/prepare-artifact.mjs api && pnpm --filter @reflo/api --prod deploy .artifacts/api",
     "package:jobs": "node scripts/prepare-artifact.mjs jobs && pnpm --filter @reflo/jobs --prod deploy .artifacts/jobs",

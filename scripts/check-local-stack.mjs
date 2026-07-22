@@ -118,6 +118,18 @@ export function collectLocalStackViolations({
   requireText(
     errors,
     scriptSource,
+    "20260722000100_litellm_dev_vector_namespace_v1.sql",
+    "isolated LiteLLM development vector schema",
+  );
+  requireText(
+    errors,
+    scriptSource,
+    "local-smoke-development-profile.sql",
+    "local-only RDS development profile allowance",
+  );
+  requireText(
+    errors,
+    scriptSource,
     "down --volumes --remove-orphans",
     "scoped reset command",
   );

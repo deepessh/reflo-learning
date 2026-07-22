@@ -78,9 +78,11 @@ scripts/local-stack.sh reset      # also remove only reflo-local named data volu
 
 The ingestion worker remains outside Docker Compose because D-GH-8 requires
 rootless Podman 6.0.1, a signed ClamAV snapshot, and job-scoped networkless
-mounts. The Piper worker remains unavailable while its checked-in manifest is
-`blocked` and lacks an admitted image and voice bundle. `worker-status` reports
-the exact missing prerequisite instead of treating either path as ready.
+mounts. Piper production activation remains unavailable while its checked-in
+manifest is `blocked` and lacks an admitted image and voice bundle. The
+connected development smoke below may exercise the candidate through explicit
+local Python and voice paths without changing that status. `worker-status`
+reports the exact boundary instead of treating either path as production-ready.
 
 ## LiteLLM development smoke adapters
 
@@ -121,5 +123,50 @@ callback origins, an ECS RAM role, explicit limits within the verified free
 allowance, and four distinct 32-byte authentication keys. Production injects
 those keys and the database credential from KMS Secrets Manager; static Alibaba
 access keys are not accepted by the adapter.
+
+## Connected local development smoke flow
+
+The connected smoke command joins the committed synthetic, non-PII PDF fixture
+to the implemented admission, isolated parsing, chunking, LiteLLM development
+embedding, owner-scoped pgvector retrieval, curriculum, activation lesson and
+quiz, narration, and Piper audio paths. RDS stores the source-backed curriculum,
+lesson, quiz, provenance, narration, audio metadata, and idempotent operation
+state. Private development artifacts are written under the ignored
+`.reflo/local-smoke/` root. Running the command again replays the terminal
+ingestion, activation, and audio operations and fails if persisted logical
+artifact counts change.
+
+Prepare these local-only prerequisites first:
+
+- exact Podman 6.0.1, the locally built pinned ingestion image, its inspected
+  digest, the verified ClamAV snapshot directory, and pinned English tessdata;
+- a reachable development LiteLLM gateway with JSON-capable text and exactly
+  1,024-dimensional embedding aliases;
+- an absolute Python environment containing `piper-tts==1.4.2` plus the
+  digest-pinned LJSpeech voice model and config from the checked-in Piper
+  manifest.
+
+Export the `REFLO_LOCAL_*` and `REFLO_LITELLM_*` values documented in
+`.env.example`, then run one command:
+
+```sh
+corepack pnpm smoke:local
+```
+
+The command starts and readies the two local database services, applies the
+production schemas plus isolated local-only LiteLLM profile tables, builds the
+participating packages, runs the flow, and emits one bounded JSON summary. A
+missing local service, LiteLLM alias, embedding dimension, ingestion worker, or
+Piper prerequisite fails with a component name and corrective action. Video is
+reported separately and never changes core success while its optional adapter
+issue is absent or its P1 flag is disabled.
+
+This connected mode is development integration evidence only. Unit and
+integration suites remain deterministic failure/replay evidence. The seeded
+offline demo is a separate service-worker bundle that must work without public
+internet, model APIs, production backend, or CDN. Authoritative performance,
+audio, adversarial, privacy, security, provider, quota, and release-gate
+evaluation runs only in the applicable Alibaba target environment under the
+repository evaluation contract; this command cannot satisfy any of them.
 
 `pnpm package` stages independently deployable outputs under `.artifacts/`. The web artifact is static; API and jobs artifacts include their production workspace dependencies.

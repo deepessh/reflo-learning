@@ -14,7 +14,7 @@ import {
 } from "./index.js";
 
 export class InMemoryContentRepository implements ContentRepositoryPort {
-  activeGenerationId: string | null = null;
+  activeGeneration: EmbeddingGenerationRecord | null = null;
   readonly curriculumGenerations: CurriculumGenerationRecord[] = [];
   readonly embeddingGenerations: EmbeddingGenerationRecord[] = [];
   readonly sourceSpans = new Map<string, SourceSpanRecord>();
@@ -65,14 +65,17 @@ export class InMemoryContentRepository implements ContentRepositoryPort {
     ) {
       throw new Error("unknown generation");
     }
-    this.activeGenerationId = generationId;
+    this.activeGeneration =
+      this.embeddingGenerations.find(
+        (entry) => entry.generationId === generationId,
+      ) ?? null;
   }
 
   async activeEmbeddingGeneration(
     access: AuthorizedSourceAccess,
-  ): Promise<string | null> {
+  ): Promise<EmbeddingGenerationRecord | null> {
     this.#assertAccess(access);
-    return this.activeGenerationId;
+    return this.activeGeneration;
   }
 
   async resolveAuthorizedSourceSpans(
@@ -81,7 +84,7 @@ export class InMemoryContentRepository implements ContentRepositoryPort {
     sourceSpanIds: readonly string[],
   ): Promise<readonly RetrievedSourceSpan[]> {
     this.#assertAccess(access);
-    if (generationId !== this.activeGenerationId) {
+    if (generationId !== this.activeGeneration?.generationId) {
       return [];
     }
     return sourceSpanIds.flatMap((id) => {

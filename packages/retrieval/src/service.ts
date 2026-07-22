@@ -150,9 +150,9 @@ export class RetrievalService {
       command.sourceDocumentId,
       command.courseId,
     );
-    const generationId =
+    const activeGeneration =
       await this.dependencies.repository.activeEmbeddingGeneration(access);
-    if (generationId === null) {
+    if (activeGeneration === null) {
       throw new RetrievalError(
         "authorization_denied",
         "source has no retrievable active generation",
@@ -164,6 +164,8 @@ export class RetrievalService {
       { deadlineMs: remainingDeadline(deadlineAt) },
     );
     assertEmbeddingMetadata(embedded.value, "query");
+    assertCompatibleActiveEmbeddingGeneration(activeGeneration, embedded);
+    const generationId = activeGeneration.generationId;
     const queryVector = required(
       embedded.value.vectors[0],
       "missing query embedding",
@@ -322,13 +324,15 @@ function buildEmbeddingGeneration(
   const providerRequestIds = batches.map(
     (batch) => batch.value.metadata.providerRequestId,
   );
+  const profileVersion =
+    provenance.embeddingProfileVersion ?? EMBEDDING_PROFILE_VERSION;
   const generationId = stableUuid({
     adapterVersion: provenance.adapterVersion,
     effectiveModel: provenance.effectiveModel,
     effectiveModelVersion: provenance.effectiveModelVersion,
     endpoint: result.metadata.endpoint,
     inputHashes: spans.map((span) => span.embeddingInputHash),
-    profileVersion: EMBEDDING_PROFILE_VERSION,
+    profileVersion,
     providerIdentifier: result.metadata.providerIdentifier,
     providerRequestIds,
     region: result.metadata.region,
@@ -343,7 +347,7 @@ function buildEmbeddingGeneration(
     generationId,
     inputMode: "document",
     ownerScopeId: access.ownerScopeId,
-    profileVersion: EMBEDDING_PROFILE_VERSION,
+    profileVersion,
     providerIdentifier: result.metadata.providerIdentifier,
     providerRequestIds,
     region: result.metadata.region,
@@ -402,6 +406,8 @@ function assertSameEmbeddingProfile(
     expected.provenance.effectiveModel !== actual.provenance.effectiveModel ||
     expected.provenance.effectiveModelVersion !==
       actual.provenance.effectiveModelVersion ||
+    expected.provenance.embeddingProfileVersion !==
+      actual.provenance.embeddingProfileVersion ||
     expected.value.metadata.endpoint !== actual.value.metadata.endpoint ||
     expected.value.metadata.providerIdentifier !==
       actual.value.metadata.providerIdentifier ||
@@ -410,6 +416,29 @@ function assertSameEmbeddingProfile(
     throw new RetrievalError(
       "invalid_model_result",
       "embedding profile changed within one generation",
+    );
+  }
+}
+
+function assertCompatibleActiveEmbeddingGeneration(
+  active: EmbeddingGenerationRecord,
+  query: RoutedModelResult<"embedding.query.v1">,
+): void {
+  const queryProfile =
+    query.provenance.embeddingProfileVersion ?? EMBEDDING_PROFILE_VERSION;
+  if (
+    active.profileVersion !== queryProfile ||
+    active.dimensions !== query.value.metadata.dimensions ||
+    active.adapterVersion !== query.provenance.adapterVersion ||
+    active.effectiveModel !== query.provenance.effectiveModel ||
+    active.effectiveModelVersion !== query.provenance.effectiveModelVersion ||
+    active.endpoint !== query.value.metadata.endpoint ||
+    active.providerIdentifier !== query.value.metadata.providerIdentifier ||
+    active.region !== query.value.metadata.region
+  ) {
+    throw new RetrievalError(
+      "invalid_configuration",
+      "active embedding profile is incompatible; rebuild the local generation before search",
     );
   }
 }

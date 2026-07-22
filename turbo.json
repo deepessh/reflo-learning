@@ -22,6 +22,10 @@
       "persistent": true,
       "env": [
         "DATABASE_URL",
+        "REFLO_LITELLM_API_KEY",
+        "REFLO_LITELLM_BASE_URL",
+        "REFLO_LITELLM_EMBEDDING_MODEL",
+        "REFLO_LITELLM_TEXT_MODEL",
         "REFLO_AUTH_CALLBACK_ORIGINS",
         "REFLO_AUTH_EMAIL_ADAPTER",
         "REFLO_AUTH_EMAIL_ENCRYPTION_KEY",

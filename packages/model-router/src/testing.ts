@@ -161,6 +161,9 @@ function descriptor(
     adapterVersion: "scripted-adapter-v1",
     capability,
     driftCanaryPassed: true,
+    ...(capability === "embedding"
+      ? { embeddingProfileVersion: "embedding-v1" }
+      : {}),
     effectiveModel,
     effectiveModelVersion: "fixture-version-1",
     maxImmediateAttempts,

@@ -69,7 +69,7 @@ export interface EmbeddingGenerationRecord {
   readonly generationId: string;
   readonly inputMode: "document";
   readonly ownerScopeId: string;
-  readonly profileVersion: typeof EMBEDDING_PROFILE_VERSION;
+  readonly profileVersion: string;
   readonly providerIdentifier: string;
   readonly providerRequestIds: readonly string[];
   readonly region: string;

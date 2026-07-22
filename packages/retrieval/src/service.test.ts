@@ -116,7 +116,7 @@ describe("retrieval vertical slice", () => {
       fixtureSpan.id,
     ]);
     expect(result.embeddingGeneration.profileVersion).toBe("embedding-v1");
-    expect(repository.activeGenerationId).toBe(
+    expect(repository.activeGeneration?.generationId).toBe(
       result.embeddingGeneration.generationId,
     );
 
@@ -170,12 +170,27 @@ describe("retrieval vertical slice", () => {
   it("rejects a contaminated cross-scope vector result before resolving text", async () => {
     const repository = new InMemoryContentRepository(access);
     repository.sourceSpans.set(fixtureSpan.id, fixtureSpan);
-    repository.activeGenerationId = "00000000-0000-5000-8000-000000000501";
+    repository.activeGeneration = {
+      adapterVersion: "scripted-adapter-v1",
+      dimensions: EMBEDDING_DIMENSIONS,
+      effectiveModel: "text-embedding-v4",
+      effectiveModelVersion: "fixture-version-1",
+      endpoint: "model-studio.example.invalid",
+      generationId: "00000000-0000-5000-8000-000000000501",
+      inputMode: "document",
+      ownerScopeId: access.ownerScopeId,
+      profileVersion: "embedding-v1",
+      providerIdentifier: "model-studio",
+      providerRequestIds: ["document-request-1"],
+      region: "fixture-region-1",
+      sourceDocumentId: access.sourceDocumentId,
+      spanIds: [fixtureSpan.id],
+    };
     const vectors = new InMemoryVectorStore();
     vectors.contaminatedResult = {
       distance: 0,
       embeddingInputHash: fixtureSpan.embeddingInputHash,
-      generationId: repository.activeGenerationId,
+      generationId: repository.activeGeneration.generationId,
       ownerScopeId: "00000000-0000-4000-8000-000000000999",
       sourceDocumentId: access.sourceDocumentId,
       sourceSpanId: fixtureSpan.id,
@@ -210,6 +225,79 @@ describe("retrieval vertical slice", () => {
         sourceDocumentId: access.sourceDocumentId,
       }),
     ).rejects.toMatchObject({ code: "invalid_vector_result" });
+  });
+
+  it("requires a clean rebuild when the configured development embedding profile changes", async () => {
+    const repository = new InMemoryContentRepository(access);
+    repository.activeGeneration = {
+      adapterVersion: "scripted-adapter-v1",
+      dimensions: EMBEDDING_DIMENSIONS,
+      effectiveModel: "local/test-embedding",
+      effectiveModelVersion: "fixture-version-1",
+      endpoint: "model-studio.example.invalid",
+      generationId: "00000000-0000-5000-8000-000000000501",
+      inputMode: "document",
+      ownerScopeId: access.ownerScopeId,
+      profileVersion: "litellm-dev-embedding-v1-aaaaaaaaaaaaaaaa",
+      providerIdentifier: "model-studio",
+      providerRequestIds: ["document-request-1"],
+      region: "fixture-region-1",
+      sourceDocumentId: access.sourceDocumentId,
+      spanIds: [fixtureSpan.id],
+    };
+    const vectors = new InMemoryVectorStore();
+    const scripted = createScriptedAdapterRegistry({
+      "embedding.query.v1": [
+        {
+          type: "result",
+          value: {
+            metadata: embeddingMetadata("query", "query-request-profile"),
+            vectors: [vector(0.2)],
+          },
+        },
+      ],
+    });
+    const embedding = scripted.adapters.embedding["embedding-v1"]!;
+    const service = new RetrievalService({
+      models: createModelRouter({
+        adapters: {
+          ...scripted.adapters,
+          embedding: {
+            "embedding-v1": {
+              ...embedding,
+              descriptor: {
+                ...embedding.descriptor,
+                developmentOnly: true,
+                driftCanaryPassed: false,
+                effectiveModel: "local/test-embedding",
+                embeddingProfileVersion:
+                  "litellm-dev-embedding-v1-bbbbbbbbbbbbbbbb",
+              },
+            },
+          },
+        },
+        deployment: "dev",
+        traceSink: new InMemoryTraceSink(),
+      }),
+      repository,
+      vectors,
+    });
+
+    await expect(
+      service.search({
+        authorization,
+        courseId: access.courseId,
+        deadlineMs: 5_000,
+        limit: 5,
+        query: "profile mismatch",
+        sourceDocumentId: access.sourceDocumentId,
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_configuration",
+      message:
+        "active embedding profile is incompatible; rebuild the local generation before search",
+    });
+    expect(vectors.records).toHaveLength(0);
   });
 });
 

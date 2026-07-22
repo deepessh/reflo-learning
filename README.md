@@ -82,6 +82,39 @@ mounts. The Piper worker remains unavailable while its checked-in manifest is
 `blocked` and lacks an admitted image and voice bundle. `worker-status` reports
 the exact missing prerequisite instead of treating either path as ready.
 
+## LiteLLM development smoke adapters
+
+`@reflo/model-router/litellm` provides development-only OpenAI-compatible
+adapters for the existing structured-generation, grounded-generation, grading,
+dialogue, and embedding ports. The adapter factory requires `REFLO_ENV=dev`,
+and the router independently rejects its descriptors in staging or pilot
+composition. It does not add a generic completion API to feature packages.
+
+The safe placeholders in `.env.example` assume a loopback LiteLLM proxy. Plain
+HTTP is accepted only for loopback hosts; non-loopback gateways must use HTTPS.
+Use only synthetic or rights-cleared non-PII fixtures. Gateway caching, logging,
+retry, and fallback behavior may be enabled for local smoke work, but the
+resulting provenance is labeled `development_only` and cannot satisfy Reflo's
+authoritative privacy, retry, provenance, quality, embedding, latency, or
+release gates. Raw provider responses are neither returned nor persisted.
+
+LiteLLM embedding calls request and require 1,024 float dimensions. The adapter
+derives a distinct `litellm-dev-embedding-v1-<fingerprint>` profile from the
+gateway origin, configured embedding alias, dimensions, and adapter contract.
+It never labels those vectors as D-GH-9 `embedding-v1`. Search fails closed when
+the active generation does not match the currently configured profile, model,
+endpoint, or adapter. After changing the LiteLLM base URL or embedding model,
+discard the local generated state and rebuild before indexing or searching:
+
+```sh
+scripts/local-stack.sh reset
+scripts/local-stack.sh setup
+```
+
+`reset` removes only the fixed `reflo-local` Compose project's containers,
+network, and named development volumes. It is intentionally a clean local
+re-embed workflow; do not use LiteLLM vectors in a staging or pilot data store.
+
 The API leaves authentication disabled only for local development. Staging and
 pilot composition require the allowlisted DirectMail adapter, exact HTTPS
 callback origins, an ECS RAM role, explicit limits within the verified free

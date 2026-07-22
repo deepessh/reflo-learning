@@ -31,6 +31,9 @@ import { RESULT_VALIDATORS } from "./validation.js";
 
 export interface ModelCallProvenance {
   readonly adapterVersion: string;
+  readonly configuredModel?: string;
+  readonly embeddingProfileVersion?: string;
+  readonly evidenceClassification: "authoritative" | "development_only";
   readonly effectiveModel: string;
   readonly effectiveModelVersion: string;
   readonly generationParametersVersion?: string;
@@ -38,6 +41,7 @@ export interface ModelCallProvenance {
   readonly promptDigest?: string;
   readonly promptId?: string;
   readonly promptVersion?: string;
+  readonly providerRequestId?: string;
   readonly requestedSelector: string;
   readonly resultSchemaVersion: string;
   readonly routePolicyVersion: typeof ROUTE_POLICY_VERSION;
@@ -60,6 +64,7 @@ export interface ModelRouterOptions {
     },
   ) => Promise<boolean> | boolean;
   readonly now?: () => number;
+  readonly deployment?: "dev" | "pilot" | "staging";
   readonly traceSink: ModelTraceSink;
 }
 
@@ -178,7 +183,12 @@ export function createModelRouter(options: ModelRouterOptions) {
         route.capability,
         selector,
       );
-      verifyAdapter(adapter.descriptor, route.capability, selector);
+      verifyAdapter(
+        adapter.descriptor,
+        route.capability,
+        selector,
+        options.deployment,
+      );
       const maximumAttempts = Math.min(
         route.maxImmediateAttempts,
         adapter.descriptor.maxImmediateAttempts,
@@ -285,7 +295,21 @@ export function createModelRouter(options: ModelRouterOptions) {
           return {
             provenance: {
               adapterVersion: adapter.descriptor.adapterVersion,
-              effectiveModel: adapter.descriptor.effectiveModel,
+              ...(response.identity?.effectiveModel === undefined
+                ? {}
+                : { configuredModel: adapter.descriptor.effectiveModel }),
+              ...(adapter.descriptor.embeddingProfileVersion === undefined
+                ? {}
+                : {
+                    embeddingProfileVersion:
+                      adapter.descriptor.embeddingProfileVersion,
+                  }),
+              evidenceClassification: adapter.descriptor.developmentOnly
+                ? "development_only"
+                : "authoritative",
+              effectiveModel:
+                response.identity?.effectiveModel ??
+                adapter.descriptor.effectiveModel,
               effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
               ...(prompt === undefined
                 ? {}
@@ -300,6 +324,11 @@ export function createModelRouter(options: ModelRouterOptions) {
               requestedSelector: adapter.descriptor.selector,
               resultSchemaVersion: route.resultSchemaVersion,
               routePolicyVersion: ROUTE_POLICY_VERSION,
+              ...(response.identity?.providerRequestId === undefined
+                ? {}
+                : {
+                    providerRequestId: response.identity.providerRequestId,
+                  }),
               task,
               validationOutcome: "passed",
             },
@@ -452,6 +481,7 @@ function verifyAdapter(
   descriptor: SelectedAdapter["descriptor"],
   capability: ModelCapability,
   selector: string,
+  deployment: ModelRouterOptions["deployment"],
 ): void {
   const attemptsValid =
     Number.isInteger(descriptor.maxImmediateAttempts) &&
@@ -464,12 +494,19 @@ function verifyAdapter(
   if (
     descriptor.capability !== capability ||
     descriptor.selector !== selector ||
+    (descriptor.developmentOnly === true && deployment !== "dev") ||
     descriptor.adapterVersion.length === 0 ||
     descriptor.effectiveModel.length === 0 ||
     descriptor.effectiveModelVersion.length === 0 ||
     !attemptsValid ||
     !mediaRetryValid ||
-    (descriptor.mutableAlias && !descriptor.driftCanaryPassed)
+    (descriptor.mutableAlias &&
+      !descriptor.driftCanaryPassed &&
+      descriptor.developmentOnly !== true) ||
+    (capability === "embedding" &&
+      descriptor.embeddingProfileVersion === undefined) ||
+    (capability !== "embedding" &&
+      descriptor.embeddingProfileVersion !== undefined)
   ) {
     throw new ModelRouterError(
       "invalid_adapter_configuration",
@@ -554,7 +591,8 @@ function attemptTrace(
     adapterVersion: descriptor.adapterVersion,
     attempt,
     durationMs: Math.max(0, finishedAt - startedAt),
-    effectiveModel: descriptor.effectiveModel,
+    effectiveModel:
+      response.identity?.effectiveModel ?? descriptor.effectiveModel,
     effectiveModelVersion: descriptor.effectiveModelVersion,
     outcome,
     requestedSelector: descriptor.selector,

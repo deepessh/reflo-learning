@@ -47,7 +47,7 @@ export interface ContentRepositoryPort {
 
   activeEmbeddingGeneration(
     access: AuthorizedSourceAccess,
-  ): Promise<string | null>;
+  ): Promise<EmbeddingGenerationRecord | null>;
 
   resolveAuthorizedSourceSpans(
     access: AuthorizedSourceAccess,

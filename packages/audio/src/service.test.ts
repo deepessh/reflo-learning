@@ -256,6 +256,7 @@ function audioPayload(wav: Uint8Array, engine: "piper" | "qwen") {
 function courseFixture(): AuthorizedAudioCourse {
   const provenance = {
     adapterVersion: "scripted-adapter-v1",
+    evidenceClassification: "authoritative",
     effectiveModel: "qwen-plus",
     effectiveModelVersion: "fixture-v1",
     generationParametersVersion: "parameters-v1",

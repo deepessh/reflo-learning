@@ -6,6 +6,7 @@ export { PostgresContentRepository } from "./content-repository.js";
 export { PostgresActivationRepository } from "./activation-repository.js";
 export { PostgresAudioGenerationRepository } from "./audio-generation-repository.js";
 export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generation-repository.js";
+export { PostgresGateAttestationIndex } from "./gate-attestation-index.js";
 
 import type {
   AccountRepository,

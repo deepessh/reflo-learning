@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reflo.invalid/schemas/evidence-bundle-v1.schema.json",
+  "title": "Reflo evidence-bundle-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bundleDigest",
+    "completedAt",
+    "contractVersion",
+    "datasetId",
+    "datasetVersion",
+    "deployableArtifactDigest",
+    "environment",
+    "evidenceBundleVersion",
+    "gateId",
+    "infrastructureFingerprint",
+    "manifestDigest",
+    "metadata",
+    "observations",
+    "result",
+    "scorerVersion",
+    "sourceCommit",
+    "startedAt"
+  ],
+  "properties": {
+    "bundleDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "contractVersion": { "const": "evaluation-contract-v1" },
+    "datasetId": { "type": "string" },
+    "datasetVersion": { "type": "string" },
+    "deployableArtifactDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "environment": { "enum": ["staging", "pilot"] },
+    "evidenceBundleVersion": { "const": "evidence-bundle-v1" },
+    "gateId": {
+      "enum": [
+        "week1.performance",
+        "week1.audio",
+        "week1.upload-security",
+        "week1.adversarial"
+      ]
+    },
+    "infrastructureFingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "manifestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "metadata": { "type": "object" },
+    "observations": { "type": "array" },
+    "result": { "type": "object" },
+    "scorerVersion": { "const": "release-gate-scorer-v1" },
+    "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "startedAt": { "type": "string", "format": "date-time" }
+  }
+}

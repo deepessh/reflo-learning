@@ -1031,6 +1031,42 @@ ALTER TABLE ONLY public.quiz_item_source_span FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: release_gate_attestation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.release_gate_attestation (
+    environment text NOT NULL,
+    gate_id text NOT NULL,
+    evidence_bundle_digest text NOT NULL,
+    evidence_bundle_reference text NOT NULL,
+    deployable_artifact_digest text NOT NULL,
+    attestation_version text NOT NULL,
+    contract_version text NOT NULL,
+    status text NOT NULL,
+    dependency_fingerprints jsonb NOT NULL,
+    mutable_evidence jsonb NOT NULL,
+    publisher_id text NOT NULL,
+    publisher_authorization_reference text NOT NULL,
+    published_at timestamp with time zone NOT NULL,
+    superseded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT release_gate_attestation_attestation_version_check CHECK ((attestation_version = 'gate-attestation-v1'::text)),
+    CONSTRAINT release_gate_attestation_check CHECK (((superseded_at IS NULL) OR (superseded_at >= published_at))),
+    CONSTRAINT release_gate_attestation_contract_version_check CHECK ((contract_version = 'evaluation-contract-v1'::text)),
+    CONSTRAINT release_gate_attestation_dependency_fingerprints_check CHECK (((jsonb_typeof(dependency_fingerprints) = 'object'::text) AND (dependency_fingerprints <> '{}'::jsonb))),
+    CONSTRAINT release_gate_attestation_deployable_artifact_digest_check CHECK ((deployable_artifact_digest ~ '^sha256:[a-f0-9]{64}$'::text)),
+    CONSTRAINT release_gate_attestation_environment_check CHECK ((environment = ANY (ARRAY['staging'::text, 'pilot'::text]))),
+    CONSTRAINT release_gate_attestation_evidence_bundle_digest_check CHECK ((evidence_bundle_digest ~ '^sha256:[a-f0-9]{64}$'::text)),
+    CONSTRAINT release_gate_attestation_evidence_bundle_reference_check CHECK (((length(evidence_bundle_reference) >= 5) AND (length(evidence_bundle_reference) <= 300))),
+    CONSTRAINT release_gate_attestation_gate_id_check CHECK ((gate_id = ANY (ARRAY['week1.performance'::text, 'week1.audio'::text, 'week1.upload-security'::text, 'week1.adversarial'::text]))),
+    CONSTRAINT release_gate_attestation_mutable_evidence_check CHECK ((jsonb_typeof(mutable_evidence) = 'array'::text)),
+    CONSTRAINT release_gate_attestation_publisher_authorization_referenc_check CHECK (((length(publisher_authorization_reference) >= 5) AND (length(publisher_authorization_reference) <= 300))),
+    CONSTRAINT release_gate_attestation_publisher_id_check CHECK ((publisher_id ~ '^[a-zA-Z0-9_-]{8,128}$'::text)),
+    CONSTRAINT release_gate_attestation_status_check CHECK ((status = ANY (ARRAY['passed'::text, 'failed'::text, 'indeterminate'::text])))
+);
+
+
+--
 -- Name: review_schedule; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1819,6 +1855,14 @@ ALTER TABLE ONLY public.quiz_item_source_span
 
 
 --
+-- Name: release_gate_attestation release_gate_attestation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.release_gate_attestation
+    ADD CONSTRAINT release_gate_attestation_pkey PRIMARY KEY (environment, gate_id, evidence_bundle_digest);
+
+
+--
 -- Name: review_schedule review_schedule_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2115,6 +2159,13 @@ CREATE UNIQUE INDEX quiz_item_bank_order_idx ON public.quiz_item USING btree (ow
 --
 
 CREATE UNIQUE INDEX quiz_item_bank_prompt_idx ON public.quiz_item USING btree (owner_scope_id, quiz_bank_id, normalized_prompt_hash) WHERE (quiz_bank_id IS NOT NULL);
+
+
+--
+-- Name: release_gate_attestation_current_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX release_gate_attestation_current_idx ON public.release_gate_attestation USING btree (environment, gate_id) WHERE (superseded_at IS NULL);
 
 
 --
@@ -3359,4 +3410,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260721000100'),
     ('20260721000200'),
     ('20260721000300'),
-    ('20260721000400');
+    ('20260721000400'),
+    ('20260721000500');

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reflo.invalid/schemas/gate-attestation-v1.schema.json",
+  "title": "Reflo gate-attestation-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "attestationVersion",
+    "contractVersion",
+    "dependencyFingerprints",
+    "deployableArtifactDigest",
+    "environment",
+    "evidenceBundleDigest",
+    "evidenceBundleReference",
+    "gateId",
+    "mutableEvidence",
+    "publishedAt",
+    "publisherAuthorizationReference",
+    "publisherId",
+    "status"
+  ],
+  "properties": {
+    "attestationVersion": { "const": "gate-attestation-v1" },
+    "contractVersion": { "const": "evaluation-contract-v1" },
+    "dependencyFingerprints": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(sha256:)?[a-f0-9]{64}$"
+      }
+    },
+    "deployableArtifactDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "environment": { "enum": ["staging", "pilot"] },
+    "evidenceBundleDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "evidenceBundleReference": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9+.-]*:[^\\s@]{3,300}$"
+    },
+    "gateId": {
+      "enum": [
+        "week1.performance",
+        "week1.audio",
+        "week1.upload-security",
+        "week1.adversarial"
+      ]
+    },
+    "mutableEvidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mutableEvidence" }
+    },
+    "publishedAt": { "type": "string", "format": "date-time" },
+    "publisherAuthorizationReference": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9+.-]*:[^\\s@]{3,300}$"
+    },
+    "publisherId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{8,128}$"
+    },
+    "status": { "enum": ["passed", "failed", "indeterminate"] }
+  },
+  "$defs": {
+    "mutableEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference", "status", "validUntil"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "approval",
+            "capacity",
+            "legal",
+            "privacy",
+            "quota",
+            "rights"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9+.-]*:[^\\s@]{3,300}$"
+        },
+        "status": { "enum": ["invalid", "valid"] },
+        "validUntil": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

@@ -39,6 +39,7 @@ export function createModelStudioEmbeddingAdapter(
       adapterVersion: options.adapterVersion,
       capability: "embedding" as const,
       driftCanaryPassed: options.driftCanaryPassed,
+      embeddingProfileVersion: "embedding-v1",
       effectiveModel: MODEL,
       effectiveModelVersion: options.effectiveModelVersion,
       maxImmediateAttempts: 2,

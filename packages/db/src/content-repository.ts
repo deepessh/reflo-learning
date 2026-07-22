@@ -27,6 +27,21 @@ interface ResolvedSpanRow extends Record<string, unknown> {
   section_path: string[];
 }
 
+interface EmbeddingGenerationRow extends Record<string, unknown> {
+  adapter_version: string;
+  dimensions: number;
+  effective_model: string;
+  effective_model_version: string;
+  endpoint: string;
+  generation_id: string;
+  input_mode: "document";
+  profile_version: string;
+  provider_identifier: string;
+  provider_request_ids: unknown;
+  region: string;
+  span_ids: string[];
+}
+
 export class PostgresContentRepository implements ContentRepositoryPort {
   readonly #pool: InstanceType<typeof Pool>;
 
@@ -305,22 +320,66 @@ export class PostgresContentRepository implements ContentRepositoryPort {
 
   async activeEmbeddingGeneration(
     access: AuthorizedSourceAccess,
-  ): Promise<string | null> {
+  ): Promise<EmbeddingGenerationRecord | null> {
     return this.#scopedTransaction(access, async (client) => {
-      const result = await client.query<{ generation_id: string }>(
-        `SELECT source.active_embedding_generation_id AS generation_id
+      const result = await client.query<EmbeddingGenerationRow>(
+        `SELECT generation.id AS generation_id, generation.profile_version,
+                generation.dimensions, generation.input_mode,
+                generation.adapter_version, generation.effective_model,
+                generation.effective_model_version,
+                generation.provider_identifier,
+                generation.provider_request_ids, generation.region,
+                generation.endpoint,
+                array_agg(link.source_span_id ORDER BY link.span_order) AS span_ids
          FROM source_document AS source
          JOIN source_embedding_generation AS generation
            ON generation.owner_scope_id = source.owner_scope_id
           AND generation.source_document_id = source.id
           AND generation.id = source.active_embedding_generation_id
+         JOIN source_embedding_generation_span AS link
+           ON link.owner_scope_id = generation.owner_scope_id
+          AND link.embedding_generation_id = generation.id
          WHERE source.owner_scope_id = $1 AND source.id = $2
            AND source.parse_status = 'parsed'
            AND source.retention_status = 'active'
-           AND generation.status = 'active'`,
+           AND generation.status = 'active'
+         GROUP BY generation.id, generation.profile_version,
+                  generation.dimensions, generation.input_mode,
+                  generation.adapter_version, generation.effective_model,
+                  generation.effective_model_version,
+                  generation.provider_identifier,
+                  generation.provider_request_ids, generation.region,
+                  generation.endpoint`,
         [access.ownerScopeId, access.sourceDocumentId],
       );
-      return result.rows[0]?.generation_id ?? null;
+      const row = result.rows[0];
+      if (row === undefined) {
+        return null;
+      }
+      if (
+        !Array.isArray(row.provider_request_ids) ||
+        row.provider_request_ids.some((value) => typeof value !== "string") ||
+        !Array.isArray(row.span_ids) ||
+        row.span_ids.some((value) => typeof value !== "string")
+      ) {
+        throw new RetrievalError("persistence_failure");
+      }
+      return {
+        adapterVersion: row.adapter_version,
+        dimensions: row.dimensions as EmbeddingGenerationRecord["dimensions"],
+        effectiveModel: row.effective_model,
+        effectiveModelVersion: row.effective_model_version,
+        endpoint: row.endpoint,
+        generationId: row.generation_id,
+        inputMode: row.input_mode,
+        ownerScopeId: access.ownerScopeId,
+        profileVersion: row.profile_version,
+        providerIdentifier: row.provider_identifier,
+        providerRequestIds: row.provider_request_ids,
+        region: row.region,
+        sourceDocumentId: access.sourceDocumentId,
+        spanIds: row.span_ids,
+      };
     });
   }
 

@@ -13,7 +13,9 @@ export type ModelCapability =
 export interface AdapterDescriptor {
   readonly adapterVersion: string;
   readonly capability: ModelCapability;
+  readonly developmentOnly?: boolean;
   readonly driftCanaryPassed: boolean;
+  readonly embeddingProfileVersion?: string;
   readonly effectiveModel: string;
   readonly effectiveModelVersion: string;
   readonly maxImmediateAttempts: number;
@@ -27,7 +29,13 @@ export interface ProviderUsage {
   readonly outputUnits?: number;
 }
 
+export interface ProviderIdentity {
+  readonly effectiveModel?: string;
+  readonly providerRequestId?: string;
+}
+
 export interface AdapterResponse {
+  readonly identity?: ProviderIdentity;
   readonly usage?: ProviderUsage;
   readonly value: unknown;
 }

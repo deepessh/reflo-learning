@@ -121,6 +121,41 @@ scripts/local-stack.sh setup
 network, and named development volumes. It is intentionally a clean local
 re-embed workflow; do not use LiteLLM vectors in a staging or pilot data store.
 
+## fal development video adapter
+
+`@reflo/model-router/fal` provides one development-only adapter for the
+existing `media.video.v1` capability. It uses fal's asynchronous queue API and
+is rejected unless `REFLO_ENV=dev`. The checked-in
+`REFLO_LOCAL_SMOKE_VIDEO=false` default leaves the adapter uncomposed, and the
+server-side `p1.media.video` guard remains independently required.
+
+When explicitly enabled, the adapter submits one five-second 720p clip, polls
+the provider queue, validates the returned HTTPS MP4 metadata, and lets the
+trusted local smoke composition copy the bytes into the ignored private
+`.reflo/local-smoke/artifacts/owners/...` path. Provider filenames and URLs do
+not select the local object key and are not persisted in the replay manifest.
+The request sends the prepared visual brief, not raw source-span text, disables
+fal JSON input/output retention, provider retries, and provider model
+fallbacks, and applies the bounded media lifetime from
+`REFLO_FAL_MEDIA_LIFETIME_SECONDS`. See fal's official
+[queue](https://fal.ai/docs/documentation/model-apis/inference/queue) and
+[retention](https://fal.ai/docs/documentation/model-apis/media-expiration)
+documentation for those provider behaviors.
+
+Set `REFLO_FAL_KEY`, `REFLO_FAL_VIDEO_MODEL`, and
+`REFLO_FAL_MEDIA_LIFETIME_SECONDS` from an ignored local environment file, then
+set `REFLO_LOCAL_SMOKE_VIDEO=true` only for a synthetic or rights-cleared,
+non-PII experiment. Enabling it submits an external media job and does not
+authorize paid usage or new capacity. If fal is disabled or unavailable, the
+connected smoke still completes its text and audio path and reports video as a
+separate skipped component.
+
+The five-second result is prototype evidence only. A 60–120 second explainer
+would require a separately designed storyboard of multiple short clips,
+cross-clip visual continuity, narration/audio timing, trusted muxing or
+stitching, and final media validation. None of that is a core local-stack
+prerequisite, Wanx production evidence, or a Week 1 release-gate pass.
+
 The API leaves authentication disabled only for local development. Staging and
 pilot composition require the allowlisted DirectMail adapter, exact HTTPS
 callback origins, an ECS RAM role, explicit limits within the verified free
@@ -163,8 +198,8 @@ production schemas plus isolated local-only LiteLLM profile tables, builds the
 participating packages, runs the flow, and emits one bounded JSON summary. A
 missing local service, LiteLLM alias, embedding dimension, ingestion worker, or
 Piper prerequisite fails with a component name and corrective action. Video is
-reported separately and never changes core success while its optional adapter
-issue is absent or its P1 flag is disabled.
+reported separately and never changes core success when its P1 flag is
+disabled or the optional fal experiment is unavailable.
 
 This connected mode is development integration evidence only. Unit and
 integration suites remain deterministic failure/replay evidence. The seeded

@@ -6,8 +6,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DevelopmentVideoArtifactError,
   LOCAL_SMOKE_PODMAN_VERSIONS,
   LocalSmokeObjectStore,
+  copyDevelopmentVideoArtifact,
   isSupportedLocalSmokePodmanVersion,
   readLocalSmokeConfiguration,
 } from "./index.js";
@@ -50,6 +52,57 @@ describe("local smoke boundaries", () => {
     ).toThrowError(
       expect.objectContaining<Partial<SmokePreflightError>>({
         component: "environment",
+      }),
+    );
+  });
+
+  it("keeps optional fal video default-off and validates enabled configuration", () => {
+    const disabled = readLocalSmokeConfiguration(
+      localConfigurationEnvironment(),
+      process.cwd(),
+    );
+    expect(disabled.videoEnabled).toBe(false);
+    expect(disabled.fal).toBeUndefined();
+
+    expect(() =>
+      readLocalSmokeConfiguration(
+        { ...localConfigurationEnvironment(), REFLO_LOCAL_SMOKE_VIDEO: "true" },
+        process.cwd(),
+      ),
+    ).toThrowError(
+      expect.objectContaining<Partial<SmokePreflightError>>({
+        component: "video",
+      }),
+    );
+
+    const enabled = readLocalSmokeConfiguration(
+      {
+        ...localConfigurationEnvironment(),
+        REFLO_FAL_KEY: "dev-only-placeholder",
+        REFLO_FAL_MEDIA_LIFETIME_SECONDS: "3600",
+        REFLO_FAL_VIDEO_MODEL: "fal-ai/wan/v2.7/text-to-video",
+        REFLO_LOCAL_SMOKE_VIDEO: "true",
+      },
+      process.cwd(),
+    );
+    expect(enabled.videoEnabled).toBe(true);
+    expect(enabled.fal).toEqual({
+      apiKey: "dev-only-placeholder",
+      mediaLifetimeSeconds: "3600",
+      videoModel: "fal-ai/wan/v2.7/text-to-video",
+    });
+
+    expect(() =>
+      readLocalSmokeConfiguration(
+        {
+          ...localConfigurationEnvironment(),
+          REFLO_LOCAL_SMOKE_VIDEO: "yes",
+        },
+        process.cwd(),
+      ),
+    ).toThrowError(
+      expect.objectContaining<Partial<SmokePreflightError>>({
+        component: "video",
       }),
     );
   });
@@ -103,7 +156,94 @@ describe("local smoke boundaries", () => {
       }),
     ).rejects.toThrowError(/unsafe local smoke object key/);
   });
+
+  it("copies validated fal output into a private deterministic local path", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "reflo-smoke-test-"));
+    scratch.push(directory);
+    const store = new LocalSmokeObjectStore(directory);
+    const bytes = Buffer.from("synthetic-mp4-fixture");
+
+    const copied = await copyDevelopmentVideoArtifact({
+      courseId: "11200000-0000-4000-8000-000000000004",
+      fetch: async () =>
+        new Response(bytes, {
+          headers: {
+            "Content-Length": String(bytes.byteLength),
+            "Content-Type": "video/mp4",
+          },
+        }),
+      mimeType: "video/mp4",
+      ownerScopeId: "11200000-0000-4000-8000-000000000002",
+      store,
+      uri: "https://v3b.fal.media/files/synthetic/provider-name.mp4",
+    });
+
+    expect(copied).toMatchObject({
+      byteSize: bytes.byteLength,
+      contentSha256: digest(bytes),
+    });
+    expect(copied.objectKey).toContain(
+      `/generations/${digest(bytes)}/payload.mp4`,
+    );
+    expect(copied.objectKey).not.toContain("provider-name");
+    expect(await store.read(copied.objectKey)).toEqual(bytes);
+  });
+
+  it("rejects unsafe or mislabeled development video output", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "reflo-smoke-test-"));
+    scratch.push(directory);
+    const store = new LocalSmokeObjectStore(directory);
+
+    await expect(
+      copyDevelopmentVideoArtifact({
+        courseId: "11200000-0000-4000-8000-000000000004",
+        fetch: async () =>
+          new Response("not-video", {
+            headers: { "Content-Type": "text/plain" },
+          }),
+        mimeType: "video/mp4",
+        ownerScopeId: "11200000-0000-4000-8000-000000000002",
+        store,
+        uri: "https://v3b.fal.media/files/synthetic/output.mp4",
+      }),
+    ).rejects.toBeInstanceOf(DevelopmentVideoArtifactError);
+
+    await expect(
+      copyDevelopmentVideoArtifact({
+        courseId: "11200000-0000-4000-8000-000000000004",
+        mimeType: "video/mp4",
+        ownerScopeId: "11200000-0000-4000-8000-000000000002",
+        store,
+        uri: "https://127.0.0.1/private",
+      }),
+    ).rejects.toBeInstanceOf(DevelopmentVideoArtifactError);
+  });
 });
+
+function localConfigurationEnvironment(): NodeJS.ProcessEnv {
+  return {
+    DATABASE_URL: "postgresql://localhost/reflo",
+    REFLO_ENV: "dev",
+    REFLO_LITELLM_API_KEY: "dev-only-placeholder",
+    REFLO_LITELLM_BASE_URL: "http://127.0.0.1:4000",
+    REFLO_LITELLM_EMBEDDING_MODEL: "local-embedding",
+    REFLO_LITELLM_TEXT_MODEL: "local-text",
+    REFLO_LOCAL_CLAMAV_DATABASE_DIR: "/tmp/clamav",
+    REFLO_LOCAL_INGESTION_IMAGE: "reflo-ingestion:test",
+    REFLO_LOCAL_INGESTION_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+    REFLO_LOCAL_PIPER_ARTIFACT_REVISION: "b".repeat(40),
+    REFLO_LOCAL_PIPER_CONFIG_PATH: "/tmp/voice.json",
+    REFLO_LOCAL_PIPER_CONFIG_SHA256: "c".repeat(64),
+    REFLO_LOCAL_PIPER_MODEL_PATH: "/tmp/voice.onnx",
+    REFLO_LOCAL_PIPER_MODEL_SHA256: "d".repeat(64),
+    REFLO_LOCAL_PIPER_PYTHON: "/tmp/python",
+    REFLO_LOCAL_PIPER_VOICE_ARTIFACT_VERSION:
+      "piper-voice-en-us-ljspeech-high-v1",
+    REFLO_LOCAL_SMOKE_VIDEO: "false",
+    REFLO_LOCAL_TESSDATA_DIR: "/tmp/tessdata",
+    REFLO_VECTOR_DATABASE_URL: "postgresql://localhost/reflo_vector",
+  };
+}
 
 function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");

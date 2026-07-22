@@ -28,6 +28,7 @@
     "@reflo/accounts": "workspace:*",
     "@reflo/activation": "workspace:*",
     "@reflo/audio": "workspace:*",
+    "@reflo/evaluation": "workspace:*",
     "@reflo/ingestion": "workspace:*",
     "@reflo/retrieval": "workspace:*",
     "dbmate": "2.34.1",

@@ -121,6 +121,35 @@ scripts/local-stack.sh setup
 network, and named development volumes. It is intentionally a clean local
 re-embed workflow; do not use LiteLLM vectors in a staging or pilot data store.
 
+## Model Studio Wan video adapter
+
+`@reflo/model-router/model-studio-video` provides the production-path adapter
+for the existing `media.video.v1` capability. It calls the workspace-scoped
+Model Studio asynchronous API with the immutable
+`wan2.7-t2v-2026-06-12` model, polls the provider task, validates the bounded
+720p MP4 result, and returns only the provider URI plus source-span IDs. The
+trusted finalizer remains responsible for copying the short-lived result into
+the private D-GH-13 object path and persisting the router provenance.
+
+The factory is unavailable unless its explicit enablement and drift-canary
+inputs are both current. The independent server-side `p1.media.video` guard is
+still required at router execution, so composing the adapter cannot enable
+video by itself. Credentials and the regional workspace endpoint must come
+from the deployment composition/KMS boundary; no static key or default
+endpoint is checked in.
+
+Wan 2.7 currently returns one 2–15 second video per asynchronous task, and its
+result URL expires after 24 hours. This adapter intentionally requests one
+15-second, 720p, 16:9, watermarked clip and never resubmits an accepted task.
+Provider prompt rewriting is disabled so the prepared source-grounded visual
+brief remains the exact generation prompt and no hidden rewrite adds latency.
+It does not claim to satisfy issue #38's 60–120 second explainer target: that
+requires an authorized storyboard, multiple provider jobs, continuity rules,
+narration timing, trusted stitching/muxing, and final-media validation. See the
+official Model Studio [text-to-video API
+reference](https://www.alibabacloud.com/help/en/model-studio/text-to-video-api-reference)
+for the provider protocol and duration limit.
+
 ## fal development video adapter
 
 `@reflo/model-router/fal` provides one development-only adapter for the

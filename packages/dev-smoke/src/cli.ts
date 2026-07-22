@@ -36,6 +36,7 @@ import {
   type ModelTraceSink,
   type SpeechModelPort,
 } from "@reflo/model-router";
+import { createFalDevVideoAdapter } from "@reflo/model-router/fal";
 import { createLiteLlmDevAdapters } from "@reflo/model-router/litellm";
 import {
   NodePiperSynthesisProcess,
@@ -55,11 +56,13 @@ import {
   verifyLocalSmokePrerequisites,
 } from "./configuration.js";
 import {
+  DevelopmentVideoArtifactError,
   FixtureQuarantineDownload,
   LOCAL_SMOKE_SCANNER,
   LocalSmokeObjectStore,
   TrustedFixtureAdmissionScanner,
   artifactObjectKey,
+  copyDevelopmentVideoArtifact,
 } from "./local-adapters.js";
 
 const IDS = Object.freeze({
@@ -76,6 +79,7 @@ const AUTHORIZATION: ScopeAuthorizationContext = Object.freeze({
   ownerScopeId: IDS.scope,
 });
 const SOURCE_OBJECT_KEY = `owners/${IDS.scope}/sources/${IDS.source}/versions/v1/original.pdf`;
+const VIDEO_MANIFEST_KEY = `owners/${IDS.scope}/courses/${IDS.course}/assets/development-fal-video/manifest.json`;
 
 interface ComponentResult {
   readonly detail: string;
@@ -239,8 +243,15 @@ async function runSmoke(
       REFLO_LITELLM_TEXT_MODEL: configuration.litellm.textModel,
     });
     const router = createModelRouter({
-      adapters: withDevelopmentSpeech(liteLlm.adapters, configuration),
+      adapters: withDevelopmentVideo(
+        withDevelopmentSpeech(liteLlm.adapters, configuration),
+        configuration,
+      ),
       deployment: "dev",
+      isFeatureEnabled: (key, context) =>
+        key === "p1.media.video" &&
+        configuration.videoEnabled &&
+        context.videoOperationKind === "chapter_explainer",
       traceSink: traces,
     });
     const vectors = new DevelopmentPgVectorStore(
@@ -379,13 +390,9 @@ async function runSmoke(
       status: snapshotAtStart.audioAssetCount === 0 ? "ran" : "replayed",
     });
 
-    components.push({
-      detail: configuration.videoEnabled
-        ? "optional adapter issue #111 is not a core dependency; unavailable video does not fail smoke"
-        : "P1 video flag is disabled",
-      name: "video",
-      status: "skipped",
-    });
+    components.push(
+      await runDevelopmentVideo(router, objects, course, configuration),
+    );
 
     const completed = await smokeRepository.snapshot(
       AUTHORIZATION,
@@ -501,6 +508,157 @@ function withDevelopmentSpeech(
       "piper-tts.cpu": piper,
       "qwen-tts.primary": unavailablePrimary,
     },
+  };
+}
+
+function withDevelopmentVideo(
+  adapters: ModelAdapterRegistry,
+  configuration: ReturnType<typeof readLocalSmokeConfiguration>,
+): ModelAdapterRegistry {
+  if (!configuration.videoEnabled) return adapters;
+  const fal = configuration.fal;
+  if (fal === undefined) {
+    throw new SmokePreflightError(
+      "video",
+      "set the required fal development configuration",
+    );
+  }
+  return {
+    ...adapters,
+    video: {
+      "wanx.video": createFalDevVideoAdapter({
+        REFLO_ENV: "dev",
+        REFLO_FAL_KEY: fal.apiKey,
+        REFLO_FAL_MEDIA_LIFETIME_SECONDS: fal.mediaLifetimeSeconds,
+        REFLO_FAL_VIDEO_MODEL: fal.videoModel,
+      }),
+    },
+  };
+}
+
+async function runDevelopmentVideo(
+  router: ReturnType<typeof createModelRouter>,
+  objects: LocalSmokeObjectStore,
+  course: AuthorizedActivationCourse,
+  configuration: ReturnType<typeof readLocalSmokeConfiguration>,
+): Promise<ComponentResult> {
+  if (!configuration.videoEnabled) {
+    return {
+      detail: "P1 video flag is disabled",
+      name: "video",
+      status: "skipped",
+    };
+  }
+  if (await objects.exists(VIDEO_MANIFEST_KEY)) {
+    const manifest = parseDevelopmentVideoManifest(
+      await objects.read(VIDEO_MANIFEST_KEY),
+    );
+    const payload = await objects.read(manifest.objectKey);
+    if (
+      payload.byteLength !== manifest.byteSize ||
+      digest(payload) !== manifest.contentSha256
+    ) {
+      throw new Error("development video replay failed integrity validation");
+    }
+    return {
+      detail: "private local fal clip artifact replayed",
+      name: "video",
+      status: "replayed",
+    };
+  }
+  const concept = course.chapters[0]?.concepts[0];
+  if (concept === undefined || concept.sourceSpans.length === 0) {
+    throw new Error("source-backed video concept is unavailable");
+  }
+  try {
+    const result = await router.execute(
+      "media.video.v1",
+      {
+        conceptId: concept.id,
+        sourceSpans: concept.sourceSpans,
+        visualBrief: `Create a concise animated educational diagram explaining ${concept.name}. Use labels, motion, and no decorative text walls.`,
+      },
+      { deadlineMs: 10 * 60_000, videoOperationKind: "chapter_explainer" },
+    );
+    const copied = await copyDevelopmentVideoArtifact({
+      courseId: course.courseId,
+      mimeType: result.value.mimeType,
+      ownerScopeId: course.ownerScopeId,
+      store: objects,
+      uri: result.value.uri,
+    });
+    const manifest = Buffer.from(
+      JSON.stringify({
+        byteSize: copied.byteSize,
+        contentSha256: copied.contentSha256,
+        contractVersion: "development-fal-video-manifest-v1",
+        objectKey: copied.objectKey,
+      }),
+      "utf8",
+    );
+    await objects.putIfAbsent({
+      bytes: manifest,
+      objectKey: VIDEO_MANIFEST_KEY,
+      sha256: digest(manifest),
+    });
+    return {
+      detail:
+        "one five-second fal clip copied into the private local artifact path",
+      name: "video",
+      status: "ran",
+    };
+  } catch (error) {
+    if (
+      error instanceof ModelRouterError ||
+      error instanceof DevelopmentVideoArtifactError
+    ) {
+      return {
+        detail:
+          "optional fal video was unavailable; text and audio remained complete",
+        name: "video",
+        status: "skipped",
+      };
+    }
+    throw error;
+  }
+}
+
+function parseDevelopmentVideoManifest(bytes: Uint8Array): {
+  readonly byteSize: number;
+  readonly contentSha256: string;
+  readonly objectKey: string;
+} {
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
+  } catch {
+    throw new Error("development video manifest is invalid");
+  }
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("contractVersion" in value) ||
+    value.contractVersion !== "development-fal-video-manifest-v1" ||
+    !("byteSize" in value) ||
+    typeof value.byteSize !== "number" ||
+    !Number.isSafeInteger(value.byteSize) ||
+    value.byteSize < 1 ||
+    !("contentSha256" in value) ||
+    typeof value.contentSha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.contentSha256) ||
+    !("objectKey" in value) ||
+    typeof value.objectKey !== "string" ||
+    !value.objectKey.startsWith(
+      `owners/${IDS.scope}/courses/${IDS.course}/assets/development-fal-video/generations/`,
+    )
+  ) {
+    throw new Error("development video manifest is invalid");
+  }
+  return {
+    byteSize: value.byteSize,
+    contentSha256: value.contentSha256,
+    objectKey: value.objectKey,
   };
 }
 

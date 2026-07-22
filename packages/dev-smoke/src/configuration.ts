@@ -15,6 +15,11 @@ export interface LocalSmokeConfiguration {
   readonly artifactRoot: string;
   readonly clamDatabaseDirectory: string;
   readonly databaseUrl: string;
+  readonly fal?: {
+    readonly apiKey: string;
+    readonly mediaLifetimeSeconds: string;
+    readonly videoModel: string;
+  };
   readonly fixturePath: string;
   readonly ingestionImage: string;
   readonly ingestionImageDigest: string;
@@ -66,6 +71,11 @@ export function readLocalSmokeConfiguration(
     absoluteRoot,
     "packages/audio/piper-worker/worker.py",
   );
+  const videoEnabled = optionalBoolean(
+    environment.REFLO_LOCAL_SMOKE_VIDEO,
+    "video",
+    "set REFLO_LOCAL_SMOKE_VIDEO to true or false",
+  );
   return {
     artifactRoot: path.join(absoluteRoot, ".reflo/local-smoke/artifacts"),
     clamDatabaseDirectory: requiredAbsolute(
@@ -78,6 +88,27 @@ export function readLocalSmokeConfiguration(
       "local-services",
       "run scripts/local-stack.sh setup and source its generated app.env",
     ),
+    ...(videoEnabled
+      ? {
+          fal: {
+            apiKey: required(
+              environment.REFLO_FAL_KEY,
+              "video",
+              "set the development-only fal API key",
+            ),
+            mediaLifetimeSeconds: required(
+              environment.REFLO_FAL_MEDIA_LIFETIME_SECONDS,
+              "video",
+              "set a bounded fal development media lifetime",
+            ),
+            videoModel: required(
+              environment.REFLO_FAL_VIDEO_MODEL,
+              "video",
+              "set the fal text-to-video model endpoint",
+            ),
+          },
+        }
+      : {}),
     fixturePath: path.join(
       absoluteRoot,
       "packages/dev-smoke/fixtures/reflo-retention-basics.pdf",
@@ -169,7 +200,7 @@ export function readLocalSmokeConfiguration(
       "embedding",
       "run scripts/local-stack.sh setup and source its generated app.env",
     ),
-    videoEnabled: environment.REFLO_LOCAL_SMOKE_VIDEO === "true",
+    videoEnabled,
   };
 }
 
@@ -389,6 +420,16 @@ function requiredMatching(
     throw new SmokePreflightError(component, action);
   }
   return requiredValue;
+}
+
+function optionalBoolean(
+  value: string | undefined,
+  component: string,
+  action: string,
+): boolean {
+  if (value === undefined || value === "false") return false;
+  if (value === "true") return true;
+  throw new SmokePreflightError(component, action);
 }
 
 function escapeRegex(value: string): string {

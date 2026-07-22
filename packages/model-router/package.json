@@ -25,6 +25,10 @@
       "types": "./dist/adapters/litellm.d.ts",
       "default": "./dist/adapters/litellm.js"
     },
+    "./fal": {
+      "types": "./dist/adapters/fal.d.ts",
+      "default": "./dist/adapters/fal.js"
+    },
     "./tts": {
       "types": "./dist/adapters/tts.d.ts",
       "default": "./dist/adapters/tts.js"

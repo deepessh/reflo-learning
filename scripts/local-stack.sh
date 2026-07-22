@@ -175,18 +175,23 @@ setup_databases() {
 
 worker_status() {
   if ! command -v podman >/dev/null 2>&1; then
-    echo "SKIPPED ingestion-worker: Podman 6.0.1 is absent; install that exact runtime before building packages/ingestion/worker/Containerfile."
+    echo "SKIPPED ingestion-worker: install development-compatible Podman 5.8.3 or production-pinned 6.0.1 before building packages/ingestion/worker/Containerfile."
   else
     REFLO_LOCAL_PODMAN_VERSION=$(podman --version 2>/dev/null | awk '{ print $3 }')
-    if [ "$REFLO_LOCAL_PODMAN_VERSION" != "6.0.1" ]; then
-      echo "SKIPPED ingestion-worker: Podman $REFLO_LOCAL_PODMAN_VERSION is installed; isolated-ingestion-v1 requires 6.0.1."
-    elif [ -z "${REFLO_LOCAL_INGESTION_IMAGE:-}" ]; then
-      echo "SKIPPED ingestion-worker: set REFLO_LOCAL_INGESTION_IMAGE to a locally built image after the pinned worker build and fixture checks pass."
-    elif ! podman image exists "$REFLO_LOCAL_INGESTION_IMAGE" >/dev/null 2>&1; then
-      echo "SKIPPED ingestion-worker: REFLO_LOCAL_INGESTION_IMAGE does not resolve to a local Podman image."
-    else
-      echo "AVAILABLE ingestion-worker: runtime and local image are present; a signed ClamAV snapshot and job-scoped mounts are still required per D-GH-8."
-    fi
+    case "$REFLO_LOCAL_PODMAN_VERSION" in
+      5.8.3 | 6.0.1)
+        if [ -z "${REFLO_LOCAL_INGESTION_IMAGE:-}" ]; then
+          echo "SKIPPED ingestion-worker: supported local Podman $REFLO_LOCAL_PODMAN_VERSION is installed; set REFLO_LOCAL_INGESTION_IMAGE after the pinned worker build and fixture checks pass."
+        elif ! podman image exists "$REFLO_LOCAL_INGESTION_IMAGE" >/dev/null 2>&1; then
+          echo "SKIPPED ingestion-worker: REFLO_LOCAL_INGESTION_IMAGE does not resolve to a local Podman image."
+        else
+          echo "AVAILABLE ingestion-worker: development-compatible Podman $REFLO_LOCAL_PODMAN_VERSION and the local image are present; production remains pinned to 6.0.1 and a signed ClamAV snapshot plus job-scoped mounts are still required per D-GH-8."
+        fi
+        ;;
+      *)
+        echo "SKIPPED ingestion-worker: Podman $REFLO_LOCAL_PODMAN_VERSION is installed; the connected development smoke accepts only 5.8.3 or 6.0.1, and production remains pinned to 6.0.1."
+        ;;
+    esac
   fi
 
   echo "SKIPPED piper-worker production activation: packages/audio/piper-worker/manifest.json remains blocked; the connected development smoke can use explicit local Python and pinned voice paths, but cannot satisfy its listed license, image, SBOM, capacity, or listening gates."

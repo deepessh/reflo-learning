@@ -5,6 +5,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+export const LOCAL_SMOKE_PODMAN_VERSIONS = ["5.8.3", "6.0.1"] as const;
+const LOCAL_SMOKE_PODMAN_VERSION_PATTERN = new RegExp(
+  `^podman version (?:${LOCAL_SMOKE_PODMAN_VERSIONS.map(escapeRegex).join("|")})$`,
+  "i",
+);
+
 export interface LocalSmokeConfiguration {
   readonly artifactRoot: string;
   readonly clamDatabaseDirectory: string;
@@ -190,9 +196,10 @@ export async function verifyLocalSmokePrerequisites(
   await verifyCommandVersion(
     "podman",
     ["--version"],
-    /^podman version 6[.]0[.]1$/i,
+    LOCAL_SMOKE_PODMAN_VERSION_PATTERN,
     {
-      action: "install exact Podman 6.0.1 and retry",
+      action:
+        "install development-compatible Podman 5.8.3 or production-pinned 6.0.1 and retry",
       component: "ingestion-worker",
     },
   );
@@ -382,4 +389,12 @@ function requiredMatching(
     throw new SmokePreflightError(component, action);
   }
   return requiredValue;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function isSupportedLocalSmokePodmanVersion(output: string): boolean {
+  return LOCAL_SMOKE_PODMAN_VERSION_PATTERN.test(output.trim());
 }

@@ -148,6 +148,12 @@ export function collectLocalStackViolations({
   requireText(
     errors,
     scriptSource,
+    "5.8.3 | 6.0.1",
+    "development-compatible Podman allowlist",
+  );
+  requireText(
+    errors,
+    scriptSource,
     "SKIPPED piper-worker",
     "actionable Piper-worker state",
   );

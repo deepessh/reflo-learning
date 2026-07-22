@@ -1,7 +1,8 @@
 # Reflo — Product Requirements Document
 
-**Version:** 1.7 · **Date:** July 18, 2026 · **Status:** Approved for build sprint
-**Changelog:** v1.7 — removed fixed deployment-location constraints; provider selection still must satisfy the existing privacy, security, consent, quality, and production-path gates
+**Version:** 1.8 · **Date:** July 22, 2026 · **Status:** Approved for build sprint
+**Changelog:** v1.8 — narrowed the sprint video scope to one source-backed nominal 15-second Wan prototype; deferred production 60–120 second composition and full-course video generation to fast-follow
+v1.7 — removed fixed deployment-location constraints; provider selection still must satisfy the existing privacy, security, consent, quality, and production-path gates
 v1.6 — decision authority split by role: this PRD controls product requirements and mandates, GitHub issues authorize implementation/process choices, and merged `DECISIONS.md` records make those verdicts effective and searchable
 v1.5 — pilot-blocking evaluations moved before activation; D7 observation window corrected; provider-scoped delivery/attempt uniqueness made implementable; sessionless ambient attempts clarified; deletion audit detached from deleted identities; per-evidence knowledge-algorithm provenance added
 v1.4 — delivery/scheduling, scope membership, exam mapping, per-concept evidence, tutor-turn provenance, and deletion-store models added; performance and re-teach gates made executable; TTS fallback, prompt-injection tests, pilot consent, D7 event semantics, email interaction, and offline-demo envelope specified; OAuth moved to P1
@@ -83,11 +84,11 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 ### F2. Multimodal Lesson Generation — *P0 audio + text; P1 video*
 - P0 per chapter: (a) narrated audio lesson, 5–10 min, via TTS (Qwen-TTS through Model Studio); (b) text micro-lessons per concept, including a 2–3 minute first micro-lesson for activation
 - P0 audio capacity must not rely on an unresolved quota. Before Week 1 exit, verify reserved primary TTS capacity and a second, quota-independent non-GPU TTS adapter behind the shared model router. Both paths must produce the same asset contract and pass the audio quality/SLO gate. Select the fallback in a `decision` issue; any paid capacity requires the human spending approval in `AGENTS.md`. If neither path is verified, the P0 audio exit criterion has not passed.
-- P1: one short explainer video, 60–120 s, via Wanx for the chapter's hardest concept; full-course video generation is attempted only after the Week 2 P0 exit criteria pass
+- P1 sprint prototype: one source-backed nominal 15-second Wanx generation for a chapter's hardest concept, behind the default-off video flag and labeled as a prototype unless the separate runtime eligibility gates pass. It must use the shared router and normal private-asset contract, but it is not a learner-flow dependency or a production per-chapter-video commitment. Production 60–120 second composition and full-course video generation are fast-follow work.
 - Generation is queue-driven (RocketMQ) and progressive — chapter 1 assets ready fast, rest fill in; UI shows generation status per chapter
 - All assets carry source-span IDs, prompt/model/version metadata, and generation status; private assets are stored in OSS and delivered through short-lived authorized URLs via CDN
 - Quality bar: audio listenable at 1.5×; video visually explains (diagrams/motion), not a slideshow of text
-- Degradation rule: video is an enhancement, never a blocker. If Wanx/GPU capacity is unavailable or slow, the chapter ships with audio + text and video backfills later; no learner-facing flow may hard-depend on video existing
+- Degradation rule: video is an enhancement, never a blocker. If Wanx/GPU capacity is unavailable or slow, the chapter ships with audio + text; no learner-facing flow may hard-depend on the prototype or any future video existing
 
 ### F3. Adaptive Assessment Engine — *P0*
 - Quiz banks generate progressively during ingestion, prioritizing the placement quiz and chapter 1. They include multiple choice, short answer (LLM-graded), and concept-linking items; each question is tagged to concept ID(s) and supporting source spans.
@@ -126,6 +127,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 ---
 
 ## 7. Fast-Follow (post–Demo Day, pre-committed roadmap)
+- **Production explainer video:** source-backed 60–120 second explainers, including multi-segment continuity, trusted composition, and full-course generation
 - **Coding-exercise sandbox** (Agent Run): generate/grade live coding tasks for technical certs
 - **Enterprise tenanting:** org accounts, seat management, admin retention dashboards, SSO
 - **Multilingual delivery:** same source, taught in learner's language (Qwen strength)
@@ -201,11 +203,11 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 **Pre-sprint Builder Day (Jul 16).** The planned asks were: (1) GPU quota approval for Wanx/TTS workloads, (2) Model Studio rate limits raised for batch generation, (3) advisory validation of the AnalyticDB-vs-Milvus decision, (4) a named AMD contact for the ROCm benchmark track, and (5) openly licensed Alibaba Cloud ACA study materials (resolves §15 Q2). At kickoff on Jul 17, record each outcome and owner in GitHub; carry forward any unresolved quota, content, WhatsApp approval, or pilot-recruitment action rather than describing Jul 16 work as current.
 
-**Week 1 (Jul 17–23) — Pipeline & skeleton.** Secure ingestion pipeline end-to-end (validate→parse→embed→curriculum with source spans), primary + fallback TTS through the shared router, OSS/CDN authorization, email auth + library UI, quiz generation v1, and Wanx spike behind the P1 video flag. Prepare versioned pilot consent and recruit a waitlist of 30+ candidates (target: exam date < 60 days out); no pilot activates before consent and content-rights gates pass. *Exit: the full §11 performance benchmark passes, both TTS paths pass the audio gate, malformed/scanned files take their documented paths, and upload authorization/prompt-injection tests pass.*
+**Week 1 (Jul 17–23) — Pipeline & skeleton.** Secure ingestion pipeline end-to-end (validate→parse→embed→curriculum with source spans), primary + fallback TTS through the shared router, OSS/CDN authorization, email auth + library UI, quiz generation v1, and one nominal 15-second source-backed Wanx prototype behind the P1 video flag. Prepare versioned pilot consent and recruit a waitlist of 30+ candidates (target: exam date < 60 days out); no pilot activates before consent and content-rights gates pass. *Exit: the full §11 performance benchmark passes, both TTS paths pass the audio gate, malformed/scanned files take their documented paths, and upload authorization/prompt-injection tests pass.*
 
 **Week 2 (Jul 24–30) — The loop.** Knowledge model + FSRS scheduling, adaptive quiz selection, executable Tutor Agent re-teach behavior, Knowledge Map UI, durable Telegram/email scheduling and delivery, Langfuse/SLS wiring, the seeded offline bundle, and the quiz-quality, grading-accuracy, and artifact-grounding evaluations. WhatsApp remains P1. *Exit: every §11 gate marked "before pilot launch" or "blocks pilots" has passed before activation; the precise Flow B assertion passes online and offline; delivery retries/webhook replays create no duplicate attempts; then the **first 5 consented pilots go live by Jul 30** (not merely invited — D7 retention needs a week of runway before the Aug 7 metrics cut).*
 
-**Week 3 (Jul 31–Aug 7) — Pilots & polish.** 10–20 pilot learners live; grounding, grading, quiz, and adversarial suites rerun for regression coverage and any regressions are fixed before further pilot deployment. Complete the ROCm benchmark with AMD mentors, eligible readiness-score calibration, and demo hardening (offline fallbacks, seeded demo course). Voice mode and full-course video remain P1 and are built only if all Week 1–2 P0 exit criteria passed on time. *Exit: all pilot-blocking gates remain green; seeded Flow B runs reliably in ≤ 6 min; the upload SLO is demonstrated separately; provisional pilot metrics report eligible cohorts and denominators.*
+**Week 3 (Jul 31–Aug 7) — Pilots & polish.** 10–20 pilot learners live; grounding, grading, quiz, and adversarial suites rerun for regression coverage and any regressions are fixed before further pilot deployment. Complete the ROCm benchmark with AMD mentors, eligible readiness-score calibration, and demo hardening (offline fallbacks, seeded demo course). Voice mode remains P1 and is built only if all Week 1–2 P0 exit criteria passed on time; production 60–120 second composition and full-course video generation remain post–Demo Day fast-follow work. *Exit: all pilot-blocking gates remain green; seeded Flow B runs reliably in ≤ 6 min; the upload SLO is demonstrated separately; provisional pilot metrics report eligible cohorts and denominators.*
 
 **Aug 8–14 — Demo Day prep.** Pitch narrative, live-demo rehearsals (≥ 10 runs), final D7 analysis at the Aug 15 cut, metrics slide with cohort dates and denominators, and failure-mode rehearsal using the seeded course and pre-generated fallback assets.
 
@@ -215,7 +217,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Wanx video quality/latency insufficient for per-chapter videos | Medium | Video is P1 and excluded from activation/release gates; pre-generate one seeded-course demo video if useful; audio+text carry the lesson load |
+| Wanx video quality/latency insufficient for the bounded prototype | Medium | Video is P1 and excluded from activation/release gates; attempt only one nominal 15-second source-backed prototype when access and capacity are authorized, label it honestly, and let audio+text carry the lesson load |
 | LLM grading errors erode trust | Medium | Confidence thresholds, MC fallback, eval suite gate before pilots |
 | TTS quota/capacity delays block P0 audio | Medium | Verify reserved primary capacity plus a quota-independent non-GPU fallback through the shared router; both must pass the §11 audio gate or Week 1 fails |
 | Scope creep (7 feature groups expanding informally) | High | This PRD is the contract; anything not in §6 goes to §7 |
@@ -225,7 +227,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 | WhatsApp Business approval doesn't land in time | Medium–High | Telegram is the P0 channel (no approval needed); WhatsApp is an upgrade, not a dependency — approval started Jul 16 |
 | Untrusted document or unauthorized asset access | Medium | Validate and scan uploads, isolate parsers/OCR, enforce expansion/resource limits, use owner-scoped retrieval and short-lived signed URLs, and include these controls in the Week 1 exit |
 | Pilot sample too small for a credible causal claim | High | Pre-register assignment and delayed-retest analysis in §12; report counts and clustered intervals; describe the 15pp target as exploratory unless achieved precision supports a stronger claim |
-| Too many P0s for a 3-person team | High | Preserve P0 ingestion, audio+text, assessment, knowledge model, re-teach loop, Telegram/email delivery, and account/privacy controls. Defer P1 voice, video, and OAuth first. Any further cut requires the human escalation process in `AGENTS.md`. |
+| Too many P0s for a 3-person team | High | Preserve P0 ingestion, audio+text, assessment, knowledge model, re-teach loop, Telegram/email delivery, and account/privacy controls. Keep video bounded to the single default-off prototype; defer production video, P1 voice, and OAuth first. Any further cut requires the human escalation process in `AGENTS.md`. |
 
 ---
 

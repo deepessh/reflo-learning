@@ -64,10 +64,30 @@ export interface EmbeddingInput {
   readonly texts: readonly string[];
 }
 
+export const TTS_SYNTHESIS_REQUEST_VERSION =
+  "tts-synthesis-request-v1" as const;
+export const AUDIO_PAYLOAD_VERSION = "audio-payload-v1" as const;
+export const REFLO_NARRATOR_VOICE_PROFILE = "en-US/reflo-narrator-v1" as const;
+export const TTS_ALLOWED_SAMPLE_RATES = [22_050, 24_000] as const;
+
 export interface TextToSpeechInput {
+  readonly contractVersion: typeof TTS_SYNTHESIS_REQUEST_VERSION;
+  readonly deadlineAt: string;
+  readonly generationReference: string;
+  readonly locale: "en-US";
   readonly narration: string;
+  readonly narrationScriptId: string;
+  readonly operationId: string;
+  readonly output: {
+    readonly allowedSampleRates: typeof TTS_ALLOWED_SAMPLE_RATES;
+    readonly channels: 1;
+    readonly codec: "pcm_s16le";
+    readonly container: "wav";
+  };
+  readonly scriptSha256: string;
   readonly sourceSpanIds: readonly string[];
-  readonly voice: string;
+  readonly speakingRate: number;
+  readonly voiceProfileId: typeof REFLO_NARRATOR_VOICE_PROFILE;
 }
 
 export interface VideoGenerationInput {
@@ -144,11 +164,24 @@ export interface EmbeddingResult {
   readonly vectors: readonly (readonly number[])[];
 }
 
-export interface AudioAssetResult {
+export interface AudioPayloadResult {
+  readonly bytes: Uint8Array;
+  readonly byteLength: number;
+  readonly channels: 1;
+  readonly codec: "pcm_s16le";
+  readonly container: "wav";
+  readonly contractVersion: typeof AUDIO_PAYLOAD_VERSION;
   readonly durationSeconds: number;
-  readonly mimeType: string;
+  readonly engine: string;
+  readonly engineVersion: string;
+  readonly headerValidated: true;
+  readonly payloadSha256: string;
+  readonly sampleRateHz: (typeof TTS_ALLOWED_SAMPLE_RATES)[number];
+  readonly settingsVersion: string;
   readonly sourceSpanIds: readonly string[];
-  readonly uri: string;
+  readonly voiceArtifactVersion: string;
+  readonly voiceId: string;
+  readonly voiceProfileId: typeof REFLO_NARRATOR_VOICE_PROFILE;
 }
 
 export interface VideoAssetResult {
@@ -181,7 +214,7 @@ export interface ModelTaskResultMap {
   readonly "lesson.audio-script.v1": AudioScriptResult;
   readonly "lesson.reteach.v1": LessonResult;
   readonly "lesson.text.v1": LessonResult;
-  readonly "media.tts.v1": AudioAssetResult;
+  readonly "media.tts.v1": AudioPayloadResult;
   readonly "media.video.v1": VideoAssetResult;
   readonly "tutor.answer.v1": TutorAnswerResult;
 }

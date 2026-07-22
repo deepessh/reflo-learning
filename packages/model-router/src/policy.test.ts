@@ -11,7 +11,9 @@ describe("route-policy-v2", () => {
     );
     for (const task of MODEL_TASK_IDS) {
       expect(ROUTE_POLICY_V2[task].task).toBe(task);
-      expect(ROUTE_POLICY_V2[task].fallback).toBeNull();
+      expect(ROUTE_POLICY_V2[task].fallback).toBe(
+        task === "media.tts.v1" ? "piper-tts.cpu" : null,
+      );
     }
   });
 

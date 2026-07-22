@@ -83,12 +83,14 @@ export interface ModelAdapterRegistry {
 
 export class ModelAdapterError extends Error {
   readonly safeCode: string;
+  readonly submissionState: "accepted" | "not_accepted" | "unknown";
   readonly transient: boolean;
 
   constructor(options: {
     readonly cause?: unknown;
     readonly message?: string;
     readonly safeCode: string;
+    readonly submissionState?: "accepted" | "not_accepted" | "unknown";
     readonly transient: boolean;
   }) {
     super(options.message ?? "model adapter request failed", {
@@ -96,6 +98,7 @@ export class ModelAdapterError extends Error {
     });
     this.name = "ModelAdapterError";
     this.safeCode = normalizeSafeCode(options.safeCode);
+    this.submissionState = options.submissionState ?? "unknown";
     this.transient = options.transient;
   }
 }
@@ -105,6 +108,7 @@ const SAFE_ADAPTER_ERROR_CODES = new Set([
   "capacity_unavailable",
   "invalid_request",
   "provider_error",
+  "quota_exhausted",
   "rate_limited",
   "request_rejected",
   "script_exhausted",

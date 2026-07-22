@@ -80,11 +80,23 @@ export type RouterErrorCode =
 
 export class ModelRouterError extends Error {
   readonly code: RouterErrorCode;
+  readonly providerFailure?: {
+    readonly safeCode: string;
+    readonly submissionState: "accepted" | "not_accepted" | "unknown";
+    readonly transient: boolean;
+  };
 
-  constructor(code: RouterErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    code: RouterErrorCode,
+    message: string,
+    options?: ErrorOptions & {
+      readonly providerFailure?: ModelRouterError["providerFailure"];
+    },
+  ) {
     super(message, options);
     this.name = "ModelRouterError";
     this.code = code;
+    this.providerFailure = options?.providerFailure;
   }
 }
 
@@ -154,151 +166,176 @@ export function createModelRouter(options: ModelRouterOptions) {
 
     const prompt = buildPrompt(task, input);
     verifyPromptRoute(route, prompt);
-    const adapter = selectAdapter(
-      options.adapters,
-      route.capability,
-      route.requestedSelector,
-    );
-    verifyAdapter(
-      adapter.descriptor,
-      route.capability,
-      route.requestedSelector,
-    );
-
     const attempts: ModelAttemptTrace[] = [];
-    const maximumAttempts = Math.min(
-      route.maxImmediateAttempts,
-      adapter.descriptor.maxImmediateAttempts,
-    );
     let failure: ModelRouterError | undefined;
+    const selectors = [
+      route.requestedSelector,
+      ...(route.fallback === null ? [] : [route.fallback]),
+    ];
+    for (const [selectorIndex, selector] of selectors.entries()) {
+      const adapter = selectAdapter(
+        options.adapters,
+        route.capability,
+        selector,
+      );
+      verifyAdapter(adapter.descriptor, route.capability, selector);
+      const maximumAttempts = Math.min(
+        route.maxImmediateAttempts,
+        adapter.descriptor.maxImmediateAttempts,
+      );
+      let fallbackEligible = false;
 
-    for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
-      const attemptStartedAt = now();
-      if (attemptStartedAt >= deadlineAt) {
-        failure = new ModelRouterError(
-          "deadline_exceeded",
-          "model call deadline elapsed before an eligible retry",
-        );
-        break;
-      }
-
-      const abortController = new AbortController();
-      try {
-        const response = await withDeadline(
-          invokeAdapter(adapter, route.capability, {
-            input,
-            ...(prompt === undefined ? {} : { prompt }),
-            signal: abortController.signal,
-            task,
-          }),
-          deadlineAt,
-          now,
-          () => abortController.abort(),
-        );
-        const finishedAt = now();
-        if (finishedAt > deadlineAt) {
-          attempts.push(
-            attemptTrace(
-              adapter.descriptor,
-              attempt,
-              attemptStartedAt,
-              finishedAt,
-              "deadline_exceeded",
-              "not_run",
-              response,
-            ),
-          );
+      for (
+        let localAttempt = 1;
+        localAttempt <= maximumAttempts;
+        localAttempt += 1
+      ) {
+        const attempt = attempts.length + 1;
+        const attemptStartedAt = now();
+        if (attemptStartedAt >= deadlineAt) {
           failure = new ModelRouterError(
             "deadline_exceeded",
-            "model adapter returned after the caller deadline",
+            "model call deadline elapsed before an eligible retry",
           );
           break;
         }
 
-        if (!RESULT_VALIDATORS[task](response.value, input)) {
+        const abortController = new AbortController();
+        try {
+          const response = await withDeadline(
+            invokeAdapter(adapter, route.capability, {
+              input,
+              ...(prompt === undefined ? {} : { prompt }),
+              signal: abortController.signal,
+              task,
+            }),
+            deadlineAt,
+            now,
+            () => abortController.abort(),
+          );
+          const finishedAt = now();
+          if (finishedAt > deadlineAt) {
+            attempts.push(
+              attemptTrace(
+                adapter.descriptor,
+                attempt,
+                attemptStartedAt,
+                finishedAt,
+                "deadline_exceeded",
+                "not_run",
+                response,
+              ),
+            );
+            failure = new ModelRouterError(
+              "deadline_exceeded",
+              "model adapter returned after the caller deadline",
+            );
+            break;
+          }
+
+          if (!RESULT_VALIDATORS[task](response.value, input)) {
+            attempts.push(
+              attemptTrace(
+                adapter.descriptor,
+                attempt,
+                attemptStartedAt,
+                finishedAt,
+                "validation_error",
+                "failed",
+                response,
+              ),
+            );
+            failure = new ModelRouterError(
+              "invalid_result",
+              "model result failed its route schema",
+            );
+            break;
+          }
+
           attempts.push(
             attemptTrace(
               adapter.descriptor,
               attempt,
               attemptStartedAt,
               finishedAt,
-              "validation_error",
-              "failed",
+              "success",
+              "passed",
               response,
             ),
           );
-          failure = new ModelRouterError(
-            "invalid_result",
-            "model result failed its route schema",
+          const traceAbortController = new AbortController();
+          await withDeadline(
+            recordTrace(
+              options.traceSink,
+              traceEnvelope({
+                attempts,
+                callId: callId(),
+                finishedAt,
+                logicalStartedAt,
+                outcome: "success",
+                prompt,
+                task,
+              }),
+              traceAbortController.signal,
+            ),
+            deadlineAt,
+            now,
+            () => traceAbortController.abort(),
           );
-          break;
-        }
-
-        attempts.push(
-          attemptTrace(
-            adapter.descriptor,
-            attempt,
-            attemptStartedAt,
-            finishedAt,
-            "success",
-            "passed",
-            response,
-          ),
-        );
-        const traceAbortController = new AbortController();
-        await withDeadline(
-          recordTrace(
-            options.traceSink,
-            traceEnvelope({
-              attempts,
-              callId: callId(),
-              finishedAt,
-              logicalStartedAt,
-              outcome: "success",
-              prompt,
+          return {
+            provenance: {
+              adapterVersion: adapter.descriptor.adapterVersion,
+              effectiveModel: adapter.descriptor.effectiveModel,
+              effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
+              ...(prompt === undefined
+                ? {}
+                : {
+                    generationParametersVersion:
+                      prompt.generationParametersVersion,
+                    promptDigest: prompt.digest,
+                    promptId: prompt.id,
+                    promptVersion: prompt.version,
+                  }),
+              inputSchemaVersion: route.inputSchemaVersion,
+              requestedSelector: adapter.descriptor.selector,
+              resultSchemaVersion: route.resultSchemaVersion,
+              routePolicyVersion: ROUTE_POLICY_VERSION,
               task,
-            }),
-            traceAbortController.signal,
-          ),
-          deadlineAt,
-          now,
-          () => traceAbortController.abort(),
-        );
-        return {
-          provenance: {
-            adapterVersion: adapter.descriptor.adapterVersion,
-            effectiveModel: adapter.descriptor.effectiveModel,
-            effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
-            ...(prompt === undefined
-              ? {}
-              : {
-                  generationParametersVersion:
-                    prompt.generationParametersVersion,
-                  promptDigest: prompt.digest,
-                  promptId: prompt.id,
-                  promptVersion: prompt.version,
-                }),
-            inputSchemaVersion: route.inputSchemaVersion,
-            requestedSelector: route.requestedSelector,
-            resultSchemaVersion: route.resultSchemaVersion,
-            routePolicyVersion: ROUTE_POLICY_VERSION,
-            task,
-            validationOutcome: "passed",
-          },
-          value: response.value as ModelTaskResult<Task>,
-        };
-      } catch (error) {
-        if (attempts.at(-1)?.outcome === "success") {
-          throw new ModelRouterError(
-            "trace_failure",
-            "model result succeeded but its logical trace was not accepted",
-            { cause: error },
-          );
-        }
-        if (
-          error instanceof ModelRouterError &&
-          error.code === "deadline_exceeded"
-        ) {
+              validationOutcome: "passed",
+            },
+            value: response.value as ModelTaskResult<Task>,
+          };
+        } catch (error) {
+          if (attempts.at(-1)?.outcome === "success") {
+            throw new ModelRouterError(
+              "trace_failure",
+              "model result succeeded but its logical trace was not accepted",
+              { cause: error },
+            );
+          }
+          if (
+            error instanceof ModelRouterError &&
+            error.code === "deadline_exceeded"
+          ) {
+            const finishedAt = now();
+            attempts.push({
+              adapterVersion: adapter.descriptor.adapterVersion,
+              attempt,
+              durationMs: Math.max(0, finishedAt - attemptStartedAt),
+              effectiveModel: adapter.descriptor.effectiveModel,
+              effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
+              outcome: "deadline_exceeded",
+              requestedSelector: adapter.descriptor.selector,
+              retryReason: "timeout",
+              startedAt: toIso(attemptStartedAt),
+              validationStatus: "not_run",
+            });
+            failure = error;
+            break;
+          }
+          if (!(error instanceof ModelAdapterError)) {
+            throw error;
+          }
           const finishedAt = now();
           attempts.push({
             adapterVersion: adapter.descriptor.adapterVersion,
@@ -306,43 +343,41 @@ export function createModelRouter(options: ModelRouterOptions) {
             durationMs: Math.max(0, finishedAt - attemptStartedAt),
             effectiveModel: adapter.descriptor.effectiveModel,
             effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
-            outcome: "deadline_exceeded",
-            requestedSelector: route.requestedSelector,
-            retryReason: "timeout",
+            outcome: error.transient ? "transient_error" : "permanent_error",
+            requestedSelector: adapter.descriptor.selector,
+            retryReason: error.safeCode,
             startedAt: toIso(attemptStartedAt),
             validationStatus: "not_run",
           });
-          failure = error;
+          failure = new ModelRouterError(
+            "provider_failure",
+            "model provider request failed",
+            {
+              cause: error,
+              providerFailure: {
+                safeCode: error.safeCode,
+                submissionState: error.submissionState,
+                transient: error.transient,
+              },
+            },
+          );
+          const retryEligible =
+            error.transient &&
+            localAttempt < maximumAttempts &&
+            finishedAt < deadlineAt;
+          if (retryEligible) {
+            continue;
+          }
+          fallbackEligible =
+            selectorIndex === 0 &&
+            route.fallback !== null &&
+            canUseTtsFallback(task, error) &&
+            finishedAt < deadlineAt;
           break;
         }
-        if (!(error instanceof ModelAdapterError)) {
-          throw error;
-        }
-        const finishedAt = now();
-        attempts.push({
-          adapterVersion: adapter.descriptor.adapterVersion,
-          attempt,
-          durationMs: Math.max(0, finishedAt - attemptStartedAt),
-          effectiveModel: adapter.descriptor.effectiveModel,
-          effectiveModelVersion: adapter.descriptor.effectiveModelVersion,
-          outcome: error.transient ? "transient_error" : "permanent_error",
-          requestedSelector: route.requestedSelector,
-          retryReason: error.safeCode,
-          startedAt: toIso(attemptStartedAt),
-          validationStatus: "not_run",
-        });
-        failure = new ModelRouterError(
-          "provider_failure",
-          "model provider request failed",
-          { cause: error },
-        );
-        if (
-          !error.transient ||
-          attempt >= maximumAttempts ||
-          finishedAt >= deadlineAt
-        ) {
-          break;
-        }
+      }
+      if (!fallbackEligible) {
+        break;
       }
     }
 
@@ -374,6 +409,23 @@ export function createModelRouter(options: ModelRouterOptions) {
       )
     );
   }
+}
+
+function canUseTtsFallback(
+  task: ModelTaskId,
+  error: ModelAdapterError,
+): boolean {
+  return (
+    task === "media.tts.v1" &&
+    error.transient &&
+    error.submissionState === "not_accepted" &&
+    [
+      "capacity_unavailable",
+      "quota_exhausted",
+      "rate_limited",
+      "unavailable",
+    ].includes(error.safeCode)
+  );
 }
 
 type SelectedAdapter = ReturnType<typeof selectAdapter>;

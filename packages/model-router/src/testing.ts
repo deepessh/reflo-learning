@@ -18,6 +18,7 @@ export type ScriptedAdapterAction =
   | {
       readonly cause?: unknown;
       readonly safeCode: string;
+      readonly submissionState?: "accepted" | "not_accepted" | "unknown";
       readonly transient: boolean;
       readonly type: "failure";
     }
@@ -56,6 +57,7 @@ export function createScriptedAdapterRegistry(
       throw new ModelAdapterError({
         cause: action.cause,
         safeCode: action.safeCode,
+        submissionState: action.submissionState,
         transient: action.transient,
       });
     }
@@ -117,6 +119,10 @@ export function createScriptedAdapterRegistry(
       speech: {
         "qwen-tts.primary": {
           descriptor: descriptors.speech,
+          synthesize: invoke,
+        },
+        "piper-tts.cpu": {
+          descriptor: descriptor("speech", "piper-tts.cpu", "piper-tts", 1),
           synthesize: invoke,
         },
       },

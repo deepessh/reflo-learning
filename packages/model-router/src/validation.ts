@@ -1,12 +1,19 @@
+import { createHash } from "node:crypto";
+
 import type {
   AuthorizedSourceSpan,
   EmbeddingInput,
   LessonInput,
   ModelTaskId,
   ModelTaskInput,
+  TextToSpeechInput,
   TutorAnswerInput,
 } from "./contracts.js";
-import { QUIZ_ITEM_TYPES } from "./contracts.js";
+import {
+  AUDIO_PAYLOAD_VERSION,
+  QUIZ_ITEM_TYPES,
+  TTS_ALLOWED_SAMPLE_RATES,
+} from "./contracts.js";
 
 export const EMBEDDING_V1_DIMENSIONS = 1_024 as const;
 
@@ -56,10 +63,10 @@ export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
   "lesson.reteach.v1": validator<"lesson.reteach.v1">(isLessonResult),
   "lesson.text.v1": validator<"lesson.text.v1">(isLessonResult),
   "media.tts.v1": validator<"media.tts.v1">((value, input) =>
-    isMediaAssetResult(value, input.sourceSpanIds),
+    isAudioPayload(value, input),
   ),
   "media.video.v1": validator<"media.video.v1">((value, input) =>
-    isMediaAssetResult(value, sourceIds(input.sourceSpans)),
+    isVideoAssetResult(value, sourceIds(input.sourceSpans)),
   ),
   "tutor.answer.v1": validator<"tutor.answer.v1">(isTutorAnswerResult),
 };
@@ -227,7 +234,94 @@ function isLessonResult(value: unknown, input: LessonInput): boolean {
   });
 }
 
-function isMediaAssetResult(
+function isAudioPayload(value: unknown, input: TextToSpeechInput): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "bytes",
+      "byteLength",
+      "channels",
+      "codec",
+      "container",
+      "contractVersion",
+      "durationSeconds",
+      "engine",
+      "engineVersion",
+      "headerValidated",
+      "payloadSha256",
+      "sampleRateHz",
+      "settingsVersion",
+      "sourceSpanIds",
+      "voiceArtifactVersion",
+      "voiceId",
+      "voiceProfileId",
+    ]) ||
+    !(value.bytes instanceof Uint8Array) ||
+    value.contractVersion !== AUDIO_PAYLOAD_VERSION ||
+    value.container !== "wav" ||
+    value.codec !== "pcm_s16le" ||
+    value.channels !== 1 ||
+    value.headerValidated !== true ||
+    value.voiceProfileId !== input.voiceProfileId ||
+    !isSafeProviderMetadata(value.engine) ||
+    !isSafeProviderMetadata(value.engineVersion) ||
+    !isSafeProviderMetadata(value.voiceArtifactVersion) ||
+    !isSafeProviderMetadata(value.voiceId) ||
+    !isSafeProviderMetadata(value.settingsVersion) ||
+    !Number.isSafeInteger(value.byteLength) ||
+    value.byteLength !== value.bytes.byteLength ||
+    !isFiniteNumber(value.durationSeconds) ||
+    value.durationSeconds <= 0 ||
+    !(TTS_ALLOWED_SAMPLE_RATES as readonly unknown[]).includes(
+      value.sampleRateHz,
+    ) ||
+    !/^[a-f0-9]{64}$/.test(String(value.payloadSha256)) ||
+    value.payloadSha256 !== sha256(value.bytes) ||
+    !isAuthorizedIds(value.sourceSpanIds, input.sourceSpanIds)
+  ) {
+    return false;
+  }
+  return isValidPcmWav(
+    value.bytes,
+    value.sampleRateHz as (typeof TTS_ALLOWED_SAMPLE_RATES)[number],
+    value.durationSeconds,
+  );
+}
+
+function isValidPcmWav(
+  bytes: Uint8Array,
+  expectedSampleRate: number,
+  expectedDurationSeconds: number,
+): boolean {
+  if (bytes.byteLength < 44) {
+    return false;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (offset: number, length: number) =>
+    String.fromCharCode(...bytes.subarray(offset, offset + length));
+  const dataLength = view.getUint32(40, true);
+  const measuredDuration = dataLength / (expectedSampleRate * 2);
+  return (
+    ascii(0, 4) === "RIFF" &&
+    ascii(8, 4) === "WAVE" &&
+    ascii(12, 4) === "fmt " &&
+    view.getUint32(16, true) === 16 &&
+    view.getUint16(20, true) === 1 &&
+    view.getUint16(22, true) === 1 &&
+    view.getUint32(24, true) === expectedSampleRate &&
+    view.getUint16(34, true) === 16 &&
+    ascii(36, 4) === "data" &&
+    dataLength === bytes.byteLength - 44 &&
+    Math.abs(measuredDuration - expectedDurationSeconds) <=
+      Math.max(1 / expectedSampleRate, expectedDurationSeconds * 0.001)
+  );
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function isVideoAssetResult(
   value: unknown,
   authorizedSourceSpanIds: readonly string[],
 ): boolean {

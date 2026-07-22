@@ -1,0 +1,43 @@
+{
+  "contractVersion": "piper-worker-manifest-v1",
+  "activationStatus": "blocked",
+  "cpuOnly": true,
+  "runtimeDownloadsAllowed": false,
+  "baseImage": {
+    "reference": "python:3.13.12-slim-bookworm@sha256:a58daefb915e1e03ad48f3ca4df8832065412c5c35cacb9d39f4229184de12b6",
+    "pythonVersion": "3.13.12"
+  },
+  "piper": {
+    "version": "1.4.2",
+    "wheel": "piper_tts-1.4.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl",
+    "sha256": "b17184a664bd9431ce95c138f4bfb3025e1280cf26075a703dbfdcab989b8ee3",
+    "license": "GPL-3.0-or-later",
+    "embeddedEspeakPinnedByWheelDigest": true
+  },
+  "onnxRuntime": {
+    "version": "1.27.0",
+    "wheel": "onnxruntime-1.27.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "sha256": "6872443f236a554921cda6f318c900e2d0c226792cf3534d00e5057c6926e5d2"
+  },
+  "voice": {
+    "profileId": "en-US/reflo-narrator-v1",
+    "voiceId": "en_US-ljspeech-high",
+    "repository": "rhasspy/piper-voices",
+    "revision": "5b44ec7bab7c5822cfec48fbd5aa99db71a823d6",
+    "modelPath": "en/en_US/ljspeech/high/en_US-ljspeech-high.onnx",
+    "modelSha256": "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a",
+    "configPath": "en/en_US/ljspeech/high/en_US-ljspeech-high.onnx.json",
+    "configSha256": "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14",
+    "modelCardPath": "en/en_US/ljspeech/high/MODEL_CARD",
+    "datasetLicenseEvidence": "LJ Speech model card records the source dataset as public domain",
+    "metadataInconsistencyRequiresGateReview": true
+  },
+  "finalImageDigest": null,
+  "blockers": [
+    "human GPL packaging and deployment clearance is not recorded",
+    "final reproducible image digest and SBOM are not recorded",
+    "target-environment five-course concurrency benchmark is not recorded",
+    "two-reviewer listening evidence is not recorded",
+    "the pinned base image requires a current security review before activation"
+  ]
+}

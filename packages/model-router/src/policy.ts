@@ -6,7 +6,7 @@ export const ROUTE_POLICY_VERSION = "route-policy-v2" as const;
 export interface RouteDefinition {
   readonly capability: ModelCapability;
   readonly featureFlag?: "p1.media.video";
-  readonly fallback: null;
+  readonly fallback: string | null;
   readonly inputSchemaVersion: string;
   readonly maxImmediateAttempts: 1 | 2;
   readonly mediaRetryRequiresSubmissionIdempotency?: true;
@@ -107,12 +107,12 @@ export const ROUTE_POLICY_V2 = Object.freeze({
   }),
   "media.tts.v1": route({
     capability: "speech",
-    fallback: null,
-    inputSchemaVersion: "text-to-speech-input-v1",
+    fallback: "piper-tts.cpu",
+    inputSchemaVersion: "tts-synthesis-request-v1",
     maxImmediateAttempts: 2,
     mediaRetryRequiresSubmissionIdempotency: true,
     requestedSelector: "qwen-tts.primary",
-    resultSchemaVersion: "audio-asset-result-v1",
+    resultSchemaVersion: "audio-payload-v1",
     task: "media.tts.v1",
   }),
   "media.video.v1": route({

@@ -4,6 +4,8 @@ export { PostgresIngestionOperationStore } from "./ingestion-operation-store.js"
 export type { PostgresIngestionOperationStoreOptions } from "./ingestion-operation-store.js";
 export { PostgresContentRepository } from "./content-repository.js";
 export { PostgresActivationRepository } from "./activation-repository.js";
+export { PostgresAudioGenerationRepository } from "./audio-generation-repository.js";
+export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generation-repository.js";
 
 import type {
   AccountRepository,

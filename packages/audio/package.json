@@ -1,12 +1,13 @@
 {
-  "name": "@reflo/model-router",
+  "name": "@reflo/audio",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "piper-worker"
   ],
   "exports": {
     ".": {
@@ -16,20 +17,17 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
-    },
-    "./model-studio-embedding": {
-      "types": "./dist/adapters/model-studio-embedding.d.ts",
-      "default": "./dist/adapters/model-studio-embedding.js"
-    },
-    "./tts": {
-      "types": "./dist/adapters/tts.d.ts",
-      "default": "./dist/adapters/tts.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@reflo/asset-delivery": "workspace:*",
+    "@reflo/model-router": "workspace:*",
+    "@reflo/retrieval": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

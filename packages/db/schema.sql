@@ -336,10 +336,16 @@ CREATE TABLE public.asset (
     content_type text,
     byte_size bigint,
     etag text,
+    audio_generation_operation_id uuid,
+    narration_script_id uuid,
+    narration_script_sha256 text,
+    audio_payload_metadata jsonb,
     CONSTRAINT asset_asset_type_check CHECK ((asset_type = ANY (ARRAY['audio'::text, 'video'::text, 'text'::text]))),
     CONSTRAINT asset_byte_size_check CHECK (((byte_size IS NULL) OR (byte_size >= 0))),
     CONSTRAINT asset_check CHECK (((status <> 'ready'::text) OR (object_key IS NOT NULL))),
     CONSTRAINT asset_content_hash_check CHECK (((content_hash IS NULL) OR (content_hash ~ '^[a-f0-9]{64}$'::text))),
+    CONSTRAINT asset_narration_script_sha256_check CHECK (((narration_script_sha256 IS NULL) OR (narration_script_sha256 ~ '^[a-f0-9]{64}$'::text))),
+    CONSTRAINT asset_ready_audio_metadata_check CHECK (((asset_type <> 'audio'::text) OR (status <> 'ready'::text) OR ((audio_generation_operation_id IS NOT NULL) AND (generation_operation_id IS NULL) AND (narration_script_id IS NOT NULL) AND (narration_script_sha256 IS NOT NULL) AND (model_provenance IS NOT NULL) AND (content_hash IS NOT NULL) AND (content_type = 'audio/wav'::text) AND (byte_size IS NOT NULL) AND (byte_size > 44) AND (etag IS NOT NULL) AND ((audio_payload_metadata ->> 'contractVersion'::text) = 'audio-payload-v1'::text) AND ((audio_payload_metadata ->> 'container'::text) = 'wav'::text) AND ((audio_payload_metadata ->> 'codec'::text) = 'pcm_s16le'::text) AND (((audio_payload_metadata ->> 'channels'::text))::integer = 1) AND (((audio_payload_metadata ->> 'sampleRateHz'::text))::integer = ANY (ARRAY[22050, 24000])) AND ((audio_payload_metadata ->> 'headerValidated'::text) = 'true'::text) AND ((audio_payload_metadata ->> 'payloadSha256'::text) = content_hash)))),
     CONSTRAINT asset_ready_text_metadata_check CHECK (((asset_type <> 'text'::text) OR (status <> 'ready'::text) OR ((generation_operation_id IS NOT NULL) AND (model_provenance IS NOT NULL) AND (content_hash IS NOT NULL) AND (content_type IS NOT NULL) AND (byte_size IS NOT NULL) AND (etag IS NOT NULL)))),
     CONSTRAINT asset_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'generating'::text, 'ready'::text, 'failed'::text, 'tombstoned'::text])))
 );
@@ -475,6 +481,28 @@ CREATE TABLE public.attempt_concept_evidence (
 );
 
 ALTER TABLE ONLY public.attempt_concept_evidence FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: audio_generation_operation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audio_generation_operation (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    chapter_id uuid NOT NULL,
+    narration_script_id uuid NOT NULL,
+    generation_version text NOT NULL,
+    priority integer NOT NULL,
+    asset_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT audio_generation_operation_generation_version_check CHECK ((generation_version = 'audio-generation-v1'::text)),
+    CONSTRAINT audio_generation_operation_priority_check CHECK (((priority >= 1) AND (priority <= 800)))
+);
+
+ALTER TABLE ONLY public.audio_generation_operation FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -809,6 +837,46 @@ ALTER TABLE ONLY public.learning_event_concept FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: narration_script; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.narration_script (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    chapter_id uuid NOT NULL,
+    script_text text NOT NULL,
+    script_sha256 text NOT NULL,
+    generation_version text NOT NULL,
+    model_provenance jsonb NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT narration_script_model_provenance_check CHECK (((model_provenance ->> 'task'::text) = 'lesson.audio-script.v1'::text)),
+    CONSTRAINT narration_script_model_provenance_check1 CHECK (((model_provenance ->> 'validationOutcome'::text) = 'passed'::text)),
+    CONSTRAINT narration_script_script_sha256_check CHECK ((script_sha256 ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT narration_script_script_text_check CHECK (((length(script_text) >= 1) AND (length(script_text) <= 100000))),
+    CONSTRAINT narration_script_status_check CHECK ((status = ANY (ARRAY['active'::text, 'superseded'::text])))
+);
+
+ALTER TABLE ONLY public.narration_script FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: narration_script_source_span; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.narration_script_source_span (
+    owner_scope_id uuid NOT NULL,
+    narration_script_id uuid NOT NULL,
+    source_span_id uuid NOT NULL,
+    span_order integer NOT NULL,
+    CONSTRAINT narration_script_source_span_span_order_check CHECK ((span_order >= 0))
+);
+
+ALTER TABLE ONLY public.narration_script_source_span FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: outbox_message; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -829,10 +897,12 @@ CREATE TABLE public.outbox_message (
     deadline_at timestamp with time zone,
     published_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    priority integer DEFAULT 800 NOT NULL,
     CONSTRAINT outbox_message_check CHECK (((deadline_at IS NULL) OR (deadline_at > occurred_at))),
     CONSTRAINT outbox_message_environment_check CHECK ((environment = ANY (ARRAY['dev'::text, 'staging'::text, 'pilot'::text]))),
     CONSTRAINT outbox_message_message_kind_check CHECK ((message_kind = ANY (ARRAY['command'::text, 'event'::text]))),
-    CONSTRAINT outbox_message_message_version_check CHECK ((message_version > 0))
+    CONSTRAINT outbox_message_message_version_check CHECK ((message_version > 0)),
+    CONSTRAINT outbox_message_priority_check CHECK (((priority >= 1) AND (priority <= 800)))
 );
 
 ALTER TABLE ONLY public.outbox_message FORCE ROW LEVEL SECURITY;
@@ -1277,6 +1347,30 @@ ALTER TABLE ONLY public.attempt
 
 
 --
+-- Name: audio_generation_operation audio_generation_operation_owner_scope_id_course_id_chapter_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audio_generation_operation
+    ADD CONSTRAINT audio_generation_operation_owner_scope_id_course_id_chapter_key UNIQUE (owner_scope_id, course_id, chapter_id, narration_script_id, generation_version);
+
+
+--
+-- Name: audio_generation_operation audio_generation_operation_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audio_generation_operation
+    ADD CONSTRAINT audio_generation_operation_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: audio_generation_operation audio_generation_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audio_generation_operation
+    ADD CONSTRAINT audio_generation_operation_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: auth_email_delivery_reservation auth_email_delivery_reservation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1573,6 +1667,46 @@ ALTER TABLE ONLY public.learning_event
 
 
 --
+-- Name: narration_script narration_script_owner_scope_id_course_id_chapter_id_genera_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script
+    ADD CONSTRAINT narration_script_owner_scope_id_course_id_chapter_id_genera_key UNIQUE (owner_scope_id, course_id, chapter_id, generation_version);
+
+
+--
+-- Name: narration_script narration_script_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script
+    ADD CONSTRAINT narration_script_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: narration_script narration_script_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script
+    ADD CONSTRAINT narration_script_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: narration_script_source_span narration_script_source_span_owner_scope_id_narration_scrip_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script_source_span
+    ADD CONSTRAINT narration_script_source_span_owner_scope_id_narration_scrip_key UNIQUE (owner_scope_id, narration_script_id, span_order);
+
+
+--
+-- Name: narration_script_source_span narration_script_source_span_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script_source_span
+    ADD CONSTRAINT narration_script_source_span_pkey PRIMARY KEY (owner_scope_id, narration_script_id, source_span_id);
+
+
+--
 -- Name: outbox_message outbox_message_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1851,6 +1985,13 @@ CREATE UNIQUE INDEX activation_generation_operation_target_idx ON public.activat
 
 
 --
+-- Name: asset_audio_generation_operation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX asset_audio_generation_operation_idx ON public.asset USING btree (owner_scope_id, audio_generation_operation_id) WHERE (audio_generation_operation_id IS NOT NULL);
+
+
+--
 -- Name: asset_generation_operation_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1869,6 +2010,13 @@ CREATE UNIQUE INDEX attempt_provider_submission_idx ON public.attempt USING btre
 --
 
 CREATE UNIQUE INDEX attempt_submission_idempotency_idx ON public.attempt USING btree (submission_idempotency_key) WHERE (submission_idempotency_key IS NOT NULL);
+
+
+--
+-- Name: audio_generation_operation_priority_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audio_generation_operation_priority_idx ON public.audio_generation_operation USING btree (priority, created_at, id);
 
 
 --
@@ -1928,10 +2076,17 @@ CREATE UNIQUE INDEX learning_event_idempotency_idx ON public.learning_event USIN
 
 
 --
+-- Name: narration_script_active_chapter_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX narration_script_active_chapter_idx ON public.narration_script USING btree (owner_scope_id, course_id, chapter_id) WHERE (status = 'active'::text);
+
+
+--
 -- Name: outbox_message_unpublished_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX outbox_message_unpublished_idx ON public.outbox_message USING btree (created_at, message_id) WHERE (published_at IS NULL);
+CREATE INDEX outbox_message_unpublished_idx ON public.outbox_message USING btree (priority, created_at, message_id) WHERE (published_at IS NULL);
 
 
 --
@@ -2050,6 +2205,22 @@ ALTER TABLE ONLY public.activation_generation_operation
 
 
 --
+-- Name: asset asset_audio_generation_operation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asset
+    ADD CONSTRAINT asset_audio_generation_operation_fk FOREIGN KEY (owner_scope_id, audio_generation_operation_id) REFERENCES public.audio_generation_operation(owner_scope_id, id);
+
+
+--
+-- Name: asset asset_audio_narration_script_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asset
+    ADD CONSTRAINT asset_audio_narration_script_fk FOREIGN KEY (owner_scope_id, narration_script_id) REFERENCES public.narration_script(owner_scope_id, id);
+
+
+--
 -- Name: asset asset_generation_operation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2159,6 +2330,30 @@ ALTER TABLE ONLY public.attempt
 
 ALTER TABLE ONLY public.attempt
     ADD CONSTRAINT attempt_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: audio_generation_operation audio_generation_operation_owner_scope_id_course_id_chapte_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audio_generation_operation
+    ADD CONSTRAINT audio_generation_operation_owner_scope_id_course_id_chapte_fkey FOREIGN KEY (owner_scope_id, course_id, chapter_id) REFERENCES public.chapter(owner_scope_id, course_id, id);
+
+
+--
+-- Name: audio_generation_operation audio_generation_operation_owner_scope_id_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audio_generation_operation
+    ADD CONSTRAINT audio_generation_operation_owner_scope_id_id_fkey FOREIGN KEY (owner_scope_id, id) REFERENCES public.async_operation(owner_scope_id, id);
+
+
+--
+-- Name: audio_generation_operation audio_generation_operation_owner_scope_id_narration_script_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audio_generation_operation
+    ADD CONSTRAINT audio_generation_operation_owner_scope_id_narration_script_fkey FOREIGN KEY (owner_scope_id, narration_script_id) REFERENCES public.narration_script(owner_scope_id, id);
 
 
 --
@@ -2426,6 +2621,30 @@ ALTER TABLE ONLY public.learning_event
 
 
 --
+-- Name: narration_script narration_script_owner_scope_id_course_id_chapter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script
+    ADD CONSTRAINT narration_script_owner_scope_id_course_id_chapter_id_fkey FOREIGN KEY (owner_scope_id, course_id, chapter_id) REFERENCES public.chapter(owner_scope_id, course_id, id);
+
+
+--
+-- Name: narration_script_source_span narration_script_source_span_owner_scope_id_narration_scri_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script_source_span
+    ADD CONSTRAINT narration_script_source_span_owner_scope_id_narration_scri_fkey FOREIGN KEY (owner_scope_id, narration_script_id) REFERENCES public.narration_script(owner_scope_id, id);
+
+
+--
+-- Name: narration_script_source_span narration_script_source_span_owner_scope_id_source_span_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.narration_script_source_span
+    ADD CONSTRAINT narration_script_source_span_owner_scope_id_source_span_id_fkey FOREIGN KEY (owner_scope_id, source_span_id) REFERENCES public.source_span(owner_scope_id, id);
+
+
+--
 -- Name: outbox_message outbox_message_owner_scope_id_operation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2673,6 +2892,19 @@ CREATE POLICY attempt_concept_evidence_select ON public.attempt_concept_evidence
 
 
 --
+-- Name: audio_generation_operation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.audio_generation_operation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: audio_generation_operation audio_generation_operation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY audio_generation_operation_active_membership ON public.audio_generation_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: channel_identity; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2796,6 +3028,32 @@ CREATE POLICY learning_event_insert ON public.learning_event FOR INSERT WITH CHE
 --
 
 CREATE POLICY learning_event_select ON public.learning_event FOR SELECT USING (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: narration_script; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.narration_script ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: narration_script narration_script_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY narration_script_active_membership ON public.narration_script USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: narration_script_source_span; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.narration_script_source_span ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: narration_script_source_span narration_script_source_span_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY narration_script_source_span_active_membership ON public.narration_script_source_span USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
 
 
 --
@@ -3100,4 +3358,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260720000200'),
     ('20260721000100'),
     ('20260721000200'),
-    ('20260721000300');
+    ('20260721000300'),
+    ('20260721000400');

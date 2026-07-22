@@ -52,6 +52,16 @@ test("toolchain policy reports Turbo environment drift", () => {
       checkToolchainPolicy(fixture).join("\n"),
       /turbo test env must pass REFLO_POSTGRES_CONTAINER_ID/,
     );
+
+    const rewriteAltered = readFileSync(
+      path.join(root, "turbo.json"),
+      "utf8",
+    ).replace('        "REFLO_POSTGRES_CONTAINER_REWRITE_FROM",\n', "");
+    writeFileSync(turboPath, rewriteAltered);
+    assert.match(
+      checkToolchainPolicy(fixture).join("\n"),
+      /turbo test env must pass REFLO_POSTGRES_CONTAINER_REWRITE_FROM/,
+    );
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }

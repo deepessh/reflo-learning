@@ -64,8 +64,14 @@ export function checkToolchainPolicy(rootDirectory) {
     errors.push("@reflo/db db:dump must use the canonical container generator");
   }
   const turbo = JSON.parse(read(root, "turbo.json"));
-  if (!turbo.tasks?.test?.env?.includes("REFLO_POSTGRES_CONTAINER_ID")) {
-    errors.push("turbo test env must pass REFLO_POSTGRES_CONTAINER_ID");
+  for (const variable of [
+    "REFLO_POSTGRES_CONTAINER_ID",
+    "REFLO_POSTGRES_CONTAINER_REWRITE_FROM",
+    "REFLO_POSTGRES_CONTAINER_REWRITE_TO",
+  ]) {
+    if (!turbo.tasks?.test?.env?.includes(variable)) {
+      errors.push(`turbo test env must pass ${variable}`);
+    }
   }
 
   for (const script of [

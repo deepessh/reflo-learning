@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import sys
 import tempfile
 import unittest
@@ -24,7 +25,7 @@ Fixture.
 
 | Mandate | Fixed choice | Authoritative source | Change control |
 |---|---|---|---|
-| `M-001` | Use the fixture vector store. | `prds/reflo-prd.md` §9 | PRD revision only |
+| `M-001` | Use the fixture vector store. | `prds/reflo-prd.md` §9 at v1.8 commit `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` | PRD revision only; discovery [#22](https://github.com/acme/reflo/issues/22); confirmation [owner comment](https://github.com/acme/reflo/issues/22#issuecomment-100) |
 
 ## Pending Decision Index
 
@@ -102,6 +103,10 @@ def bootstrap_metadata() -> dict:
 def mandate_metadata(state: str = "staged", cutover_pr=None) -> dict:
     metadata = github_metadata("0023", "M-001")
     metadata["title"] = "Fixture mandate"
+    metadata["prd_references"] = (
+        "`prds/reflo-prd.md` §9 at v1.8 commit "
+        "`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`"
+    )
     metadata["provenance"] = {
         "kind": "prd-mandate",
         "prd_version": "1.8",
@@ -117,6 +122,14 @@ def mandate_metadata(state: str = "staged", cutover_pr=None) -> dict:
 
 
 def body(metadata: dict, *, context: str = "Validator fixture context.") -> str:
+    mandate = (metadata.get("provenance") or {}).get("kind") == "prd-mandate"
+    verdict = "Use the fixture vector store." if mandate else "Choose option A."
+    reversal = (
+        "PRD revision only; discovery [#22](https://github.com/acme/reflo/issues/22); "
+        "confirmation [owner comment](https://github.com/acme/reflo/issues/22#issuecomment-100)"
+        if mandate
+        else "Fixture reversal criterion."
+    )
     return f"""# ADR {metadata['id']}: {metadata['title']}
 
 ## Context
@@ -131,7 +144,7 @@ Option A; option B.
 
 ### Authorized verdict
 
-Choose option A.
+{verdict}
 
 ### Rationale
 
@@ -143,7 +156,7 @@ Fixture consequence.
 
 ## Reversal criteria
 
-Fixture reversal criterion.
+{reversal}
 """
 
 
@@ -212,15 +225,14 @@ class AdrValidationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.fixture.close()
 
-    def test_repository_partial_mirror_is_valid_and_incomplete(self) -> None:
+    def test_repository_complete_mirror_is_valid_and_complete(self) -> None:
         errors, _, adrs, repository_config = validator.validate_repository(validator.ROOT)
         self.assertEqual([], errors)
-        self.assertEqual("partial-mirror", repository_config["mode"])
-        self.assertFalse(repository_config["baseline_complete"])
-        self.assertGreater(len(repository_config["partial_mirror_exemptions"]), 0)
+        self.assertEqual("complete-mirror", repository_config["mode"])
+        self.assertTrue(repository_config["baseline_complete"])
+        self.assertEqual([], repository_config["partial_mirror_exemptions"])
         self.assertEqual(
-            len(repository_config["legacy_ids"])
-            - len(repository_config["partial_mirror_exemptions"]),
+            len(repository_config["legacy_ids"]),
             len(adrs),
         )
 
@@ -324,6 +336,97 @@ class AdrValidationTests(unittest.TestCase):
         assert adr
         validator.validate_adr_schema(adr, "adr-authoritative", diagnostics)
         self.assertIn("cutover_pr: expected one exact GitHub URL", "\n".join(diagnostics.finish()))
+
+    def test_mandate_mirror_must_match_authoritative_source_and_confirmation(self) -> None:
+        self.fixture.write_config(
+            config(
+                exemptions=["D-GH-42"],
+                legacy_ids={"D-GH-42": "0029", "M-001": "0023"},
+                managed=["M-001"],
+            )
+        )
+        metadata = mandate_metadata()
+        self.fixture.write_adr(metadata, slug="mandate")
+        self.assertEqual("", self.fixture.validate())
+
+        invented = copy.deepcopy(metadata)
+        invented["provenance"]["confirmation_comment"] = (
+            "https://github.com/acme/reflo/issues/22#issuecomment-101"
+        )
+        mandate_path = self.fixture.root / "docs/adrs/0023-mandate.md"
+        mandate_path.write_text(render(invented), encoding="utf-8")
+        messages = self.fixture.validate()
+        self.assertIn(
+            "provenance.confirmation_comment does not exactly match authoritative mandate M-001",
+            messages,
+        )
+
+        invented["provenance"]["confirmation_comment"] = (
+            "https://github.com/acme/reflo/issues/22#issuecomment-100"
+        )
+        invented["provenance"]["prd_commit"] = "b" * 40
+        mandate_path.write_text(render(invented), encoding="utf-8")
+        self.assertIn(
+            "provenance.prd_commit does not exactly match authoritative mandate M-001",
+            self.fixture.validate(),
+        )
+
+    def test_authoritative_mode_accepts_only_transferred_mandate_provenance(self) -> None:
+        (self.fixture.root / "DECISIONS.md").unlink()
+        self.fixture.write_config(
+            config(
+                mode="adr-authoritative",
+                complete=True,
+                exemptions=[],
+                legacy_ids={"M-001": "0023"},
+                managed=["M-001"],
+            )
+        )
+        metadata = mandate_metadata(
+            state="transferred",
+            cutover_pr="https://github.com/acme/reflo/pull/80",
+        )
+        self.fixture.write_adr(metadata, slug="mandate")
+        self.assertEqual("", self.fixture.validate())
+
+        metadata["provenance"]["authority_state"] = "staged"
+        metadata["provenance"]["cutover_pr"] = None
+        path = self.fixture.root / "docs/adrs/0023-mandate.md"
+        path.write_text(render(metadata), encoding="utf-8")
+        messages = self.fixture.validate()
+        self.assertIn("adr-authoritative mode requires 'transferred'", messages)
+        self.assertIn("cutover_pr: expected one exact GitHub URL", messages)
+
+    def test_cutover_contract_retains_product_requirements_and_maps_m006_architecture(self) -> None:
+        diagnostics = validator.Diagnostics()
+        errors, _, adrs, repository_config = validator.validate_repository(validator.ROOT)
+        self.assertEqual([], errors)
+        validator.validate_cutover_contract(
+            validator.ROOT, repository_config, adrs, diagnostics
+        )
+        self.assertEqual([], diagnostics.finish())
+
+        contract = json.loads(
+            (validator.ROOT / validator.CUTOVER_CONTRACT).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            {"M-004", "M-005", "M-006-product"},
+            set(contract["retained_prd_requirements"]),
+        )
+        self.assertNotIn(
+            "M-004", repository_config["managed_prd_mandates"]
+        )
+        self.assertNotIn(
+            "M-005", repository_config["managed_prd_mandates"]
+        )
+        self.assertGreater(
+            len(
+                contract["moved_architecture_requirements"][
+                    "M-006-provider-storage"
+                ]["adr_aliases"]
+            ),
+            0,
+        )
 
     def test_duplicate_canonical_ids_and_aliases_are_rejected(self) -> None:
         self.fixture.write_config(
@@ -512,7 +615,11 @@ class AdrValidationTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            ("0023", None),
+            (
+                "0023",
+                validator.ROOT
+                / "docs/adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md",
+            ),
             validator.resolve_legacy_id(
                 repository_config, repository_adrs, "M-001"
             ),

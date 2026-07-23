@@ -11,16 +11,17 @@ ownership:
   implementation_owner: "Owners of separately claimed consent, deletion, authenticated-export, telemetry, provider-adapter, and pilot-activation implementation issues"
 authorization:
   decider: "@deepessh, repository owner and named human decider for issue #18"
-  approval_basis: |
-    Owner-authored acceptance in the exact verdict comment after reviewing the
-    condensed privacy-lifecycle-v1 proposal, its seven explicit confirmation
-    items, PRD privacy outcomes, retention periods, implementation consequences,
-    human acceptance boundary, and reversal criteria.
+  approval_basis: >-
+    ** I reviewed the condensed privacy-lifecycle-v1 proposal in
+    https://github.com/deepessh/reflo-learning/issues/18#issuecomment-5064087274,
+    including its seven explicit confirmation items, PRD privacy outcomes,
+    retention periods, implementation consequences, human acceptance boundary,
+    and reversal criteria. I approve that proposal as written.
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/18
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/18#issuecomment-5064210480
-  record_pr: https://github.com/deepessh/reflo-learning/pull/0
+  record_pr: https://github.com/deepessh/reflo-learning/pull/150
 supersedes: []
 superseded_by: null
 deprecation: null

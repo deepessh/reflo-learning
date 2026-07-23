@@ -64,13 +64,16 @@ export function checkToolchainPolicy(rootDirectory) {
     );
   }
   if (
+    !ci.includes(
+      "python3 -m pip install --requirement scripts/requirements-governance.txt",
+    ) ||
     !governanceCi.includes(
       "python3 -m pip install --requirement scripts/requirements-governance.txt",
     ) ||
     !governanceCi.includes("python3 scripts/validate_adrs.py")
   ) {
     errors.push(
-      "decision validation CI must install the pinned governance requirement and run ADR validation",
+      "workspace and decision validation CI must install the pinned governance requirement, and decision CI must run ADR validation",
     );
   }
 

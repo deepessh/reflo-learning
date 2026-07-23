@@ -199,6 +199,64 @@ class AdrSkillScriptTests(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("permitted only for an unmerged branch", result.stderr)
 
+    def test_allocator_inventories_more_than_thirty_open_prs(self) -> None:
+        repository = self.repository()
+
+        result = self.execute(
+            ALLOCATE,
+            repository,
+            "more-than-30-open-prs.json",
+            "--json",
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual("0033", report["allocated_id"])
+        self.assertEqual(32, len(report["used_ids"]))
+
+    def test_merge_order_accepts_only_the_next_eligible_draft(self) -> None:
+        repository = self.repository()
+        repository.add_adr("0002-local.md", adr("0002", "Local"))
+        repository.commit()
+
+        result = self.execute(
+            ALLOCATE,
+            repository,
+            "merge-order-current.json",
+            "--current-pr-number",
+            "50",
+            "--check-merge-order",
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_merge_order_rejects_a_skipped_or_lower_open_claim(self) -> None:
+        repository = self.repository()
+        repository.add_adr("0003-local.md", adr("0003", "Local"))
+        repository.commit()
+
+        abandoned = self.execute(
+            ALLOCATE,
+            repository,
+            "merge-order-current.json",
+            "--current-pr-number",
+            "50",
+            "--check-merge-order",
+        )
+        self.assertEqual(1, abandoned.returncode)
+        self.assertIn("renumber the draft to 0002", abandoned.stderr)
+
+        lower_open = self.execute(
+            ALLOCATE,
+            repository,
+            "merge-order-lower-open.json",
+            "--current-pr-number",
+            "50",
+            "--check-merge-order",
+        )
+        self.assertEqual(1, lower_open.returncode)
+        self.assertIn("ADR 0002 in PR #49", lower_open.stderr)
+
     def test_renumber_updates_target_collision_without_touching_history(self) -> None:
         accepted_source = adr("0001", "Accepted")
         repository = self.repository(
@@ -295,6 +353,28 @@ class AdrSkillScriptTests(unittest.TestCase):
         self.assertIn("permitted only for an unmerged branch", result.stderr)
         self.assertEqual(before, git(repository.root, "status", "--short"))
         self.assertTrue((repository.root / "docs/adrs/0002-local-draft.md").exists())
+
+    def test_renumber_reclaims_an_abandoned_lower_number(self) -> None:
+        repository = self.repository()
+        repository.add_adr("0003-local-draft.md", adr("0003", "Local draft"))
+        repository.write_config({"D-GH-1": "0001", "D-GH-3": "0003"})
+        repository.commit()
+
+        result = self.execute(
+            RENUMBER,
+            repository,
+            "merge-order-current.json",
+            "--apply",
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual("0002", report["renumbers"][0]["new_id"])
+        self.assertTrue((repository.root / "docs/adrs/0002-local-draft.md").exists())
+        config_source = (repository.root / ".adr-governance.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('D-GH-3: "0002"', config_source)
 
     def test_renumber_never_selects_a_merged_accepted_adr(self) -> None:
         accepted_source = adr("0001", "Accepted")

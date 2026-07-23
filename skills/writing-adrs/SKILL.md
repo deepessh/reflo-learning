@@ -31,10 +31,12 @@ python3 skills/writing-adrs/scripts/allocate_adr_number.py \
   --target-ref origin/main --base-branch main
 ```
 
-The allocator inspects reserved IDs, local ADRs, the target ref, and added or
-renamed ADR paths in every other open PR. It excludes the current open PR,
-returns the lowest unused four-digit ID, and fails closed if GitHub, Git, config,
-or collision state is uncertain. Treat allocation as provisional until merge.
+The allocator inspects target-branch reservations, local ADRs, the target ref,
+and added or renamed ADR paths in every other open PR. Open PR enumeration and
+changed-file retrieval are explicitly paginated. It excludes the current open
+PR, returns the lowest unused four-digit ID, and fails closed if GitHub, Git,
+config, pagination, or collision state is uncertain. Treat allocation as
+provisional until merge.
 
 ## Write the record
 
@@ -57,7 +59,9 @@ or collision state is uncertain. Treat allocation as provisional until merge.
    owner-authorized deprecation provenance.
 8. Never edit accepted semantic content. Use a successor ADR for clarification,
    reversal, or replacement; limit maintenance to marked typo, formatting, or
-   navigation corrections.
+   navigation corrections. Each maintenance entry names exactly the changed
+   body `sections`; identity, date, aliases, ownership, authorization,
+   provenance, and lifecycle history remain immutable.
 
 ## Update descriptive documents
 
@@ -81,8 +85,21 @@ python3 scripts/validate_adrs.py --base-ref origin/main
 python3 -m unittest scripts/test_validate_adrs.py scripts/test_adr_skills.py
 ```
 
-Verify exact GitHub provenance and run repository lint and tests required by
-`AGENTS.md`.
+After the draft PR exists, replace its temporary provenance URL and run the
+pre-merge checks with its exact number:
+
+```sh
+python3 scripts/validate_adrs.py \
+  --base-ref origin/main --check-links --current-pr-number PR_NUMBER
+python3 skills/writing-adrs/scripts/allocate_adr_number.py \
+  --target-ref origin/main --base-branch main \
+  --current-pr-number PR_NUMBER --check-merge-order
+```
+
+The second command requires one new ADR and proves it is the next
+merge-eligible ID. A lower open claim must merge or be renumbered first; a gap
+left by a closed or abandoned draft must be reclaimed with `$renumber-adr`.
+Run repository lint and tests required by `AGENTS.md`.
 
 ## Source inspiration
 

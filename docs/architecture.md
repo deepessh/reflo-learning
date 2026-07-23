@@ -17,7 +17,6 @@ Detailed rules live in the linked records.
 <!-- BEGIN GENERATED ACTIVE ADRS -->
 | ADR | Decided target | Legacy IDs | Current authority |
 |---|---|---|---|
-| [ADR 0001](adrs/0001-repository-decision-authority-and-register.md) | Repository decision authority and register | `D-BOOTSTRAP-001` | ADR |
 | [ADR 0002](adrs/0002-workspace-tooling-and-deployable-service-boundaries.md) | Workspace tooling and deployable service boundaries | `D-GH-2` | ADR |
 | [ADR 0003](adrs/0003-sql-migrations-schema-ownership-and-write-boundaries.md) | SQL migrations, schema ownership, and write boundaries | `D-GH-3` | ADR |
 | [ADR 0004](adrs/0004-provider-capability-ports-and-adapter-rollout.md) | Provider capability ports and adapter rollout | `D-GH-4` | ADR |
@@ -45,6 +44,7 @@ Detailed rules live in the linked records.
 | [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md) | File-per-decision ADR storage and lifecycle | `D-GH-125` | ADR |
 | [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md) | Immutable sequential canonical ADR identifiers | `D-GH-126` | ADR |
 | [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) | Product requirements and architecture document authority | `D-GH-127` | ADR |
+| [ADR 0029](adrs/0029-adr-authority-and-enforcement-guarantees.md) | ADR authority and enforcement guarantees | `D-GH-145` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -73,13 +73,13 @@ Detailed rules live in the linked records.
   [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md),
   and [ADR 0025](adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md).
 - Decision and contributor governance:
-  [ADR 0001](adrs/0001-repository-decision-authority-and-register.md),
   [ADR 0017](adrs/0017-worktree-based-issue-pickup-and-claim-labels.md),
   [ADR 0018](adrs/0018-reproducible-agent-toolchain-and-required-check-recovery-policy.md),
   [ADR 0019](adrs/0019-evidence-backed-contributor-agent-improvement-loop.md),
   [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md),
   [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md),
-  and [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md).
+  [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md),
+  and [ADR 0029](adrs/0029-adr-authority-and-enforcement-guarantees.md).
 
 ## Implemented state
 
@@ -103,7 +103,7 @@ deployment, capacity, release-gate, or pilot-readiness evidence.
 | Default-off P1 flag registry and evaluation slice | [flag registry](../packages/feature-flags/src/registry.ts) and [flag tests](../packages/feature-flags/src/feature-flags.test.ts) | [ADR 0014](adrs/0014-p1-feature-flags-and-default-off-enforcement.md), [ADR 0022](adrs/0022-single-segment-wan-sprint-prototype-and-long-form-deferral.md) |
 | Repository-owned evaluation contracts and attestation index slice | [evaluation package guide](../packages/evaluation/README.md), [attestation implementation](../packages/evaluation/src/attestation.ts), and [gate index](../packages/db/src/gate-attestation-index.ts) | [ADR 0015](adrs/0015-repository-owned-release-gate-evaluation-evidence.md) |
 | Environment and module source-boundary scaffold | [infrastructure guide](../infra/README.md), [environment roots](../infra/environments), and [policy check](../scripts/check-infra-policy.mjs) | [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md) |
-| Authoritative ADR, problem-document, and architecture-view governance checks | [ADR validator](../scripts/validate_adrs.py), [problem validator](../scripts/validate_problem_docs.py), [architecture validator](../scripts/validate_architecture.py), and [required validation workflow](../.github/workflows/validate-decisions.yml) | [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md), [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md), [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) |
+| Authoritative ADR, problem-document, and architecture-view governance checks | [ADR validator](../scripts/validate_adrs.py), [problem validator](../scripts/validate_problem_docs.py), [architecture validator](../scripts/validate_architecture.py), and [required validation workflow](../.github/workflows/validate-decisions.yml) | [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md), [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md), [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md), [ADR 0029](adrs/0029-adr-authority-and-enforcement-guarantees.md) |
 <!-- END IMPLEMENTED STATE -->
 <!-- prettier-ignore-end -->
 

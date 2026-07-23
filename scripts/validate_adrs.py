@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import json
 import re
 import subprocess
@@ -33,7 +34,6 @@ if str(SCRIPTS) not in sys.path:
 from validate_decisions import (  # noqa: E402
     DECISIONS,
     SENSITIVE_PATTERNS,
-    check_urls,
     markdown_urls,
     parse_index,
 )
@@ -80,6 +80,15 @@ OWNERSHIP_KEYS = {"proposer", "decision_dri", "implementation_owner"}
 AUTHORIZATION_KEYS = {"decider", "approval_basis"}
 MAX_DIAGNOSTICS = 50
 MAX_VALUE_DISPLAY = 180
+MAX_TYPO_DELTA = 120
+SECTION_FIELD_NAMES = {
+    "Context",
+    "Options",
+    "Authorized verdict",
+    "Rationale",
+    "Verification",
+    "Reversal criteria",
+}
 RESERVED_LEGACY_IDS = {
     "D-BOOTSTRAP-001": "0001",
     **{f"D-GH-{number}": f"{number:04d}" for number in range(2, 17)},
@@ -366,6 +375,108 @@ def pr_parts(url: str) -> tuple[str, str, str] | None:
     return match.groups() if match else None
 
 
+class GitHubEvidenceError(RuntimeError):
+    """Raised when required live GitHub evidence cannot be resolved exactly."""
+
+
+class GitHubEvidence:
+    """Small cached GitHub API client used only by required live validation."""
+
+    def __init__(
+        self,
+        *,
+        responses: dict[str, Any] | None = None,
+    ) -> None:
+        self.responses = responses
+        self.cache: dict[str, Any] = {}
+
+    def get(self, endpoint: str) -> Any:
+        if endpoint in self.cache:
+            return self.cache[endpoint]
+        if self.responses is not None:
+            if endpoint not in self.responses:
+                raise GitHubEvidenceError(f"fixture has no response for {endpoint}")
+            value = self.responses[endpoint]
+            if isinstance(value, Exception):
+                raise value
+            self.cache[endpoint] = value
+            return value
+
+        result = subprocess.run(
+            ["gh", "api", endpoint],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode:
+            raise GitHubEvidenceError(
+                f"gh api could not resolve {endpoint} (exit {result.returncode})"
+            )
+        try:
+            value = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubEvidenceError(
+                f"GitHub API returned unusable data for {endpoint}"
+            ) from exc
+        self.cache[endpoint] = value
+        return value
+
+    def issue(self, owner: str, repository: str, number: str) -> dict[str, Any]:
+        value = self.get(f"/repos/{owner}/{repository}/issues/{number}")
+        if not isinstance(value, dict):
+            raise GitHubEvidenceError(f"issue #{number} response is not an object")
+        return value
+
+    def comment(self, owner: str, repository: str, comment_id: str) -> dict[str, Any]:
+        value = self.get(
+            f"/repos/{owner}/{repository}/issues/comments/{comment_id}"
+        )
+        if not isinstance(value, dict):
+            raise GitHubEvidenceError(
+                f"issue comment {comment_id} response is not an object"
+            )
+        return value
+
+    def pull_request(
+        self, owner: str, repository: str, number: str
+    ) -> dict[str, Any]:
+        value = self.get(f"/repos/{owner}/{repository}/pulls/{number}")
+        if not isinstance(value, dict):
+            raise GitHubEvidenceError(
+                f"pull request #{number} response is not an object"
+            )
+        return value
+
+    def pull_request_files(
+        self, owner: str, repository: str, number: str
+    ) -> tuple[str, ...]:
+        files: list[str] = []
+        for page in range(1, 101):
+            endpoint = (
+                f"/repos/{owner}/{repository}/pulls/{number}/files"
+                f"?per_page=100&page={page}"
+            )
+            value = self.get(endpoint)
+            if not isinstance(value, list):
+                raise GitHubEvidenceError(
+                    f"pull request #{number} files response is not a list"
+                )
+            for item in value:
+                if not isinstance(item, dict) or not isinstance(
+                    item.get("filename"), str
+                ):
+                    raise GitHubEvidenceError(
+                        f"pull request #{number} contains malformed file data"
+                    )
+                files.append(item["filename"])
+            if len(value) < 100:
+                return tuple(files)
+        raise GitHubEvidenceError(
+            f"pull request #{number} file enumeration exceeded 100 pages"
+        )
+
+
 def validate_same_issue(issue: str, comment: str, label: str, diagnostics: Diagnostics) -> None:
     parsed_issue = issue_parts(issue)
     parsed_comment = comment_parts(comment)
@@ -530,13 +641,23 @@ def validate_maintenance(adr: Adr, diagnostics: Diagnostics) -> list[str]:
         diagnostics.add(f"{label}: expected a list")
         return []
     urls: list[str] = []
-    required = {"kind", "issue", "pull_request", "summary"}
+    required = {"kind", "issue", "pull_request", "summary", "sections"}
     for index, item in enumerate(value):
         item_label = f"{label}[{index}]"
         mapping = require_mapping(item, item_label, required, required, diagnostics)
         if mapping.get("kind") not in {"typo", "formatting", "navigation"}:
             diagnostics.add(f"{item_label}.kind: expected typo, formatting, or navigation")
         require_nonempty_strings(mapping, {"summary"}, item_label, diagnostics)
+        sections = mapping.get("sections")
+        if (
+            not isinstance(sections, list)
+            or not sections
+            or any(section not in SECTION_FIELD_NAMES for section in sections)
+            or len(sections) != len(set(map(str, sections)))
+        ):
+            diagnostics.add(
+                f"{item_label}.sections: expected a unique non-empty list of ADR body section names"
+            )
         issue = one_github_url(
             mapping.get("issue"), f"{item_label}.issue", r"https://github\.com/[^/]+/[^/]+/issues/\d+", diagnostics
         )
@@ -549,6 +670,344 @@ def validate_maintenance(adr: Adr, diagnostics: Diagnostics) -> list[str]:
         validate_same_repository([issue, pull_request], item_label, diagnostics)
         urls.extend(filter(None, [issue, pull_request]))
     return urls
+
+
+def canonical_adr_path(adr: Adr) -> str:
+    path = adr.path.as_posix()
+    marker = "docs/adrs/"
+    return marker + path.split(marker, 1)[1] if marker in path else path
+
+
+def declared_decider(body: str) -> str:
+    match = re.search(
+        r"(?i)(?:\*\*)?Authorized decider(?:\*\*)?\s*:\s*([^.\n]+)",
+        body,
+    )
+    return match.group(1).strip().rstrip("*").strip() if match else ""
+
+
+def decider_handle(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    match = re.search(r"@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\b", value)
+    return match.group(1).lower() if match else ""
+
+
+def accepted_verdict_signal(body: str) -> bool:
+    rejected = re.search(
+        r"(?im)(?:^|\n)\s*(?:#+\s*)?(?:\*\*)?(?:authorized\s+)?verdict"
+        r"(?:\*\*)?\s*(?::|[-—])\s*rejected\b|^\s*Rejected\.",
+        body,
+    )
+    if rejected:
+        return False
+    return bool(
+        re.search(r"(?i)\bauthorized\s+verdict\b", body)
+        or re.search(r"(?im)^\s*Accepted\.", body)
+        or re.search(
+            r"(?im)^\s*(?:\*\*)?Verdict(?:\*\*)?\s*:\s*Accepted\b",
+            body,
+        )
+    )
+
+
+def exact_approval_basis(body: str) -> str:
+    match = re.search(
+        r"(?is)\bapproval\s+basis\s*:\s*(.+?)(?:\n\s*\n|$)",
+        body,
+    )
+    return normalize_markdown(match.group(1)) if match else ""
+
+
+def issue_has_decision_label(issue: dict[str, Any]) -> bool:
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return False
+    return any(
+        (isinstance(label, dict) and label.get("name") == "decision")
+        or label == "decision"
+        for label in labels
+    )
+
+
+def validate_exact_comment(
+    *,
+    issue_url: str,
+    comment_url: str,
+    expected_decider: Any,
+    expected_approval_basis: Any,
+    require_accepted: bool,
+    evidence: GitHubEvidence,
+    label: str,
+    diagnostics: Diagnostics,
+    require_issue_decider: bool = True,
+    require_comment_decider: bool = True,
+    require_exact_approval_basis: bool = False,
+) -> None:
+    issue = issue_parts(issue_url)
+    comment = comment_parts(comment_url)
+    if not issue or not comment:
+        return
+    owner, repository, issue_number = issue
+    comment_id = comment[3]
+    try:
+        issue_value = evidence.issue(owner, repository, issue_number)
+        comment_value = evidence.comment(owner, repository, comment_id)
+    except GitHubEvidenceError as exc:
+        diagnostics.add(f"{label}: {exc}")
+        return
+
+    expected_issue_api = (
+        f"https://api.github.com/repos/{owner}/{repository}/issues/{issue_number}"
+    )
+    if comment_value.get("issue_url") != expected_issue_api:
+        diagnostics.add(f"{label}: exact comment does not belong to the originating issue")
+
+    issue_body = issue_value.get("body")
+    comment_body = comment_value.get("body")
+    if not isinstance(issue_body, str) or not isinstance(comment_body, str):
+        diagnostics.add(f"{label}: issue and comment must retain readable authorization text")
+        return
+    issue_body = issue_body.replace("\\n", "\n")
+    comment_body = comment_body.replace("\\n", "\n")
+
+    handle = decider_handle(expected_decider)
+    issue_handle = decider_handle(declared_decider(issue_body))
+    comment_handle = decider_handle(comment_body)
+    actor = str((comment_value.get("user") or {}).get("login", "")).lower()
+    if not handle:
+        diagnostics.add(f"{label}: authorization.decider must identify one @GitHub handle")
+    else:
+        if issue_handle and issue_handle != handle:
+            diagnostics.add(
+                f"{label}: decision issue declares a different authorized decider"
+            )
+        elif require_issue_decider and not issue_handle:
+            diagnostics.add(
+                f"{label}: decision issue does not declare the ADR's authorized decider"
+            )
+        if require_comment_decider and comment_handle != handle:
+            diagnostics.add(
+                f"{label}: exact comment does not identify the declared authorized decider"
+            )
+        if actor != handle:
+            diagnostics.add(
+                f"{label}: exact comment was not authored by the declared authorized decider"
+            )
+    if require_accepted:
+        if not issue_has_decision_label(issue_value):
+            diagnostics.add(f"{label}: originating issue must retain the decision label")
+        if not accepted_verdict_signal(comment_body):
+            diagnostics.add(f"{label}: exact comment is not an authorized Accepted verdict")
+        has_approval_basis = bool(
+            re.search(r"(?i)\bapproval\s+basis\b", comment_body)
+            or re.search(
+                r"(?is)\bI\s+approve\b.{0,240}\bbased\s+on\b",
+                comment_body,
+            )
+        )
+        if not has_approval_basis:
+            diagnostics.add(f"{label}: exact verdict comment does not state its approval basis")
+        elif require_exact_approval_basis:
+            expected_basis = (
+                normalize_markdown(expected_approval_basis)
+                if isinstance(expected_approval_basis, str)
+                else ""
+            )
+            if (
+                not expected_basis
+                or exact_approval_basis(comment_body).casefold()
+                != expected_basis.casefold()
+            ):
+                diagnostics.add(
+                    f"{label}: ADR approval basis does not exactly match the verdict comment"
+                )
+    elif not re.search(r"(?i)\bconfirm(?:ed|ation)?\b", comment_body):
+        diagnostics.add(f"{label}: exact PRD-mandate comment is not a confirmation")
+
+
+def validate_record_pr(
+    *,
+    url: str,
+    expected_path: str,
+    current_pr_number: int | None,
+    evidence: GitHubEvidence,
+    label: str,
+    diagnostics: Diagnostics,
+    originating_issue: str | None = None,
+) -> None:
+    parsed = pr_parts(url)
+    if not parsed:
+        return
+    owner, repository, number = parsed
+    try:
+        pull = evidence.pull_request(owner, repository, number)
+        files = evidence.pull_request_files(owner, repository, number)
+    except GitHubEvidenceError as exc:
+        diagnostics.add(f"{label}: {exc}")
+        return
+
+    merged = bool(pull.get("merged_at"))
+    current_open = (
+        current_pr_number is not None
+        and int(number) == current_pr_number
+        and str(pull.get("state", "")).lower() == "open"
+        and not merged
+    )
+    if not merged and not current_open:
+        diagnostics.add(f"{label}: record pull request must be merged")
+    if expected_path not in files:
+        diagnostics.add(
+            f"{label}: record pull request does not contain required path {expected_path}"
+        )
+    if originating_issue:
+        issue = issue_parts(originating_issue)
+        body = pull.get("body")
+        if issue and (
+            not isinstance(body, str)
+            or not re.search(rf"(?<!\d)#{re.escape(issue[2])}(?!\d)", body)
+        ):
+            diagnostics.add(
+                f"{label}: record pull request is unrelated to the originating issue"
+            )
+
+
+def validate_issue_resource(
+    url: str,
+    evidence: GitHubEvidence,
+    label: str,
+    diagnostics: Diagnostics,
+) -> None:
+    parsed = issue_parts(url)
+    if not parsed:
+        return
+    try:
+        evidence.issue(*parsed)
+    except GitHubEvidenceError as exc:
+        diagnostics.add(f"{label}: {exc}")
+
+
+def validate_live_github_evidence(
+    adrs: dict[str, Adr],
+    diagnostics: Diagnostics,
+    *,
+    current_pr_number: int | None = None,
+    evidence: GitHubEvidence | None = None,
+) -> None:
+    client = evidence or GitHubEvidence()
+    for canonical_id, adr in sorted(adrs.items()):
+        provenance = adr.metadata.get("provenance")
+        if not isinstance(provenance, dict):
+            continue
+        kind = provenance.get("kind")
+        label = f"{canonical_adr_path(adr)}: provenance"
+        authorization = adr.metadata.get("authorization") or {}
+
+        if kind == "github-decision":
+            validate_exact_comment(
+                issue_url=str(provenance.get("issue", "")),
+                comment_url=str(provenance.get("verdict_comment", "")),
+                expected_decider=authorization.get("decider"),
+                expected_approval_basis=authorization.get("approval_basis"),
+                require_accepted=True,
+                evidence=client,
+                label=label,
+                diagnostics=diagnostics,
+                require_issue_decider=int(canonical_id) >= 29,
+                require_exact_approval_basis=int(canonical_id) >= 29,
+            )
+            expected_path = (
+                "DECISIONS.md" if int(canonical_id) <= 28 else canonical_adr_path(adr)
+            )
+            validate_record_pr(
+                url=str(provenance.get("record_pr", "")),
+                expected_path=expected_path,
+                current_pr_number=current_pr_number,
+                evidence=client,
+                label=label,
+                diagnostics=diagnostics,
+                originating_issue=str(provenance.get("issue", "")),
+            )
+        elif kind == "bootstrap-exception":
+            validate_record_pr(
+                url=str(provenance.get("migration_pr", "")),
+                expected_path=canonical_adr_path(adr),
+                current_pr_number=current_pr_number,
+                evidence=client,
+                label=label,
+                diagnostics=diagnostics,
+            )
+        elif kind == "prd-mandate":
+            validate_exact_comment(
+                issue_url=str(provenance.get("confirmation_issue", "")),
+                comment_url=str(provenance.get("confirmation_comment", "")),
+                expected_decider=authorization.get("decider"),
+                expected_approval_basis=authorization.get("approval_basis"),
+                require_accepted=False,
+                require_issue_decider=False,
+                require_comment_decider=False,
+                evidence=client,
+                label=label,
+                diagnostics=diagnostics,
+            )
+            cutover_pr = provenance.get("cutover_pr")
+            if isinstance(cutover_pr, str):
+                validate_record_pr(
+                    url=cutover_pr,
+                    expected_path=canonical_adr_path(adr),
+                    current_pr_number=current_pr_number,
+                    evidence=client,
+                    label=label,
+                    diagnostics=diagnostics,
+                )
+
+        deprecation = adr.metadata.get("deprecation")
+        if isinstance(deprecation, dict):
+            dep_label = f"{canonical_adr_path(adr)}: deprecation"
+            validate_exact_comment(
+                issue_url=str(deprecation.get("issue", "")),
+                comment_url=str(deprecation.get("verdict_comment", "")),
+                expected_decider=deprecation.get("decider"),
+                expected_approval_basis=deprecation.get("approval_basis"),
+                require_accepted=True,
+                evidence=client,
+                label=dep_label,
+                diagnostics=diagnostics,
+                require_exact_approval_basis=True,
+            )
+            validate_record_pr(
+                url=str(deprecation.get("record_pr", "")),
+                expected_path=canonical_adr_path(adr),
+                current_pr_number=current_pr_number,
+                evidence=client,
+                label=dep_label,
+                diagnostics=diagnostics,
+                originating_issue=str(deprecation.get("issue", "")),
+            )
+
+        maintenance = adr.metadata.get("maintenance")
+        if isinstance(maintenance, list):
+            for index, item in enumerate(maintenance):
+                if not isinstance(item, dict):
+                    continue
+                maintenance_label = (
+                    f"{canonical_adr_path(adr)}: maintenance[{index}]"
+                )
+                validate_issue_resource(
+                    str(item.get("issue", "")),
+                    client,
+                    maintenance_label,
+                    diagnostics,
+                )
+                validate_record_pr(
+                    url=str(item.get("pull_request", "")),
+                    expected_path=canonical_adr_path(adr),
+                    current_pr_number=current_pr_number,
+                    evidence=client,
+                    label=maintenance_label,
+                    diagnostics=diagnostics,
+                    originating_issue=str(item.get("issue", "")),
+                )
 
 
 def validate_adr_schema(adr: Adr, mode: str, diagnostics: Diagnostics) -> list[str]:
@@ -685,8 +1144,110 @@ def immutable_snapshot(adr: Adr) -> dict[str, Any]:
         "ownership": adr.metadata.get("ownership"),
         "authorization": adr.metadata.get("authorization"),
         "provenance": adr.metadata.get("provenance"),
-        "sections": adr.sections,
     }
+
+
+def section_delta(previous: Adr, current: Adr) -> set[str]:
+    return {
+        section
+        for section in SECTION_FIELD_NAMES
+        if previous.sections.get(section) != current.sections.get(section)
+    }
+
+
+def formatting_equivalent(previous: str, current: str) -> bool:
+    return re.sub(r"\s+", " ", previous).strip() == re.sub(
+        r"\s+", " ", current
+    ).strip()
+
+
+def navigation_equivalent(previous: str, current: str) -> bool:
+    markdown_link = re.compile(r"(\[[^\]]+\])\([^)]+\)")
+    autolink = re.compile(r"<https?://[^>]+>")
+
+    def normalize(value: str) -> str:
+        value = markdown_link.sub(r"\1(<destination>)", value)
+        return autolink.sub("<destination>", value)
+
+    return normalize(previous) == normalize(current)
+
+
+def changed_character_count(previous: str, current: str) -> int:
+    matcher = difflib.SequenceMatcher(a=previous, b=current, autojunk=False)
+    return sum(
+        max(old_end - old_start, new_end - new_start)
+        for operation, old_start, old_end, new_start, new_end in matcher.get_opcodes()
+        if operation != "equal"
+    )
+
+
+def validate_maintenance_delta(
+    previous: Adr,
+    current: Adr,
+    entry: dict[str, Any],
+    diagnostics: Diagnostics,
+) -> None:
+    label = current.path.as_posix()
+    changed = section_delta(previous, current)
+    declared_value = entry.get("sections")
+    declared = (
+        set(declared_value)
+        if isinstance(declared_value, list)
+        and all(isinstance(value, str) for value in declared_value)
+        else set()
+    )
+    if not changed:
+        diagnostics.add(f"{label}: maintenance entry does not correspond to a body change")
+        return
+    if changed != declared:
+        diagnostics.add(
+            f"{label}: maintenance sections must exactly declare the changed body sections"
+        )
+        return
+
+    kind = entry.get("kind")
+    if kind == "formatting":
+        invalid = [
+            section
+            for section in changed
+            if not formatting_equivalent(
+                previous.sections.get(section, ""),
+                current.sections.get(section, ""),
+            )
+        ]
+        if invalid:
+            diagnostics.add(
+                f"{label}: formatting maintenance changed non-whitespace content"
+            )
+    elif kind == "navigation":
+        invalid = [
+            section
+            for section in changed
+            if not navigation_equivalent(
+                previous.sections.get(section, ""),
+                current.sections.get(section, ""),
+            )
+        ]
+        if invalid:
+            diagnostics.add(
+                f"{label}: navigation maintenance changed content outside link destinations"
+            )
+    elif kind == "typo":
+        changed_characters = sum(
+            changed_character_count(
+                previous.sections.get(section, ""),
+                current.sections.get(section, ""),
+            )
+            for section in changed
+        )
+        baseline_size = sum(
+            len(previous.sections.get(section, "")) for section in changed
+        )
+        allowed = min(MAX_TYPO_DELTA, max(4, baseline_size // 50))
+        if changed_characters > allowed:
+            diagnostics.add(
+                f"{label}: typo maintenance exceeds the bounded textual delta"
+            )
 
 
 def is_prd_authority_transfer(previous: Adr, current: Adr) -> bool:
@@ -742,22 +1303,53 @@ def validate_transition(previous: Adr, current: Adr, diagnostics: Diagnostics) -
         diagnostics.add(f"{label}: invalid lifecycle transition {old_status!r} -> {new_status!r}")
     if previous.path.name != current.path.name:
         diagnostics.add(f"{label}: merged ADR filenames and canonical IDs are immutable")
-    if immutable_snapshot(previous) != immutable_snapshot(current):
-        old_maintenance = previous.metadata.get("maintenance") or []
-        new_maintenance = current.metadata.get("maintenance") or []
-        marked_correction = (
-            old_status == new_status == "Accepted"
-            and isinstance(old_maintenance, list)
-            and isinstance(new_maintenance, list)
-            and len(new_maintenance) == len(old_maintenance) + 1
-            and new_maintenance[:-1] == old_maintenance
+    authority_transfer = is_prd_authority_transfer(previous, current)
+    if immutable_snapshot(previous) != immutable_snapshot(current) and not authority_transfer:
+        diagnostics.add(
+            f"{label}: accepted ADR metadata is immutable "
+            "(identity, date, aliases, ownership, authorization, provenance)"
         )
-        if not marked_correction and not is_prd_authority_transfer(previous, current):
+    if previous.metadata.get("supersedes") != current.metadata.get("supersedes"):
+        diagnostics.add(f"{label}: merged supersedes history is immutable")
+    if old_status == "Superseded" and previous.metadata.get(
+        "superseded_by"
+    ) != current.metadata.get("superseded_by"):
+        diagnostics.add(f"{label}: merged superseded_by history is immutable")
+    if old_status == "Deprecated" and previous.metadata.get(
+        "deprecation"
+    ) != current.metadata.get("deprecation"):
+        diagnostics.add(f"{label}: merged deprecation history is immutable")
+
+    old_maintenance = previous.metadata.get("maintenance") or []
+    new_maintenance = current.metadata.get("maintenance") or []
+    maintenance_added = (
+        old_status == new_status == "Accepted"
+        and isinstance(old_maintenance, list)
+        and isinstance(new_maintenance, list)
+        and len(new_maintenance) == len(old_maintenance) + 1
+        and new_maintenance[:-1] == old_maintenance
+        and isinstance(new_maintenance[-1], dict)
+    )
+    if not maintenance_added and new_maintenance != old_maintenance:
+        diagnostics.add(
+            f"{label}: maintenance history is immutable and may append one correction at a time"
+        )
+
+    changed_sections = section_delta(previous, current)
+    if changed_sections:
+        if old_status != new_status:
+            diagnostics.add(f"{label}: lifecycle transitions cannot change accepted body content")
+            diagnostics.add(
+                f"{label}: accepted decision content is immutable; use a successor ADR"
+            )
+        elif maintenance_added:
+            validate_maintenance_delta(
+                previous, current, new_maintenance[-1], diagnostics
+            )
+        elif not authority_transfer:
             diagnostics.add(
                 f"{label}: accepted decision content is immutable; use a successor ADR or one marked typo/formatting/navigation correction"
             )
-    if old_status != new_status and previous.sections != current.sections:
-        diagnostics.add(f"{label}: lifecycle transitions cannot change accepted body content")
 
 
 def parse_config(root: Path, diagnostics: Diagnostics) -> dict[str, Any]:
@@ -1512,12 +2104,23 @@ def main() -> int:
         help="Git ref containing merged ADRs to enforce lifecycle and content immutability against.",
     )
     parser.add_argument("--check-links", action="store_true")
+    parser.add_argument(
+        "--current-pr-number",
+        type=int,
+        help="Allow this matching open record PR during pre-merge pull-request validation.",
+    )
     parser.add_argument("--resolve", metavar="LEGACY_OR_CANONICAL_ID")
     args = parser.parse_args()
 
     errors, urls, adrs, config = validate_repository(args.root.resolve(), base_ref=args.base_ref)
     if args.check_links:
-        check_urls(urls, errors)
+        live_diagnostics = Diagnostics()
+        validate_live_github_evidence(
+            adrs,
+            live_diagnostics,
+            current_pr_number=args.current_pr_number,
+        )
+        errors.extend(live_diagnostics.finish())
     if len(errors) > MAX_DIAGNOSTICS:
         omitted = len(errors) - MAX_DIAGNOSTICS
         errors = errors[:MAX_DIAGNOSTICS] + [
@@ -1539,7 +2142,8 @@ def main() -> int:
     mode = config.get("mode")
     print(
         f"ADR governance is valid in {mode} mode: {len(adrs)} ADR(s), "
-        f"{len(urls)} provenance link(s) checked structurally."
+        f"{len(urls)} provenance link(s) checked "
+        f"{'structurally and against GitHub' if args.check_links else 'structurally'}."
     )
     return 0
 

@@ -1,7 +1,7 @@
 ---
 id: "0001"
 title: "Repository decision authority and register"
-status: Accepted
+status: Superseded
 date: "2026-07-17"
 aliases: [D-BOOTSTRAP-001]
 prd_references: "`prds/reflo-prd.md` §9"
@@ -19,7 +19,7 @@ provenance:
   bounded_exception: "Yes — limited to the files listed in the Bootstrap exception section"
   migration_pr: https://github.com/deepessh/reflo-learning/pull/140
 supersedes: []
-superseded_by: null
+superseded_by: "0029"
 deprecation: null
 maintenance: []
 ---

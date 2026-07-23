@@ -84,3 +84,4 @@ assessment evidence.
 - [ADR 0015 — repository-owned release-gate evaluation evidence](../adrs/0015-repository-owned-release-gate-evaluation-evidence.md)
 - [ADR 0016 — provisional Bayesian mastery and reproducibility contract](../adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md)
 - [ADR 0025 — versioned Bayesian mastery and FSRS-style scheduling](../adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md)
+- [ADR 0030 — versioned grading, abstention, fallback, and FSRS rating contract](../adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md)

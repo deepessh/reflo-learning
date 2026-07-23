@@ -16,7 +16,6 @@ managed_prd_mandates:
 # partial-mirror. Remove an entry as its ADR lands. A later effective record is
 # never added here: it must be dual-written immediately.
 partial_mirror_exemptions:
-  - D-BOOTSTRAP-001
   - M-001
   - M-002
   - M-003

@@ -46,6 +46,7 @@ Detailed rules live in the linked records.
 | [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) | Product requirements and architecture document authority | `D-GH-127` | ADR |
 | [ADR 0029](adrs/0029-adr-authority-and-enforcement-guarantees.md) | ADR authority and enforcement guarantees | `D-GH-145` | ADR |
 | [ADR 0030](adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md) | Versioned grading, abstention, fallback, and FSRS rating contract | `D-GH-17` | ADR |
+| [ADR 0031](adrs/0031-versioned-privacy-lifecycle-and-deletion-control-plane.md) | Versioned privacy lifecycle and deletion control plane | `D-GH-18` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 

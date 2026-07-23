@@ -38,6 +38,8 @@ jobs:
         run: corepack enable && corepack prepare pnpm@10.34.5 --activate
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Install pinned governance dependency
+        run: python3 -m pip install --requirement scripts/requirements-governance.txt
       - name: Configure pinned PostgreSQL client
         run: |
           install -D -m 0755 packages/db/scripts/pg-dump-from-container.sh \

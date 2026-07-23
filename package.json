@@ -25,7 +25,7 @@
     "package:web": "node scripts/prepare-artifact.mjs web apps/web/out",
     "toolchain:check": "node scripts/check-toolchain-policy.mjs",
     "workflows:check": "node scripts/check-required-checks.mjs",
-    "test": "turbo run test && node --test scripts/*.test.mjs && python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py scripts/test_agent_improvements.py"
+    "test": "turbo run test && node --test scripts/*.test.mjs && python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_work_item.py scripts/test_agent_improvements.py"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

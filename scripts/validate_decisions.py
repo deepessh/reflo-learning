@@ -21,7 +21,7 @@ FIELD = re.compile(r"^- \*\*(.+?):\*\*\s+(.+)$")
 URL = re.compile(r"https://github\.com/[^\s)>]+")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-ALLOWED_STATUSES = {"Accepted", "Rejected", "Superseded"}
+ALLOWED_STATUSES = {"Accepted", "Deprecated", "Rejected", "Superseded"}
 REQUIRED_FIELDS = {
     "Status",
     "Decision date",

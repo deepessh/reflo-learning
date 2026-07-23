@@ -21,6 +21,10 @@
       "types": "./dist/adapters/model-studio-embedding.d.ts",
       "default": "./dist/adapters/model-studio-embedding.js"
     },
+    "./model-studio-video": {
+      "types": "./dist/adapters/model-studio-video.d.ts",
+      "default": "./dist/adapters/model-studio-video.js"
+    },
     "./litellm": {
       "types": "./dist/adapters/litellm.d.ts",
       "default": "./dist/adapters/litellm.js"

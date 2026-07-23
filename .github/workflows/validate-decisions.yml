@@ -15,14 +15,17 @@ on:
       - prds/reflo-prd.md
       - scripts/validate_decisions.py
       - scripts/validate_adrs.py
+      - scripts/validate_architecture.py
       - scripts/validate_problem_docs.py
       - scripts/requirements-governance.txt
       - scripts/test_validate_adrs.py
+      - scripts/test_validate_architecture.py
       - scripts/test_validate_problem_docs.py
       - scripts/test_adr_skills.py
       - scripts/fixtures/adr-skills/**
       - .adr-governance.yaml
       - docs/adrs/**
+      - docs/architecture.md
       - docs/problems/**
       - skills/writing-adrs/**
       - skills/renumber-adr/**
@@ -70,7 +73,7 @@ jobs:
         run: python3 -m pip install --requirement scripts/requirements-governance.txt
       - name: Test governance tooling
         run: |
-          python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
+          python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
           node --test scripts/check-required-checks.test.mjs scripts/check-toolchain-policy.test.mjs scripts/doctor.test.mjs
       - name: Check shell helper syntax
         run: bash -n scripts/work-item.sh scripts/doctor.sh packages/db/scripts/dump-schema-from-container.sh packages/db/scripts/pg-dump-from-container.sh
@@ -86,4 +89,5 @@ jobs:
         run: |
           python3 scripts/validate_decisions.py --check-links
           python3 scripts/validate_adrs.py --base-ref HEAD^ --check-links
+          python3 scripts/validate_architecture.py
           python3 scripts/validate_problem_docs.py

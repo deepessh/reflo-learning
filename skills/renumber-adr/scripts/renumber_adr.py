@@ -32,7 +32,7 @@ from allocate_adr_number import (  # noqa: E402
 FRONTMATTER_ID = re.compile(r'^(id:\s*)["\']?(\d{4})["\']?\s*$', re.MULTILINE)
 ADR_HEADING = re.compile(r"^(# ADR )(\d{4})(: .+)$", re.MULTILINE)
 CANONICAL_REFERENCE = re.compile(r"\bADR (?P<id>\d{4})\b")
-PROTECTED_FILES = {"DECISIONS.md"}
+PROTECTED_FILES: set[str] = set()
 
 
 @dataclass(frozen=True)

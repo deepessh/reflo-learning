@@ -1,12 +1,9 @@
 # Reflo architecture
 
 > **Non-authoritative:** This page is a reviewable projection of Reflo's decided
-> target and repository-evidenced state. During the current coexistence phase,
-> product and architecture authority remains with the
-> [PRD](../prds/reflo-prd.md) and the
-> [effective decision register](../DECISIONS.md). The linked
-> [ADR records](adrs/README.md) are mirrors until the separately authorized
-> atomic cutover.
+> target and repository-evidenced state. Product authority remains with the
+> [PRD](../prds/reflo-prd.md); the linked
+> [ADR records](adrs/README.md) authorize architecture and process decisions.
 
 ## Decided target architecture
 
@@ -20,34 +17,34 @@ Detailed rules live in the linked records.
 <!-- BEGIN GENERATED ACTIVE ADRS -->
 | ADR | Decided target | Legacy IDs | Current authority |
 |---|---|---|---|
-| [ADR 0001](adrs/0001-repository-decision-authority-and-register.md) | Repository decision authority and register | `D-BOOTSTRAP-001` | Decision register (ADR mirror) |
-| [ADR 0002](adrs/0002-workspace-tooling-and-deployable-service-boundaries.md) | Workspace tooling and deployable service boundaries | `D-GH-2` | Decision register (ADR mirror) |
-| [ADR 0003](adrs/0003-sql-migrations-schema-ownership-and-write-boundaries.md) | SQL migrations, schema ownership, and write boundaries | `D-GH-3` | Decision register (ADR mirror) |
-| [ADR 0004](adrs/0004-provider-capability-ports-and-adapter-rollout.md) | Provider capability ports and adapter rollout | `D-GH-4` | Decision register (ADR mirror) |
-| [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md) | OpenTofu infrastructure, environment, secret, and promotion controls | `D-GH-5` | Decision register (ADR mirror) |
-| [ADR 0006](adrs/0006-passwordless-email-authentication-and-revocable-server-sessions.md) | Passwordless email authentication and revocable server sessions | `D-GH-6` | Decision register (ADR mirror) |
-| [ADR 0007](adrs/0007-layered-owner-scope-enforcement.md) | Layered owner-scope enforcement | `D-GH-7` | Decision register (ADR mirror) |
-| [ADR 0008](adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md) | Isolated local document parsing, scanning, and OCR | `D-GH-8` | Decision register (ADR mirror) |
-| [ADR 0009](adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md) | Versioned source-span, embedding, and vector-namespace contract | `D-GH-9` | Decision register (ADR mirror) |
-| [ADR 0010](adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md) | Typed model routing, prompt, provenance, retry, and trace contract | `D-GH-10` | Decision register (ADR mirror) |
-| [ADR 0011](adrs/0011-cpu-fallback-tts-and-layered-audio-asset-contract.md) | CPU fallback TTS and layered audio-asset contract | `D-GH-11` | Decision register (ADR mirror) |
-| [ADR 0012](adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md) | Durable event, idempotency, retry, DLQ, and finalization contract | `D-GH-12` | Decision register (ADR mirror) |
-| [ADR 0013](adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md) | Private OSS delivery, CDN signing, expiry, and invalidation contract | `D-GH-13` | Decision register (ADR mirror) |
-| [ADR 0014](adrs/0014-p1-feature-flags-and-default-off-enforcement.md) | P1 feature flags and default-off enforcement | `D-GH-14` | Decision register (ADR mirror) |
-| [ADR 0015](adrs/0015-repository-owned-release-gate-evaluation-evidence.md) | Repository-owned release-gate evaluation evidence | `D-GH-15` | Decision register (ADR mirror) |
-| [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md) | Provisional Bayesian mastery and reproducibility contract | `D-GH-16` | Decision register (ADR mirror) |
-| [ADR 0017](adrs/0017-worktree-based-issue-pickup-and-claim-labels.md) | Worktree-based issue pickup and claim labels | `D-GH-67` | Decision register (ADR mirror) |
-| [ADR 0018](adrs/0018-reproducible-agent-toolchain-and-required-check-recovery-policy.md) | Reproducible agent toolchain and required-check recovery policy | `D-GH-81` | Decision register (ADR mirror) |
-| [ADR 0019](adrs/0019-evidence-backed-contributor-agent-improvement-loop.md) | Evidence-backed contributor-agent improvement loop | `D-GH-83` | Decision register (ADR mirror) |
-| [ADR 0020](adrs/0020-java-25-base-family-for-the-isolated-ingestion-worker.md) | Java 25 base family for the isolated-ingestion worker | `D-GH-95` | Decision register (ADR mirror) |
-| [ADR 0021](adrs/0021-kms-backed-clamav-snapshot-signing-profile.md) | KMS-backed ClamAV snapshot signing profile | `D-GH-96` | Decision register (ADR mirror) |
-| [ADR 0022](adrs/0022-single-segment-wan-sprint-prototype-and-long-form-deferral.md) | Single-segment Wan sprint prototype and long-form deferral | `D-GH-120` | Decision register (ADR mirror) |
-| [ADR 0023](adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md) | AnalyticDB for PostgreSQL sprint vector store | `M-001` | PRD mandate (staged ADR mirror) |
-| [ADR 0024](adrs/0024-shared-traced-model-routing-module.md) | Shared traced model-routing module | `M-002` | PRD mandate (staged ADR mirror) |
-| [ADR 0025](adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md) | Versioned Bayesian mastery and FSRS-style scheduling | `M-003` | PRD mandate (staged ADR mirror) |
-| [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md) | File-per-decision ADR storage and lifecycle | `D-GH-125` | Decision register (ADR mirror) |
-| [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md) | Immutable sequential canonical ADR identifiers | `D-GH-126` | Decision register (ADR mirror) |
-| [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) | Product requirements and architecture document authority | `D-GH-127` | Decision register (ADR mirror) |
+| [ADR 0001](adrs/0001-repository-decision-authority-and-register.md) | Repository decision authority and register | `D-BOOTSTRAP-001` | ADR |
+| [ADR 0002](adrs/0002-workspace-tooling-and-deployable-service-boundaries.md) | Workspace tooling and deployable service boundaries | `D-GH-2` | ADR |
+| [ADR 0003](adrs/0003-sql-migrations-schema-ownership-and-write-boundaries.md) | SQL migrations, schema ownership, and write boundaries | `D-GH-3` | ADR |
+| [ADR 0004](adrs/0004-provider-capability-ports-and-adapter-rollout.md) | Provider capability ports and adapter rollout | `D-GH-4` | ADR |
+| [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md) | OpenTofu infrastructure, environment, secret, and promotion controls | `D-GH-5` | ADR |
+| [ADR 0006](adrs/0006-passwordless-email-authentication-and-revocable-server-sessions.md) | Passwordless email authentication and revocable server sessions | `D-GH-6` | ADR |
+| [ADR 0007](adrs/0007-layered-owner-scope-enforcement.md) | Layered owner-scope enforcement | `D-GH-7` | ADR |
+| [ADR 0008](adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md) | Isolated local document parsing, scanning, and OCR | `D-GH-8` | ADR |
+| [ADR 0009](adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md) | Versioned source-span, embedding, and vector-namespace contract | `D-GH-9` | ADR |
+| [ADR 0010](adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md) | Typed model routing, prompt, provenance, retry, and trace contract | `D-GH-10` | ADR |
+| [ADR 0011](adrs/0011-cpu-fallback-tts-and-layered-audio-asset-contract.md) | CPU fallback TTS and layered audio-asset contract | `D-GH-11` | ADR |
+| [ADR 0012](adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md) | Durable event, idempotency, retry, DLQ, and finalization contract | `D-GH-12` | ADR |
+| [ADR 0013](adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md) | Private OSS delivery, CDN signing, expiry, and invalidation contract | `D-GH-13` | ADR |
+| [ADR 0014](adrs/0014-p1-feature-flags-and-default-off-enforcement.md) | P1 feature flags and default-off enforcement | `D-GH-14` | ADR |
+| [ADR 0015](adrs/0015-repository-owned-release-gate-evaluation-evidence.md) | Repository-owned release-gate evaluation evidence | `D-GH-15` | ADR |
+| [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md) | Provisional Bayesian mastery and reproducibility contract | `D-GH-16` | ADR |
+| [ADR 0017](adrs/0017-worktree-based-issue-pickup-and-claim-labels.md) | Worktree-based issue pickup and claim labels | `D-GH-67` | ADR |
+| [ADR 0018](adrs/0018-reproducible-agent-toolchain-and-required-check-recovery-policy.md) | Reproducible agent toolchain and required-check recovery policy | `D-GH-81` | ADR |
+| [ADR 0019](adrs/0019-evidence-backed-contributor-agent-improvement-loop.md) | Evidence-backed contributor-agent improvement loop | `D-GH-83` | ADR |
+| [ADR 0020](adrs/0020-java-25-base-family-for-the-isolated-ingestion-worker.md) | Java 25 base family for the isolated-ingestion worker | `D-GH-95` | ADR |
+| [ADR 0021](adrs/0021-kms-backed-clamav-snapshot-signing-profile.md) | KMS-backed ClamAV snapshot signing profile | `D-GH-96` | ADR |
+| [ADR 0022](adrs/0022-single-segment-wan-sprint-prototype-and-long-form-deferral.md) | Single-segment Wan sprint prototype and long-form deferral | `D-GH-120` | ADR |
+| [ADR 0023](adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md) | AnalyticDB for PostgreSQL sprint vector store | `M-001` | ADR |
+| [ADR 0024](adrs/0024-shared-traced-model-routing-module.md) | Shared traced model-routing module | `M-002` | ADR |
+| [ADR 0025](adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md) | Versioned Bayesian mastery and FSRS-style scheduling | `M-003` | ADR |
+| [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md) | File-per-decision ADR storage and lifecycle | `D-GH-125` | ADR |
+| [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md) | Immutable sequential canonical ADR identifiers | `D-GH-126` | ADR |
+| [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) | Product requirements and architecture document authority | `D-GH-127` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -106,7 +103,7 @@ deployment, capacity, release-gate, or pilot-readiness evidence.
 | Default-off P1 flag registry and evaluation slice | [flag registry](../packages/feature-flags/src/registry.ts) and [flag tests](../packages/feature-flags/src/feature-flags.test.ts) | [ADR 0014](adrs/0014-p1-feature-flags-and-default-off-enforcement.md), [ADR 0022](adrs/0022-single-segment-wan-sprint-prototype-and-long-form-deferral.md) |
 | Repository-owned evaluation contracts and attestation index slice | [evaluation package guide](../packages/evaluation/README.md), [attestation implementation](../packages/evaluation/src/attestation.ts), and [gate index](../packages/db/src/gate-attestation-index.ts) | [ADR 0015](adrs/0015-repository-owned-release-gate-evaluation-evidence.md) |
 | Environment and module source-boundary scaffold | [infrastructure guide](../infra/README.md), [environment roots](../infra/environments), and [policy check](../scripts/check-infra-policy.mjs) | [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md) |
-| ADR mirror, problem-document, and architecture-view governance checks | [ADR validator](../scripts/validate_adrs.py), [problem validator](../scripts/validate_problem_docs.py), [architecture validator](../scripts/validate_architecture.py), and [required validation workflow](../.github/workflows/validate-decisions.yml) | [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md), [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md), [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) |
+| Authoritative ADR, problem-document, and architecture-view governance checks | [ADR validator](../scripts/validate_adrs.py), [problem validator](../scripts/validate_problem_docs.py), [architecture validator](../scripts/validate_architecture.py), and [required validation workflow](../.github/workflows/validate-decisions.yml) | [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md), [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md), [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) |
 <!-- END IMPLEMENTED STATE -->
 <!-- prettier-ignore-end -->
 

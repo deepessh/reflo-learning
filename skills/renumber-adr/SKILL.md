@@ -46,10 +46,10 @@ The script assigns the lowest unused four-digit IDs and updates:
 - new legacy-alias entries on the branch;
 - exact draft-filename links, generated tables, and mutable references.
 
-It leaves `DECISIONS.md`, merged ADR files, SQL files, migration directories,
-and other historical provenance untouched and reports protected references that
-remain. When a bare canonical reference could mean the target ADR rather than
-the colliding draft, retain it instead of guessing.
+It leaves merged ADR files, SQL files, migration directories, and other
+historical provenance untouched and reports protected references that remain.
+When a bare canonical reference could mean the target ADR rather than the
+colliding draft, retain it instead of guessing.
 
 ## Non-negotiable limits
 
@@ -66,7 +66,6 @@ the colliding draft, retain it instead of guessing.
 After applying, inspect the diff and run:
 
 ```sh
-python3 scripts/validate_decisions.py
 python3 scripts/validate_adrs.py --base-ref origin/main
 python3 -m unittest scripts/test_adr_skills.py scripts/test_validate_adrs.py
 ```

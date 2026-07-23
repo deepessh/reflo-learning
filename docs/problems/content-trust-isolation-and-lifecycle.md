@@ -1,6 +1,6 @@
 # Content trust, isolation, and lifecycle
 
-> **Non-authoritative:** This document explores a durable architectural problem. It does not authorize architecture, record a decision, or track delivery work. Product requirements remain in the [PRD](../../prds/reflo-prd.md), and effective implementation verdicts remain in the [decision register](../../DECISIONS.md).
+> **Non-authoritative:** This document explores a durable architectural problem. It does not authorize architecture, record a decision, or track delivery work. Product requirements remain in the [PRD](../../prds/reflo-prd.md), and accepted architecture decisions remain in the [ADR collection](../adrs/README.md).
 
 ## Problem
 
@@ -83,10 +83,7 @@ parsers, model providers, storage systems, and delivery mechanisms change.
 ## Related authoritative sources
 
 - [PRD §6, F1 and F7; §9; §10; §11](../../prds/reflo-prd.md)
-- [D-GH-7 — layered owner-scope enforcement](../../DECISIONS.md#d-gh-7--layered-owner-scope-enforcement)
-- [D-GH-8 — isolated local document parsing, scanning, and OCR](../../DECISIONS.md#d-gh-8--isolated-local-document-parsing-scanning-and-ocr)
-- [D-GH-9 — versioned source-span embedding and vector namespace contract](../../DECISIONS.md#d-gh-9--versioned-source-span-embedding-and-vector-namespace-contract)
-- [D-GH-13 — private OSS delivery, CDN signing, expiry, and invalidation](../../DECISIONS.md#d-gh-13--private-oss-delivery-cdn-signing-expiry-and-invalidation-contract)
-
-The corresponding [ADR mirrors](../adrs/README.md) are navigation aids during
-coexistence and do not replace these authoritative sources.
+- [ADR 0007 — layered owner-scope enforcement](../adrs/0007-layered-owner-scope-enforcement.md)
+- [ADR 0008 — isolated local document parsing, scanning, and OCR](../adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md)
+- [ADR 0009 — versioned source-span embedding and vector namespace contract](../adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md)
+- [ADR 0013 — private OSS delivery, CDN signing, expiry, and invalidation](../adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md)

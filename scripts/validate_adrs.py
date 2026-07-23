@@ -777,6 +777,7 @@ def parse_config(root: Path, diagnostics: Diagnostics) -> dict[str, Any]:
         "baseline_complete",
         "adr_directory",
         "register",
+        "authority_transfer_pr",
         "managed_prd_mandates",
         "partial_mirror_exemptions",
         "legacy_ids",
@@ -796,6 +797,19 @@ def parse_config(root: Path, diagnostics: Diagnostics) -> dict[str, Any]:
             diagnostics.add(f"{CONFIG_NAME}: {key} must be a non-empty relative path")
         elif Path(config[key]).is_absolute() or ".." in Path(config[key]).parts:
             diagnostics.add(f"{CONFIG_NAME}: {key} must stay within the repository")
+    transfer_pr = config.get("authority_transfer_pr")
+    if mode := config.get("mode"):
+        if mode == "adr-authoritative":
+            one_github_url(
+                transfer_pr,
+                f"{CONFIG_NAME}: authority_transfer_pr",
+                r"https://github\.com/[^/]+/[^/]+/pull/\d+",
+                diagnostics,
+            )
+        elif transfer_pr is not None:
+            diagnostics.add(
+                f"{CONFIG_NAME}: coexistence modes require authority_transfer_pr: null"
+            )
     for key in ("managed_prd_mandates", "partial_mirror_exemptions"):
         values = config.get(key)
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
@@ -838,6 +852,37 @@ def parse_config(root: Path, diagnostics: Diagnostics) -> dict[str, Any]:
         if pattern.search(source):
             diagnostics.add(f"{CONFIG_NAME}: appears to contain prohibited {sensitive_label}")
     return config
+
+
+def validate_authority_transfer(
+    config: dict[str, Any],
+    by_id: dict[str, Adr],
+    diagnostics: Diagnostics,
+) -> None:
+    """Require one exact atomic cutover PR for every promoted PRD mandate."""
+
+    if config.get("mode") != "adr-authoritative":
+        return
+    transfer_pr = config.get("authority_transfer_pr")
+    if not isinstance(transfer_pr, str) or not pr_parts(transfer_pr):
+        return
+    legacy_ids = config.get("legacy_ids") or {}
+    for mandate in config.get("managed_prd_mandates") or []:
+        canonical_id = legacy_ids.get(mandate)
+        adr = by_id.get(canonical_id) if isinstance(canonical_id, str) else None
+        if not adr:
+            continue
+        provenance = adr.metadata.get("provenance") or {}
+        if provenance.get("kind") != "prd-mandate":
+            diagnostics.add(
+                f"{adr.path.as_posix()}: managed mandate {mandate} must use prd-mandate provenance"
+            )
+            continue
+        if provenance.get("cutover_pr") != transfer_pr:
+            diagnostics.add(
+                f"{adr.path.as_posix()}: cutover_pr must exactly match "
+                f"{CONFIG_NAME} authority_transfer_pr"
+            )
 
 
 def collect_adrs(root: Path, config: dict[str, Any], diagnostics: Diagnostics) -> tuple[dict[str, Adr], dict[str, Adr], list[str]]:
@@ -1190,6 +1235,21 @@ def validate_cutover_contract(
                     diagnostics.add(
                         f"{label}: M-006 provider/storage alias {alias!r} has no migrated ADR"
                     )
+        prohibited = moved_entry.get("prohibited_prd_fragments_after_cutover")
+        if not isinstance(prohibited, list) or not prohibited:
+            diagnostics.add(
+                f"{label}: M-006-provider-storage must declare prohibited PRD fragments"
+            )
+        elif config.get("mode") == "adr-authoritative":
+            for fragment in prohibited:
+                if not isinstance(fragment, str) or not fragment.strip():
+                    diagnostics.add(
+                        f"{label}: prohibited PRD fragments must be non-empty strings"
+                    )
+                elif fragment in prd_text:
+                    diagnostics.add(
+                        f"{label}: moved architecture fragment remains in the authoritative PRD"
+                    )
 
 
 def git_previous_adrs(root: Path, config: dict[str, Any], base_ref: str, diagnostics: Diagnostics) -> dict[str, Adr]:
@@ -1236,6 +1296,132 @@ def git_previous_adrs(root: Path, config: dict[str, Any], base_ref: str, diagnos
     for message in scratch_diagnostics.finish():
         diagnostics.add(f"baseline: {message}")
     return previous
+
+
+def git_show_text(root: Path, base_ref: str, relative: str) -> str | None:
+    result = subprocess.run(
+        ["git", "show", f"{base_ref}:{relative}"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def validate_cutover_bijection(
+    root: Path,
+    config: dict[str, Any],
+    by_alias: dict[str, Adr],
+    base_ref: str,
+    diagnostics: Diagnostics,
+) -> None:
+    """Prove the authoritative cutover preserves the complete prior register."""
+
+    if config.get("mode") != "adr-authoritative":
+        return
+    register = config.get("register")
+    if not isinstance(register, str):
+        return
+    previous_config_source = git_show_text(root, base_ref, CONFIG_NAME)
+    previous_config = (
+        load_yaml(previous_config_source, f"{base_ref}:{CONFIG_NAME}", diagnostics)
+        if previous_config_source is not None
+        else None
+    )
+    if isinstance(previous_config, dict) and previous_config.get("mode") == "adr-authoritative":
+        return
+    if not isinstance(previous_config, dict) or previous_config.get("mode") != "complete-mirror":
+        diagnostics.add(
+            f"atomic cutover must transition from complete-mirror at {base_ref}"
+        )
+        return
+    previous_register = git_show_text(root, base_ref, register)
+    if previous_register is None:
+        diagnostics.add(
+            f"git baseline {base_ref!r} has no {register}; cannot prove cutover bijection"
+        )
+        return
+
+    records = parse_register_records(previous_register, diagnostics)
+    register_errors: list[str] = []
+    mandates = parse_index(
+        previous_register.splitlines(), "M-", 4, register_errors
+    )
+    for message in register_errors:
+        diagnostics.add(f"{base_ref}:{register}: {message}")
+    effective_records = {
+        record_id: record
+        for record_id, record in records.items()
+        if record.get("Status") != "Rejected"
+    }
+    managed_mandates = set(config.get("managed_prd_mandates") or [])
+    expected = set(effective_records) | managed_mandates
+    actual = set(by_alias)
+    for alias in sorted(expected - actual):
+        diagnostics.add(
+            f"atomic cutover lost authoritative record {alias} from {base_ref}:{register}"
+        )
+    for alias in sorted(actual - expected):
+        diagnostics.add(
+            f"atomic cutover ADR alias {alias} has no source in {base_ref}:{register}"
+        )
+    legacy_ids = config.get("legacy_ids") or {}
+    for alias, adr in by_alias.items():
+        if alias in effective_records:
+            validate_field_preservation(
+                adr, alias, effective_records[alias], legacy_ids, diagnostics
+            )
+        elif alias in managed_mandates and alias in mandates:
+            validate_mandate_preservation(
+                adr, alias, mandates[alias], diagnostics
+            )
+        elif alias in managed_mandates:
+            diagnostics.add(
+                f"atomic cutover mandate {alias} is absent from {base_ref}:{register}"
+            )
+
+
+def validate_immutable_sql_history(
+    root: Path,
+    base_ref: str,
+    diagnostics: Diagnostics,
+) -> None:
+    """Reject changes to SQL files that were already merged at the base ref."""
+
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", base_ref],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        diagnostics.add(
+            f"git baseline {base_ref!r} is unavailable; cannot verify immutable SQL history"
+        )
+        return
+    for relative in sorted(
+        path
+        for path in result.stdout.splitlines()
+        if Path(path).suffix.lower() == ".sql"
+        and (
+            "migrations" in Path(path).parts
+            or Path(path).parent.name == "sql"
+        )
+    ):
+        previous = git_show_text(root, base_ref, relative)
+        current_path = root / relative
+        if previous is None or not current_path.is_file():
+            diagnostics.add(f"{relative}: merged SQL history cannot be deleted")
+            continue
+        try:
+            current = current_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            diagnostics.add(f"{relative}: merged SQL history cannot be read")
+            continue
+        if current != previous:
+            diagnostics.add(f"{relative}: merged SQL history is immutable")
 
 
 def validate_prd_sources(root: Path, adrs: dict[str, Adr], diagnostics: Diagnostics) -> None:
@@ -1289,10 +1475,15 @@ def validate_repository(
     config = parse_config(root, diagnostics)
     by_id, by_alias, urls = collect_adrs(root, config, diagnostics)
     validate_alias_allocation(config, by_id, diagnostics)
+    validate_authority_transfer(config, by_id, diagnostics)
     validate_coexistence(root, config, by_alias, diagnostics)
     validate_cutover_contract(root, config, by_id, diagnostics)
     validate_prd_sources(root, by_id, diagnostics)
     if base_ref:
+        validate_cutover_bijection(
+            root, config, by_alias, base_ref, diagnostics
+        )
+        validate_immutable_sql_history(root, base_ref, diagnostics)
         previous = git_previous_adrs(root, config, base_ref, diagnostics)
         for canonical_id, old_adr in previous.items():
             current = by_id.get(canonical_id)

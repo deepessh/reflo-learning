@@ -1,12 +1,13 @@
 schema_version: 1
-mode: complete-mirror
+mode: adr-authoritative
 baseline_complete: true
 adr_directory: docs/adrs
 register: DECISIONS.md
+authority_transfer_pr: https://github.com/deepessh/reflo-learning/pull/0
 
-# These PRD mandates become ADRs only through the atomic authority transfer
-# authorized by D-GH-127. M-004, M-005, and the product portion of M-006 stay
-# product requirements and are intentionally not ADR-managed.
+# These former PRD technical mandates transferred to ADR authority through the
+# exact atomic pull request above. M-004, M-005, and the product portion of
+# M-006 remain product requirements and are intentionally not ADR-managed.
 managed_prd_mandates:
   - M-001
   - M-002

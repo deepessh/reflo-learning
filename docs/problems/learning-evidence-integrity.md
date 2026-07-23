@@ -1,6 +1,6 @@
 # Learning evidence integrity
 
-> **Non-authoritative:** This document explores a durable architectural problem. It does not authorize architecture, record a decision, or track delivery work. Product requirements remain in the [PRD](../../prds/reflo-prd.md), and effective implementation verdicts remain in the [decision register](../../DECISIONS.md).
+> **Non-authoritative:** This document explores a durable architectural problem. It does not authorize architecture, record a decision, or track delivery work. Product requirements remain in the [PRD](../../prds/reflo-prd.md), and accepted architecture decisions remain in the [ADR collection](../adrs/README.md).
 
 ## Problem
 
@@ -79,11 +79,8 @@ assessment evidence.
 ## Related authoritative sources
 
 - [PRD §5; §6, F3–F5; §8; §10–§12](../../prds/reflo-prd.md)
-- [D-GH-9 — versioned source-span embedding and vector namespace contract](../../DECISIONS.md#d-gh-9--versioned-source-span-embedding-and-vector-namespace-contract)
-- [D-GH-10 — typed model routing, prompt provenance, retry, and trace contract](../../DECISIONS.md#d-gh-10--typed-model-routing-prompt-provenance-retry-and-trace-contract)
-- [D-GH-15 — repository-owned release-gate evaluation evidence](../../DECISIONS.md#d-gh-15--repository-owned-release-gate-evaluation-evidence)
-- [D-GH-16 — provisional Bayesian mastery and reproducibility contract](../../DECISIONS.md#d-gh-16--provisional-bayesian-mastery-and-reproducibility-contract)
-- [M-003 — versioned Bayesian mastery and FSRS-style scheduling mandate](../../DECISIONS.md#prd-mandate-index)
-
-The corresponding [ADR mirrors](../adrs/README.md) are navigation aids during
-coexistence and do not replace these authoritative sources.
+- [ADR 0009 — versioned source-span embedding and vector namespace contract](../adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md)
+- [ADR 0010 — typed model routing, prompt provenance, retry, and trace contract](../adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md)
+- [ADR 0015 — repository-owned release-gate evaluation evidence](../adrs/0015-repository-owned-release-gate-evaluation-evidence.md)
+- [ADR 0016 — provisional Bayesian mastery and reproducibility contract](../adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md)
+- [ADR 0025 — versioned Bayesian mastery and FSRS-style scheduling](../adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md)

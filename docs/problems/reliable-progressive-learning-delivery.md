@@ -1,6 +1,6 @@
 # Reliable progressive learning delivery
 
-> **Non-authoritative:** This document explores a durable architectural problem. It does not authorize architecture, record a decision, or track delivery work. Product requirements remain in the [PRD](../../prds/reflo-prd.md), and effective implementation verdicts remain in the [decision register](../../DECISIONS.md).
+> **Non-authoritative:** This document explores a durable architectural problem. It does not authorize architecture, record a decision, or track delivery work. Product requirements remain in the [PRD](../../prds/reflo-prd.md), and accepted architecture decisions remain in the [ADR collection](../adrs/README.md).
 
 ## Problem
 
@@ -85,13 +85,10 @@ for completed learner value.
 ## Related authoritative sources
 
 - [PRD §6, F1–F3 and F6; §8–§9; §11–§14](../../prds/reflo-prd.md)
-- [D-GH-2 — workspace tooling and deployable service boundaries](../../DECISIONS.md#d-gh-2--workspace-tooling-and-deployable-service-boundaries)
-- [D-GH-4 — provider capability ports and adapter rollout](../../DECISIONS.md#d-gh-4--provider-capability-ports-and-adapter-rollout)
-- [D-GH-10 — typed model routing, prompt provenance, retry, and trace contract](../../DECISIONS.md#d-gh-10--typed-model-routing-prompt-provenance-retry-and-trace-contract)
-- [D-GH-11 — CPU fallback TTS and layered audio asset contract](../../DECISIONS.md#d-gh-11--cpu-fallback-tts-and-layered-audio-asset-contract)
-- [D-GH-12 — durable event idempotency, retry, DLQ, and finalization contract](../../DECISIONS.md#d-gh-12--durable-event-idempotency-retry-dlq-and-finalization-contract)
-- [D-GH-14 — P1 feature flags and default-off enforcement](../../DECISIONS.md#d-gh-14--p1-feature-flags-and-default-off-enforcement)
-- [D-GH-15 — repository-owned release-gate evaluation evidence](../../DECISIONS.md#d-gh-15--repository-owned-release-gate-evaluation-evidence)
-
-The corresponding [ADR mirrors](../adrs/README.md) are navigation aids during
-coexistence and do not replace these authoritative sources.
+- [ADR 0002 — workspace tooling and deployable service boundaries](../adrs/0002-workspace-tooling-and-deployable-service-boundaries.md)
+- [ADR 0004 — provider capability ports and adapter rollout](../adrs/0004-provider-capability-ports-and-adapter-rollout.md)
+- [ADR 0010 — typed model routing, prompt provenance, retry, and trace contract](../adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md)
+- [ADR 0011 — CPU fallback TTS and layered audio asset contract](../adrs/0011-cpu-fallback-tts-and-layered-audio-asset-contract.md)
+- [ADR 0012 — durable event idempotency, retry, DLQ, and finalization contract](../adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md)
+- [ADR 0014 — P1 feature flags and default-off enforcement](../adrs/0014-p1-feature-flags-and-default-off-enforcement.md)
+- [ADR 0015 — repository-owned release-gate evaluation evidence](../adrs/0015-repository-owned-release-gate-evaluation-evidence.md)

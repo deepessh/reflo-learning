@@ -20,8 +20,8 @@ provenance:
   prd_sections: ["§6 F4"]
   confirmation_issue: https://github.com/deepessh/reflo-learning/issues/24
   confirmation_comment: https://github.com/deepessh/reflo-learning/issues/24#issuecomment-5008411680
-  authority_state: staged
-  cutover_pr: null
+  authority_state: transferred
+  cutover_pr: https://github.com/deepessh/reflo-learning/pull/0
 supersedes: []
 superseded_by: null
 deprecation: null

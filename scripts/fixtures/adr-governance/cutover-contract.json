@@ -37,6 +37,13 @@
         "D-GH-11",
         "D-GH-13",
         "D-GH-120"
+      ],
+      "prohibited_prd_fragments_after_cutover": [
+        "AnalyticDB for PostgreSQL (pgvector-compatible) for the sprint",
+        "RDS PostgreSQL (system of record",
+        "Qwen (tutoring dialogue",
+        "Algorithm: Bayesian mastery update + FSRS-style spaced-repetition scheduling",
+        "`User` (id, auth, prefs, channel opt-ins)"
       ]
     }
   }

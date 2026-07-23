@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -188,6 +189,11 @@ def config(
         "baseline_complete": complete,
         "adr_directory": "docs/adrs",
         "register": "DECISIONS.md",
+        "authority_transfer_pr": (
+            "https://github.com/acme/reflo/pull/80"
+            if mode == "adr-authoritative"
+            else None
+        ),
         "managed_prd_mandates": managed or [],
         "partial_mirror_exemptions": exemptions or [],
         "legacy_ids": legacy_ids or {"D-GH-42": "0029"},
@@ -225,12 +231,13 @@ class AdrValidationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.fixture.close()
 
-    def test_repository_complete_mirror_is_valid_and_complete(self) -> None:
+    def test_repository_is_adr_authoritative_and_complete(self) -> None:
         errors, _, adrs, repository_config = validator.validate_repository(validator.ROOT)
         self.assertEqual([], errors)
-        self.assertEqual("complete-mirror", repository_config["mode"])
+        self.assertEqual("adr-authoritative", repository_config["mode"])
         self.assertTrue(repository_config["baseline_complete"])
         self.assertEqual([], repository_config["partial_mirror_exemptions"])
+        self.assertFalse((validator.ROOT / "DECISIONS.md").exists())
         self.assertEqual(
             len(repository_config["legacy_ids"]),
             len(adrs),
@@ -396,6 +403,143 @@ class AdrValidationTests(unittest.TestCase):
         messages = self.fixture.validate()
         self.assertIn("adr-authoritative mode requires 'transferred'", messages)
         self.assertIn("cutover_pr: expected one exact GitHub URL", messages)
+
+    def test_authoritative_mode_requires_one_exact_transfer_pr(self) -> None:
+        (self.fixture.root / "DECISIONS.md").unlink()
+        self.fixture.write_config(
+            config(
+                mode="adr-authoritative",
+                complete=True,
+                legacy_ids={"M-001": "0023"},
+                managed=["M-001"],
+            )
+        )
+        metadata = mandate_metadata(
+            state="transferred",
+            cutover_pr="https://github.com/acme/reflo/pull/81",
+        )
+        self.fixture.write_adr(metadata, slug="mandate")
+        self.assertIn(
+            "cutover_pr must exactly match .adr-governance.yaml authority_transfer_pr",
+            self.fixture.validate(),
+        )
+
+    def test_golden_cutover_preserves_complete_register_and_late_decisions(self) -> None:
+        self.fixture.write_config(
+            config(
+                mode="complete-mirror",
+                complete=True,
+                legacy_ids={"D-GH-42": "0029", "M-001": "0023"},
+                managed=["M-001"],
+            )
+        )
+        github_path = self.fixture.write_adr(github_metadata())
+        mandate_path = self.fixture.write_adr(
+            mandate_metadata(), slug="mandate"
+        )
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=self.fixture.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "fixture@example.com"],
+            cwd=self.fixture.root,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Fixture"],
+            cwd=self.fixture.root,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "add", "."], cwd=self.fixture.root, check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "complete mirror"],
+            cwd=self.fixture.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        github_diagnostics = validator.Diagnostics()
+        github_adr = validator.parse_adr(github_path, github_diagnostics)
+        mandate_adr = validator.parse_adr(mandate_path, github_diagnostics)
+        assert github_adr and mandate_adr
+        by_alias = {"D-GH-42": github_adr, "M-001": mandate_adr}
+        authoritative = config(
+            mode="adr-authoritative",
+            complete=True,
+            legacy_ids={"D-GH-42": "0029", "M-001": "0023"},
+            managed=["M-001"],
+        )
+        diagnostics = validator.Diagnostics()
+        validator.validate_cutover_bijection(
+            self.fixture.root,
+            authoritative,
+            by_alias,
+            "HEAD",
+            diagnostics,
+        )
+        self.assertEqual([], diagnostics.finish())
+
+        diagnostics = validator.Diagnostics()
+        validator.validate_cutover_bijection(
+            self.fixture.root,
+            authoritative,
+            {"M-001": mandate_adr},
+            "HEAD",
+            diagnostics,
+        )
+        self.assertIn(
+            "atomic cutover lost authoritative record D-GH-42",
+            "\n".join(diagnostics.finish()),
+        )
+
+    def test_immutable_sql_history_rejects_edits_and_allows_new_files(self) -> None:
+        migration = self.fixture.root / "packages/db/migrations/001.sql"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("select 1;\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=self.fixture.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "fixture@example.com"],
+            cwd=self.fixture.root,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Fixture"],
+            cwd=self.fixture.root,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "add", "."], cwd=self.fixture.root, check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "baseline"],
+            cwd=self.fixture.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        migration.write_text("select 2;\n", encoding="utf-8")
+        added = self.fixture.root / "packages/db/migrations/002.sql"
+        added.write_text("select 2;\n", encoding="utf-8")
+        diagnostics = validator.Diagnostics()
+        validator.validate_immutable_sql_history(
+            self.fixture.root, "HEAD", diagnostics
+        )
+        messages = "\n".join(diagnostics.finish())
+        self.assertIn("001.sql: merged SQL history is immutable", messages)
+        self.assertNotIn("002.sql", messages)
 
     def test_cutover_contract_retains_product_requirements_and_maps_m006_architecture(self) -> None:
         diagnostics = validator.Diagnostics()

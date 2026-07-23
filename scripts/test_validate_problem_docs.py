@@ -17,7 +17,7 @@ NOTICE = (
     "> **Non-authoritative:** This document explores a durable architectural problem. "
     "It does not authorize architecture, record a decision, or track delivery work. "
     "Product requirements remain in the [PRD](../../prds/reflo-prd.md), and effective "
-    "implementation verdicts remain in the [decision register](../../DECISIONS.md)."
+    "implementation verdicts remain in the [ADR collection](../adrs/README.md)."
 )
 
 
@@ -49,7 +49,7 @@ A durable problem.
 ## Related authoritative sources
 
 - [PRD](../../prds/reflo-prd.md)
-- [Decision](../../DECISIONS.md#effective-decision-records)
+- [ADR collection](../adrs/README.md)
 {extra}
 """
 
@@ -64,11 +64,8 @@ class Fixture:
         (self.root / "prds/reflo-prd.md").write_text(
             "# Product requirements\n", encoding="utf-8"
         )
-        (self.root / "DECISIONS.md").write_text(
-            "# Decisions\n\n## Effective Decision Records\n", encoding="utf-8"
-        )
         (self.root / "docs/adrs/README.md").write_text(
-            "# ADR mirrors\n", encoding="utf-8"
+            "# Authoritative ADRs\n", encoding="utf-8"
         )
         (self.root / "docs/problems/README.md").write_text(
             "# Problems\n\n[Fixture](durable-fixture.md)\n", encoding="utf-8"
@@ -137,7 +134,7 @@ Recommendation: use the fixture.
             valid_document(
                 """
 - [Missing file](../../docs/missing.md)
-- [Missing heading](../../DECISIONS.md#not-a-heading)
+- [Missing heading](../adrs/README.md#not-a-heading)
 """
             )
         )
@@ -148,11 +145,11 @@ Recommendation: use the fixture.
     def test_requires_authoritative_source_links(self) -> None:
         source = valid_document().replace(
             "../../prds/reflo-prd.md", "https://example.com/prd"
-        ).replace("../../DECISIONS.md", "https://example.com/decisions")
+        ).replace("../adrs/README.md", "https://example.com/adrs")
         self.fixture.write(source)
         errors = self.fixture.errors()
         self.assertIn("must link the authoritative PRD", errors)
-        self.assertIn("must link the effective decision register", errors)
+        self.assertIn("must link the authoritative ADR collection", errors)
 
     def test_rejects_non_kebab_filename(self) -> None:
         self.fixture.write(valid_document(), name="Durable_Fixture.md")

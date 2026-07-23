@@ -176,6 +176,8 @@ describe("Model Studio Wan video adapter", () => {
       { output: { ...success().output, video_url: "https://127.0.0.1/x" } },
       { usage: { ...success().usage, output_video_duration: 5 } },
       { usage: { ...success().usage, SR: 1080 } },
+      { usage: { ...success().usage, size: "1920*1080" } },
+      { usage: { ...success().usage, video_count: 2 } },
     ]) {
       const adapter = createModelStudioVideoAdapter({
         ...baseOptions,
@@ -277,10 +279,6 @@ function success() {
     },
     request_id: "success_request_12345678",
     usage: {
-      SR: 720,
-      duration: 15,
-      output_video_duration: 15,
-      ratio: "16:9",
       video_count: 1,
     },
   };

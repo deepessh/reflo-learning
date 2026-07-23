@@ -218,23 +218,33 @@ function parseResult(
     throw adapterFailure("provider_error", false, "accepted");
   }
   const uri = safeMediaUrl(payload.output.video_url);
-  const duration = payload.usage.output_video_duration;
   if (
     uri === null ||
-    duration !== CLIP_DURATION_SECONDS ||
-    payload.usage.duration !== CLIP_DURATION_SECONDS ||
     payload.usage.video_count !== 1 ||
-    payload.usage.ratio !== "16:9" ||
-    payload.usage.SR !== 720
+    !matchesOptionalNumber(
+      payload.usage.output_video_duration,
+      CLIP_DURATION_SECONDS,
+    ) ||
+    !matchesOptionalNumber(payload.usage.duration, CLIP_DURATION_SECONDS) ||
+    !matchesOptionalNumber(payload.usage.SR, 720) ||
+    !matchesOptionalString(payload.usage.size, "1280*720")
   ) {
     throw adapterFailure("provider_error", false, "accepted");
   }
   return Object.freeze({
-    durationSeconds: duration,
+    durationSeconds: CLIP_DURATION_SECONDS,
     mimeType: "video/mp4",
     sourceSpanIds: Object.freeze(input.sourceSpans.map((span) => span.id)),
     uri,
   });
+}
+
+function matchesOptionalNumber(value: unknown, expected: number): boolean {
+  return value === undefined || value === expected;
+}
+
+function matchesOptionalString(value: unknown, expected: string): boolean {
+  return value === undefined || value === expected;
 }
 
 function validateOptions(options: ModelStudioVideoAdapterOptions): URL {

@@ -114,7 +114,7 @@ Lint/format:  corepack pnpm lint / corepack pnpm format
 Decisions:    python3 scripts/validate_decisions.py
 ADRs:         python3 scripts/validate_adrs.py
 Improvements: python3 scripts/agent_improvements.py validate
-Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_work_item.py scripts/test_agent_improvements.py
+Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build

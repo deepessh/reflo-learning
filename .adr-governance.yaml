@@ -16,31 +16,6 @@ managed_prd_mandates:
 # partial-mirror. Remove an entry as its ADR lands. A later effective record is
 # never added here: it must be dual-written immediately.
 partial_mirror_exemptions:
-  - D-BOOTSTRAP-001
-  - D-GH-2
-  - D-GH-3
-  - D-GH-4
-  - D-GH-5
-  - D-GH-6
-  - D-GH-7
-  - D-GH-8
-  - D-GH-9
-  - D-GH-10
-  - D-GH-11
-  - D-GH-12
-  - D-GH-13
-  - D-GH-14
-  - D-GH-15
-  - D-GH-16
-  - D-GH-67
-  - D-GH-81
-  - D-GH-83
-  - D-GH-95
-  - D-GH-96
-  - D-GH-120
-  - D-GH-125
-  - D-GH-126
-  - D-GH-127
   - M-001
   - M-002
   - M-003

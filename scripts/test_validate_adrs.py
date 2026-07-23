@@ -215,10 +215,14 @@ class AdrValidationTests(unittest.TestCase):
     def test_repository_partial_mirror_is_valid_and_incomplete(self) -> None:
         errors, _, adrs, repository_config = validator.validate_repository(validator.ROOT)
         self.assertEqual([], errors)
-        self.assertEqual({}, adrs)
         self.assertEqual("partial-mirror", repository_config["mode"])
         self.assertFalse(repository_config["baseline_complete"])
         self.assertGreater(len(repository_config["partial_mirror_exemptions"]), 0)
+        self.assertEqual(
+            len(repository_config["legacy_ids"])
+            - len(repository_config["partial_mirror_exemptions"]),
+            len(adrs),
+        )
 
     def test_github_decision_provenance_and_field_preservation_pass(self) -> None:
         self.fixture.write_config(config())
@@ -497,7 +501,22 @@ class AdrValidationTests(unittest.TestCase):
     def test_legacy_id_resolution_handles_alias_canonical_and_unmigrated(self) -> None:
         repository_errors, _, repository_adrs, repository_config = validator.validate_repository(validator.ROOT)
         self.assertEqual([], repository_errors)
-        self.assertEqual(("0026", None), validator.resolve_legacy_id(repository_config, repository_adrs, "D-GH-125"))
+        self.assertEqual(
+            (
+                "0026",
+                validator.ROOT
+                / "docs/adrs/0026-file-per-decision-adr-storage-and-lifecycle.md",
+            ),
+            validator.resolve_legacy_id(
+                repository_config, repository_adrs, "D-GH-125"
+            ),
+        )
+        self.assertEqual(
+            ("0023", None),
+            validator.resolve_legacy_id(
+                repository_config, repository_adrs, "M-001"
+            ),
+        )
 
         diagnostics = validator.Diagnostics()
         path = self.fixture.write_adr(github_metadata())

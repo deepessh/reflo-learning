@@ -45,6 +45,7 @@ Detailed rules live in the linked records.
 | [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md) | Immutable sequential canonical ADR identifiers | `D-GH-126` | ADR |
 | [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md) | Product requirements and architecture document authority | `D-GH-127` | ADR |
 | [ADR 0029](adrs/0029-adr-authority-and-enforcement-guarantees.md) | ADR authority and enforcement guarantees | `D-GH-145` | ADR |
+| [ADR 0030](adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md) | Versioned grading, abstention, fallback, and FSRS rating contract | `D-GH-17` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 

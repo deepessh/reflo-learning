@@ -7,10 +7,8 @@ non-authoritative: they do not approve an architecture, restate a decision as a
 new source of authority, or track delivery work.
 
 Product requirements remain authoritative in the
-[PRD](../../prds/reflo-prd.md). During the current coexistence phase, effective
-implementation and process verdicts remain authoritative in the
-[decision register](../../DECISIONS.md); [ADR mirrors](../adrs/README.md) improve
-navigation but do not transfer authority.
+[PRD](../../prds/reflo-prd.md). Accepted [ADRs](../adrs/README.md) authorize
+architecture and process decisions.
 
 ## Problem index
 

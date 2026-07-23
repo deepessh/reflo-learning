@@ -1,28 +1,26 @@
 ---
 name: writing-adrs
-description: Create or update Reflo Architecture Decision Records under docs/adrs using the repository's GitHub authorization, coexistence, provenance, schema, allocation, and document-authority rules. Use when an accepted Reflo decision needs an ADR record, when a new effective decision must be dual-written during ADR migration, or when target-architecture and problem-document references must be updated after an ADR is accepted.
+description: Create or update authoritative Reflo Architecture Decision Records under docs/adrs using the repository's GitHub authorization, provenance, schema, allocation, lifecycle, and document-authority rules. Use when an accepted Reflo decision needs an ADR record or when target-architecture and problem-document references must be updated after an ADR is accepted.
 ---
 
 # Write Reflo ADRs
 
 Create one Reflo-governed decision record without weakening GitHub authorization,
-PRD authority, coexistence checks, or accepted-record immutability.
+PRD product authority, ADR authority, or accepted-record immutability.
 
 ## Establish authority first
 
-1. Read `AGENTS.md`, the relevant PRD section, `.adr-governance.yaml`,
-   `docs/adrs/README.md`, and effective records in `DECISIONS.md`.
-2. Read the decision issue, exact verdict comment, and linked record work.
+1. Read `AGENTS.md`, the relevant PRD section and accepted ADRs,
+   `.adr-governance.yaml`, and `docs/adrs/README.md`.
+2. Read the decision issue and exact verdict comment.
 3. Require one standalone owner-authored verdict that says `Accepted`, identifies
    the authorized decider, and states the approval basis. Verify the comment URL
    and author association with `gh`; do not infer approval from reactions,
    discussion, issue closure, or a bare earlier `Accepted` comment.
 4. Stop without creating an effective ADR when the verdict is absent, rejected,
-   non-owner-authored, inexact, or inconsistent with the PRD/effective register.
-5. Treat `DECISIONS.md` as authoritative in `partial-mirror` and
-   `complete-mirror`. Dual-write every new effective decision in the register and
-   ADR in the same record PR. Never add late decisions to
-   `partial_mirror_exemptions`.
+   non-owner-authored, inexact, or inconsistent with the PRD or accepted ADRs.
+5. Rejected proposals remain in GitHub and never produce ADR files. An accepted
+   verdict becomes effective only when its authorized ADR PR merges.
 
 ## Allocate a draft number
 
@@ -79,13 +77,12 @@ Install the exact governance dependency when needed, then run:
 
 ```sh
 python3 -m pip install --requirement scripts/requirements-governance.txt
-python3 scripts/validate_decisions.py
 python3 scripts/validate_adrs.py --base-ref origin/main
-python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_adr_skills.py
+python3 -m unittest scripts/test_validate_adrs.py scripts/test_adr_skills.py
 ```
 
-During coexistence, verify the new register record and ADR are equivalent before
-merge. Run repository lint and tests required by `AGENTS.md`.
+Verify exact GitHub provenance and run repository lint and tests required by
+`AGENTS.md`.
 
 ## Source inspiration
 

@@ -188,8 +188,8 @@ def validate_problem_document(root: Path, path: Path, errors: list[str]) -> None
     linked_paths = validate_local_links(root, path, errors)
     if (root / "prds/reflo-prd.md").resolve() not in linked_paths:
         errors.append(f"{relative}: must link the authoritative PRD")
-    if (root / "DECISIONS.md").resolve() not in linked_paths:
-        errors.append(f"{relative}: must link the effective decision register")
+    if (root / "docs/adrs/README.md").resolve() not in linked_paths:
+        errors.append(f"{relative}: must link the authoritative ADR collection")
 
 
 def validate_repository(root: Path = ROOT) -> list[str]:

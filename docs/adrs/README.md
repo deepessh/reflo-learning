@@ -1,10 +1,10 @@
 # Reflo architecture decision records
 
 This directory contains one immutable, four-digit Markdown ADR per effective
-architecture decision and staged technical mandate. In `complete-mirror` mode,
-these files are non-authoritative mirrors: the PRD and `DECISIONS.md` retain
-their current authority. Rejected proposals remain in GitHub and never become
-ADRs.
+architecture or process decision. In `adr-authoritative` mode, accepted ADRs
+authorize decided architecture and process targets; the PRD remains
+authoritative for product requirements. Rejected proposals remain in GitHub
+and never become ADRs.
 
 Validation is configured by `.adr-governance.yaml` and run with:
 
@@ -79,18 +79,18 @@ Lossless reversal text.
 ```
 
 `github-decision`, `bootstrap-exception`, and `prd-mandate` provenance have
-different required fields. A staged PRD mandate uses
-`authority_state: staged` and `cutover_pr: null`; only `adr-authoritative` mode
-accepts `authority_state: transferred` with the exact cutover PR. Lifecycle
+different required fields. The three former technical PRD mandates use
+`authority_state: transferred` and the exact atomic cutover PR declared in
+`.adr-governance.yaml`. Lifecycle
 changes retain the body and use bidirectional `supersedes`/`superseded_by`
 links. Deprecation carries its own issue, exact verdict comment, date, PR,
 decider, and approval basis. Marked typo, formatting, and navigation-only
 maintenance is reviewable metadata; unmarked accepted-content edits fail.
 
-The preparatory cutover contract at
+The cutover contract at
 `scripts/fixtures/adr-governance/cutover-contract.json` keeps the D-GH-127
 retain/move boundary executable. It requires M-004 messaging priority, M-005
 P1/default-off behavior, and the product portion of M-006 to remain in the PRD,
-while the provider/storage portion of M-006 resolves to existing ADR mirrors.
-The contract does not transfer authority or represent the target architecture
-as implemented.
+while the provider/storage portion of M-006 resolves to existing ADRs.
+It also rejects moved architecture fragments that reappear in the PRD. The
+contract never represents a decided target as implemented.

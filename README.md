@@ -8,8 +8,9 @@ Reflo is a pnpm/Turborepo monorepo with three independently deployable applicati
 
 Shared packages live under `packages/` and expose public package entry points. Applications may import shared packages, but never another application.
 
-The [architecture view](docs/architecture.md) keeps the decided target separate
-from evidence-backed repository state and links the governing records.
+Accepted [ADRs](docs/adrs/README.md) authorize architecture and process
+decisions. The [architecture view](docs/architecture.md) keeps those decided
+targets separate from evidence-backed repository state.
 
 ## Local commands
 

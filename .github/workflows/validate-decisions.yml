@@ -84,7 +84,17 @@ jobs:
       - name: Validate structure and GitHub references
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          python3 scripts/validate_adrs.py --base-ref HEAD^ --check-links
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            python3 scripts/validate_adrs.py --base-ref HEAD^ --check-links --current-pr-number "$CURRENT_PR_NUMBER"
+            python3 skills/writing-adrs/scripts/allocate_adr_number.py \
+              --target-ref HEAD^ \
+              --base-branch "$GITHUB_BASE_REF" \
+              --current-pr-number "$CURRENT_PR_NUMBER" \
+              --check-merge-order
+          else
+            python3 scripts/validate_adrs.py --base-ref HEAD^ --check-links
+          fi
           python3 scripts/validate_architecture.py
           python3 scripts/validate_problem_docs.py

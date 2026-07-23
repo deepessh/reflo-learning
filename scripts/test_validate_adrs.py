@@ -74,7 +74,7 @@ def github_metadata(canonical_id: str = "0029", alias: str = "D-GH-42") -> dict:
         },
         "authorization": {
             "decider": "Human example",
-            "approval_basis": "Repository owner approval in the exact verdict comment.",
+            "approval_basis": "repository-owner authorization.",
         },
         "provenance": {
             "kind": "github-decision",
@@ -173,6 +173,36 @@ def render(metadata: dict, *, context: str = "Validator fixture context.") -> st
         flags=validator.re.MULTILINE,
     )
     return f"---\n{frontmatter}\n---\n{body(metadata, context=context)}"
+
+
+def live_github_responses(
+    *,
+    canonical_path: str = "docs/adrs/0029-fixture.md",
+    record_path: str | None = None,
+) -> dict:
+    return {
+        "/repos/acme/reflo/issues/42": {
+            "body": "Authorized decider: @owner",
+            "labels": [{"name": "decision"}],
+        },
+        "/repos/acme/reflo/issues/comments/99": {
+            "issue_url": "https://api.github.com/repos/acme/reflo/issues/42",
+            "user": {"login": "owner"},
+            "author_association": "OWNER",
+            "body": (
+                "Accepted. Authorized decider: @owner. "
+                "Approval basis: repository-owner authorization."
+            ),
+        },
+        "/repos/acme/reflo/pulls/43": {
+            "state": "closed",
+            "merged_at": "2026-07-23T00:00:00Z",
+            "body": "Closes #42",
+        },
+        "/repos/acme/reflo/pulls/43/files?per_page=100&page=1": [
+            {"filename": record_path or canonical_path}
+        ],
+    }
 
 
 def config(
@@ -300,6 +330,186 @@ class AdrValidationTests(unittest.TestCase):
         messages = self.fixture.validate()
         self.assertIn("issue and verdict comment must reference the same issue", messages)
         self.assertIn("does not exactly match D-GH-42 Verdict", messages)
+
+    def test_live_github_provenance_accepts_historical_and_future_records(self) -> None:
+        for canonical_id, record_path in (("0028", "DECISIONS.md"), ("0029", None)):
+            with self.subTest(canonical_id=canonical_id):
+                metadata = github_metadata(canonical_id)
+                metadata["authorization"]["decider"] = (
+                    "@owner, repository owner and authorized decision authority"
+                )
+                diagnostics = validator.Diagnostics()
+                path = self.fixture.write_adr(
+                    metadata, slug=f"fixture-{canonical_id}"
+                )
+                adr = validator.parse_adr(path, diagnostics)
+                assert adr
+                responses = live_github_responses(
+                    canonical_path=validator.canonical_adr_path(adr),
+                    record_path=record_path,
+                )
+                validator.validate_live_github_evidence(
+                    {canonical_id: adr},
+                    diagnostics,
+                    evidence=validator.GitHubEvidence(responses=responses),
+                )
+                self.assertEqual([], diagnostics.finish())
+
+    def test_live_github_provenance_rejects_non_authorizing_comments(self) -> None:
+        metadata = github_metadata()
+        metadata["authorization"]["decider"] = "@owner"
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata)
+        adr = validator.parse_adr(path, diagnostics)
+        assert adr
+
+        cases = {
+            "bare accepted": (
+                lambda responses: responses[
+                    "/repos/acme/reflo/issues/comments/99"
+                ].update({"body": "Accepted."}),
+                "does not identify the declared authorized decider",
+            ),
+            "unauthorized actor": (
+                lambda responses: responses[
+                    "/repos/acme/reflo/issues/comments/99"
+                ]["user"].update({"login": "other"}),
+                "was not authored by the declared authorized decider",
+            ),
+            "rejected": (
+                lambda responses: responses[
+                    "/repos/acme/reflo/issues/comments/99"
+                ].update(
+                    {
+                        "body": (
+                            "Authorized verdict: Rejected. Authorized decider: "
+                            "@owner. Approval basis: owner review."
+                        )
+                    }
+                ),
+                "is not an authorized Accepted verdict",
+            ),
+            "mismatched approval basis": (
+                lambda responses: responses[
+                    "/repos/acme/reflo/issues/comments/99"
+                ].update(
+                    {
+                        "body": (
+                            "Accepted. Authorized decider: @owner. "
+                            "Approval basis: a different authorization."
+                        )
+                    }
+                ),
+                "approval basis does not exactly match",
+            ),
+        }
+        for name, (mutate, expected) in cases.items():
+            with self.subTest(name=name):
+                responses = live_github_responses(
+                    canonical_path=validator.canonical_adr_path(adr)
+                )
+                mutate(responses)
+                case_diagnostics = validator.Diagnostics()
+                validator.validate_live_github_evidence(
+                    {"0029": adr},
+                    case_diagnostics,
+                    evidence=validator.GitHubEvidence(responses=responses),
+                )
+                self.assertIn(expected, "\n".join(case_diagnostics.finish()))
+
+    def test_live_github_provenance_allows_the_issue_named_agent_decider(self) -> None:
+        metadata = github_metadata()
+        metadata["authorization"]["decider"] = (
+            "@reflo-agent, authorized decider named by the issue"
+        )
+        metadata["authorization"]["approval_basis"] = (
+            "issue-delegated agent authorization."
+        )
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata)
+        adr = validator.parse_adr(path, diagnostics)
+        assert adr
+        responses = live_github_responses(
+            canonical_path=validator.canonical_adr_path(adr)
+        )
+        responses["/repos/acme/reflo/issues/42"]["body"] = (
+            "Authorized decider: @reflo-agent"
+        )
+        responses["/repos/acme/reflo/issues/comments/99"].update(
+            {
+                "user": {"login": "reflo-agent"},
+                "author_association": "COLLABORATOR",
+                "body": (
+                    "Accepted. Authorized decider: @reflo-agent. "
+                    "Approval basis: issue-delegated agent authorization."
+                ),
+            }
+        )
+        validator.validate_live_github_evidence(
+            {"0029": adr},
+            diagnostics,
+            evidence=validator.GitHubEvidence(responses=responses),
+        )
+        self.assertEqual([], diagnostics.finish())
+
+    def test_live_github_provenance_rejects_unmerged_unrelated_or_missing_record_pr(
+        self,
+    ) -> None:
+        metadata = github_metadata()
+        metadata["authorization"]["decider"] = "@owner"
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata)
+        adr = validator.parse_adr(path, diagnostics)
+        assert adr
+
+        cases = {
+            "unmerged": (
+                lambda responses: responses["/repos/acme/reflo/pulls/43"].update(
+                    {"state": "open", "merged_at": None}
+                ),
+                "record pull request must be merged",
+            ),
+            "unrelated": (
+                lambda responses: responses["/repos/acme/reflo/pulls/43"].update(
+                    {"body": "Closes #41"}
+                ),
+                "record pull request is unrelated",
+            ),
+            "missing path": (
+                lambda responses: responses[
+                    "/repos/acme/reflo/pulls/43/files?per_page=100&page=1"
+                ][0].update({"filename": "docs/architecture.md"}),
+                "does not contain required path",
+            ),
+        }
+        for name, (mutate, expected) in cases.items():
+            with self.subTest(name=name):
+                responses = live_github_responses(
+                    canonical_path=validator.canonical_adr_path(adr)
+                )
+                mutate(responses)
+                case_diagnostics = validator.Diagnostics()
+                validator.validate_live_github_evidence(
+                    {"0029": adr},
+                    case_diagnostics,
+                    evidence=validator.GitHubEvidence(responses=responses),
+                )
+                self.assertIn(expected, "\n".join(case_diagnostics.finish()))
+
+        responses = live_github_responses(
+            canonical_path=validator.canonical_adr_path(adr)
+        )
+        responses["/repos/acme/reflo/pulls/43"].update(
+            {"state": "open", "merged_at": None}
+        )
+        premerge = validator.Diagnostics()
+        validator.validate_live_github_evidence(
+            {"0029": adr},
+            premerge,
+            current_pr_number=43,
+            evidence=validator.GitHubEvidence(responses=responses),
+        )
+        self.assertEqual([], premerge.finish())
 
     def test_rejected_proposals_remain_github_only(self) -> None:
         rejected_record = REGISTER[REGISTER.index("## D-GH-42") :]
@@ -708,6 +918,144 @@ class AdrValidationTests(unittest.TestCase):
         self.assertIn("accepted decision content is immutable", messages)
         self.assertIn("lifecycle transitions cannot change accepted body content", messages)
 
+    def test_maintenance_is_bounded_to_its_declared_nonsemantic_delta(self) -> None:
+        metadata = github_metadata()
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata, slug="same")
+        previous = validator.parse_adr(path, diagnostics)
+        assert previous
+
+        current_metadata = copy.deepcopy(metadata)
+        current_metadata["maintenance"] = [
+            {
+                "kind": "typo",
+                "issue": "https://github.com/acme/reflo/issues/70",
+                "pull_request": "https://github.com/acme/reflo/pull/71",
+                "summary": "Correct one typo in Context.",
+                "sections": ["Context"],
+            }
+        ]
+        path.write_text(
+            render(current_metadata, context="Validator fixture contexts."),
+            encoding="utf-8",
+        )
+        current = validator.parse_adr(path, diagnostics)
+        assert current
+        validator.validate_transition(previous, current, diagnostics)
+        self.assertEqual([], diagnostics.finish())
+
+        path.write_text(
+            render(current_metadata, context="A completely different decision boundary."),
+            encoding="utf-8",
+        )
+        oversized = validator.parse_adr(path, diagnostics)
+        assert oversized
+        validator.validate_transition(previous, oversized, diagnostics)
+        self.assertIn(
+            "typo maintenance exceeds the bounded textual delta",
+            "\n".join(diagnostics.finish()),
+        )
+
+        undeclared_metadata = copy.deepcopy(current_metadata)
+        undeclared_metadata["maintenance"][0]["sections"] = ["Options"]
+        path.write_text(
+            render(undeclared_metadata, context="Validator fixture contexts."),
+            encoding="utf-8",
+        )
+        undeclared = validator.parse_adr(path, diagnostics)
+        assert undeclared
+        validator.validate_transition(previous, undeclared, diagnostics)
+        self.assertIn(
+            "maintenance sections must exactly declare",
+            "\n".join(diagnostics.finish()),
+        )
+
+    def test_maintenance_marker_cannot_change_immutable_metadata(self) -> None:
+        metadata = github_metadata()
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata, slug="same")
+        previous = validator.parse_adr(path, diagnostics)
+        assert previous
+
+        mutations = {
+            "identity": lambda value: value.update({"title": "Changed identity"}),
+            "date": lambda value: value.update({"date": "2026-07-19"}),
+            "aliases": lambda value: value.update({"aliases": ["D-GH-43"]}),
+            "ownership": lambda value: value["ownership"].update(
+                {"decision_dri": "Different DRI"}
+            ),
+            "authorization": lambda value: value["authorization"].update(
+                {"decider": "@different"}
+            ),
+            "provenance": lambda value: value["provenance"].update(
+                {"record_pr": "https://github.com/acme/reflo/pull/99"}
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                current_metadata = copy.deepcopy(metadata)
+                current_metadata["maintenance"] = [
+                    {
+                        "kind": "typo",
+                        "issue": "https://github.com/acme/reflo/issues/70",
+                        "pull_request": "https://github.com/acme/reflo/pull/71",
+                        "summary": "Correct one typo in Context.",
+                        "sections": ["Context"],
+                    }
+                ]
+                mutate(current_metadata)
+                path.write_text(
+                    render(current_metadata, context="Validator fixture contexts."),
+                    encoding="utf-8",
+                )
+                current_diagnostics = validator.Diagnostics()
+                current = validator.parse_adr(path, current_diagnostics)
+                assert current
+                validator.validate_transition(
+                    previous, current, current_diagnostics
+                )
+                self.assertIn(
+                    "accepted ADR metadata is immutable",
+                    "\n".join(current_diagnostics.finish()),
+                )
+
+    def test_formatting_and_navigation_maintenance_reject_semantic_changes(self) -> None:
+        metadata = github_metadata()
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata, slug="same")
+        previous = validator.parse_adr(path, diagnostics)
+        assert previous
+
+        for kind, expected in (
+            ("formatting", "formatting maintenance changed non-whitespace content"),
+            (
+                "navigation",
+                "navigation maintenance changed content outside link destinations",
+            ),
+        ):
+            with self.subTest(kind=kind):
+                current_metadata = copy.deepcopy(metadata)
+                current_metadata["maintenance"] = [
+                    {
+                        "kind": kind,
+                        "issue": "https://github.com/acme/reflo/issues/70",
+                        "pull_request": "https://github.com/acme/reflo/pull/71",
+                        "summary": f"Apply a {kind} correction in Context.",
+                        "sections": ["Context"],
+                    }
+                ]
+                path.write_text(
+                    render(current_metadata, context="Semantic replacement."),
+                    encoding="utf-8",
+                )
+                current_diagnostics = validator.Diagnostics()
+                current = validator.parse_adr(path, current_diagnostics)
+                assert current
+                validator.validate_transition(
+                    previous, current, current_diagnostics
+                )
+                self.assertIn(expected, "\n".join(current_diagnostics.finish()))
+
     def test_invalid_lifecycle_reactivation_is_rejected(self) -> None:
         previous_metadata = github_metadata()
         previous_metadata["status"] = "Deprecated"
@@ -729,6 +1077,25 @@ class AdrValidationTests(unittest.TestCase):
         assert current
         validator.validate_transition(previous, current, diagnostics)
         self.assertIn("invalid lifecycle transition 'Deprecated' -> 'Accepted'", "\n".join(diagnostics.finish()))
+
+    def test_merged_lifecycle_history_cannot_be_rewritten(self) -> None:
+        superseded = github_metadata()
+        superseded["status"] = "Superseded"
+        superseded["superseded_by"] = "0030"
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(superseded, slug="same")
+        previous = validator.parse_adr(path, diagnostics)
+        assert previous
+        rewritten = copy.deepcopy(superseded)
+        rewritten["superseded_by"] = "0031"
+        path.write_text(render(rewritten), encoding="utf-8")
+        current = validator.parse_adr(path, diagnostics)
+        assert current
+        validator.validate_transition(previous, current, diagnostics)
+        self.assertIn(
+            "merged superseded_by history is immutable",
+            "\n".join(diagnostics.finish()),
+        )
 
     def test_prd_authority_transfer_is_the_only_allowed_provenance_transition(self) -> None:
         old_metadata = mandate_metadata()

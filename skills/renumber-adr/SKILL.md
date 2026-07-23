@@ -6,7 +6,9 @@ description: Detect and resolve Reflo ADR number collisions for unmerged draft A
 # Renumber Reflo ADR Drafts
 
 Renumber only branch-added ADR drafts whose provisional IDs collide with the
-target branch or another open PR. Preserve all merged decision history.
+target branch or another open PR, or whose lower provisional ID became
+available after another draft closed or was abandoned. Preserve all merged
+decision history.
 
 ## Check before changing files
 
@@ -25,9 +27,10 @@ changing files. Exit `1` means the script could not prove the operation safe.
 Do not bypass a fail-closed result.
 
 The script queries the current PR state and every open PR targeting the same
-base. It refuses closed or merged current PRs, detached or ambiguous branch
-state, malformed ADR paths, duplicate local IDs, unavailable target refs, and
-unavailable or malformed GitHub data.
+base through explicitly paginated API requests. It refuses closed or merged
+current PRs, detached or ambiguous branch state, malformed ADR paths, duplicate
+local IDs, unavailable target refs, incomplete pagination, and unavailable or
+malformed GitHub data.
 
 ## Apply the plan
 
@@ -45,6 +48,11 @@ The script assigns the lowest unused four-digit IDs and updates:
 - unambiguous draft-to-draft `supersedes` and `superseded_by` links;
 - new legacy-alias entries on the branch;
 - exact draft-filename links, generated tables, and mutable references.
+
+When one draft skipped a number that is no longer claimed by the target or any
+open PR, the same command renumbers it downward to reclaim that abandoned gap.
+It does not bypass a lower-numbered open claim; that claim must merge, close, or
+renumber before the higher draft becomes merge-eligible.
 
 It leaves merged ADR files, SQL files, migration directories, and other
 historical provenance untouched and reports protected references that remain.

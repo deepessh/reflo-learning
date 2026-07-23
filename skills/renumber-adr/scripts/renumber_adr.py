@@ -106,6 +106,13 @@ def plan_renumbers(
         for canonical_id, path in sorted(local_new.items(), key=lambda item: item[1])
         if canonical_id in taken_elsewhere
     ]
+    if len(local_new) == 1 and not colliding:
+        canonical_id, path = next(iter(local_new.items()))
+        expected = next_available(
+            set(inventory.reserved) | taken_elsewhere
+        )
+        if canonical_id != expected:
+            colliding.append((canonical_id, path))
     used = set(inventory.reserved) | taken_elsewhere | set(local_new)
     planned: list[Renumber] = []
     for old_id, old_path in colliding:

@@ -107,12 +107,13 @@ def load_yaml(source: str, label: str) -> dict[str, Any]:
     return value
 
 
-def load_reserved_ids(root: Path) -> set[str]:
-    path = root / ".adr-governance.yaml"
-    try:
-        config = load_yaml(path.read_text(encoding="utf-8"), path.as_posix())
-    except OSError as exc:
-        raise InventoryError(f"cannot read {path}: {exc}") from exc
+def load_reserved_ids(root: Path, target_ref: str) -> set[str]:
+    path = ".adr-governance.yaml"
+    source = run(
+        ["git", "show", f"{target_ref}:{path}"],
+        root=root,
+    ).stdout
+    config = load_yaml(source, f"{target_ref}:{path}")
     mapping = config.get("legacy_ids")
     if not isinstance(mapping, dict):
         raise InventoryError(".adr-governance.yaml legacy_ids must be a mapping")
@@ -182,11 +183,60 @@ class GitHub:
         files = tuple(str(path) for path in files_value) if isinstance(files_value, list) else ()
         return PullRequest(number, base, state, str(merged_at) if merged_at else None, files)
 
-    def current_pull_request(self, branch: str) -> PullRequest | None:
+    def repository(self) -> str:
+        repository = run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+            root=self.root,
+        ).stdout.strip()
+        if not repository or "/" not in repository:
+            raise InventoryError("gh repo view did not return owner/name")
+        return repository
+
+    def current_pull_request(
+        self, branch: str | None, number: int | None = None
+    ) -> PullRequest | None:
         if self.data is not None:
             value = self.data.get("current_pr")
-            return None if value is None else self._parse_pr(value, require_files=False)
+            current = (
+                None
+                if value is None
+                else self._parse_pr(value, require_files=False)
+            )
+            if number is not None and (current is None or current.number != number):
+                raise InventoryError(
+                    f"GitHub fixture does not contain current pull request #{number}"
+                )
+            return current
 
+        if number is not None:
+            repository = self.repository()
+            result = run(
+                [
+                    "gh",
+                    "api",
+                    "--jq",
+                    "[.number, .state, (.merged_at // \"\"), .base.ref] | @tsv",
+                    f"repos/{repository}/pulls/{number}",
+                ],
+                root=self.root,
+            )
+            fields = result.stdout.rstrip("\n").split("\t")
+            if len(fields) != 4:
+                raise InventoryError(
+                    f"GitHub returned malformed data for pull request #{number}"
+                )
+            return self._parse_pr(
+                {
+                    "number": fields[0],
+                    "state": fields[1],
+                    "merged_at": fields[2] or None,
+                    "base_ref_name": fields[3],
+                },
+                require_files=False,
+            )
+
+        if not branch:
+            raise InventoryError("current branch is required when no PR number is supplied")
         result = run(
             [
                 "gh",
@@ -196,6 +246,8 @@ class GitHub:
                 branch,
                 "--state",
                 "all",
+                "--limit",
+                "1000",
                 "--json",
                 "number,state,mergedAt,baseRefName",
             ],
@@ -240,32 +292,31 @@ class GitHub:
                     )
             return tuple(sorted(prs, key=lambda pr: pr.number))
 
+        repository = self.repository()
         listed = run(
             [
                 "gh",
-                "pr",
-                "list",
-                "--base",
-                base_branch,
-                "--state",
-                "open",
-                "--json",
-                "number,state,mergedAt,baseRefName",
+                "api",
+                "--paginate",
+                "--jq",
+                '.[] | [.number, .state, (.merged_at // ""), .base.ref] | @tsv',
+                f"repos/{repository}/pulls?state=open&base={base_branch}&per_page=100",
             ],
             root=self.root,
         )
-        try:
-            values = json.loads(listed.stdout)
-        except json.JSONDecodeError as exc:
-            raise InventoryError("gh pr list returned invalid JSON") from exc
-        if not isinstance(values, list):
-            raise InventoryError("gh pr list did not return a JSON list")
-        repository = run(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-            root=self.root,
-        ).stdout.strip()
-        if not repository or "/" not in repository:
-            raise InventoryError("gh repo view did not return owner/name")
+        values: list[dict[str, Any]] = []
+        for line in listed.stdout.splitlines():
+            fields = line.split("\t")
+            if len(fields) != 4:
+                raise InventoryError("paginated GitHub PR response is malformed")
+            values.append(
+                {
+                    "number": fields[0],
+                    "state": fields[1],
+                    "merged_at": fields[2] or None,
+                    "base_ref_name": fields[3],
+                }
+            )
         prs: list[PullRequest] = []
         for value in sorted(values, key=lambda item: int(item["number"])):
             number = int(value["number"])
@@ -313,6 +364,7 @@ def build_inventory(
     target_ref: str,
     base_branch: str,
     github_fixture: Path | None,
+    current_pr_number: int | None = None,
 ) -> Inventory:
     target = parse_adr_paths(target_adr_paths(root, target_ref), f"target ref {target_ref}")
     target_path_set = set(target.values())
@@ -321,7 +373,8 @@ def build_inventory(
         "new local ADR paths",
     )
     github = GitHub(root, github_fixture)
-    current = github.current_pull_request(current_branch(root))
+    branch = None if current_pr_number is not None else current_branch(root)
+    current = github.current_pull_request(branch, current_pr_number)
     if current and current.base_ref_name != base_branch:
         raise InventoryError(
             f"current pull request #{current.number} targets {current.base_ref_name!r}, "
@@ -338,7 +391,7 @@ def build_inventory(
             continue
         prs.append((pr.number, parse_adr_paths(pr.files, f"open pull request #{pr.number}")))
     return Inventory(
-        frozenset(load_reserved_ids(root)),
+        frozenset(load_reserved_ids(root, target_ref)),
         local,
         target,
         tuple(prs),
@@ -370,12 +423,50 @@ def next_available(used: set[str]) -> str:
     raise InventoryError("all four-digit ADR identifiers are exhausted")
 
 
+def merge_order_diagnostics(inventory: Inventory) -> list[str]:
+    if not inventory.local:
+        return []
+    if inventory.current_pr is None:
+        return [
+            "merge-order validation requires the current open pull-request number"
+        ]
+    if len(inventory.local) != 1:
+        return [
+            "one ADR pull request must add exactly one canonical ADR before merge"
+        ]
+
+    current_id = next(iter(inventory.local))
+    diagnostics: list[str] = []
+    expected = next_available(set(inventory.reserved) | set(inventory.target))
+    if current_id != expected:
+        diagnostics.append(
+            f"ADR {current_id} is not next merge-eligible; renumber the draft to {expected}"
+        )
+    lower_claims = [
+        (number, canonical_id)
+        for number, claims in inventory.open_prs
+        for canonical_id in claims
+        if int(canonical_id) < int(current_id)
+    ]
+    if lower_claims:
+        rendered = ", ".join(
+            f"ADR {canonical_id} in PR #{number}"
+            for number, canonical_id in sorted(lower_claims)
+        )
+        diagnostics.append(
+            f"lower-numbered open claim(s) must merge or be renumbered first: {rendered}"
+        )
+    return diagnostics
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--target-ref", default="origin/main")
     parser.add_argument("--base-branch", default="main")
     parser.add_argument("--github-fixture", type=Path)
+    parser.add_argument("--current-pr-number", type=int)
+    parser.add_argument("--check-merge-order", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()
 
@@ -386,6 +477,7 @@ def main() -> int:
             target_ref=args.target_ref,
             base_branch=args.base_branch,
             github_fixture=args.github_fixture,
+            current_pr_number=args.current_pr_number,
         )
         collisions = collision_diagnostics(inventory)
         if collisions:
@@ -393,6 +485,13 @@ def main() -> int:
                 "existing ADR collision(s) make allocation unsafe:\n- "
                 + "\n- ".join(collisions)
             )
+        if args.check_merge_order:
+            ordering = merge_order_diagnostics(inventory)
+            if ordering:
+                raise InventoryError(
+                    "ADR merge order is not eligible:\n- "
+                    + "\n- ".join(ordering)
+                )
         allocated = next_available(inventory.used)
     except InventoryError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

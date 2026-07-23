@@ -1,0 +1,18 @@
+{
+  "current_pr": {
+    "number": 50,
+    "base_ref_name": "main",
+    "state": "OPEN",
+    "merged_at": null,
+    "files": []
+  },
+  "open_prs": [
+    {
+      "number": 49,
+      "base_ref_name": "main",
+      "state": "OPEN",
+      "merged_at": null,
+      "files": ["docs/adrs/0002-other-draft.md"]
+    }
+  ]
+}

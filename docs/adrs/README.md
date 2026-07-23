@@ -1,10 +1,10 @@
 # Reflo architecture decision records
 
-This directory will contain one immutable, four-digit Markdown ADR per
-effective architecture decision. During `partial-mirror` and `complete-mirror`
-modes, these files are non-authoritative mirrors: the PRD and `DECISIONS.md`
-retain their current authority. Rejected proposals remain in GitHub and never
-become ADRs.
+This directory contains one immutable, four-digit Markdown ADR per effective
+architecture decision and staged technical mandate. In `complete-mirror` mode,
+these files are non-authoritative mirrors: the PRD and `DECISIONS.md` retain
+their current authority. Rejected proposals remain in GitHub and never become
+ADRs.
 
 Validation is configured by `.adr-governance.yaml` and run with:
 
@@ -86,3 +86,11 @@ changes retain the body and use bidirectional `supersedes`/`superseded_by`
 links. Deprecation carries its own issue, exact verdict comment, date, PR,
 decider, and approval basis. Marked typo, formatting, and navigation-only
 maintenance is reviewable metadata; unmarked accepted-content edits fail.
+
+The preparatory cutover contract at
+`scripts/fixtures/adr-governance/cutover-contract.json` keeps the D-GH-127
+retain/move boundary executable. It requires M-004 messaging priority, M-005
+P1/default-off behavior, and the product portion of M-006 to remain in the PRD,
+while the provider/storage portion of M-006 resolves to existing ADR mirrors.
+The contract does not transfer authority or represent the target architecture
+as implemented.

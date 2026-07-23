@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import re
 import subprocess
 import sys
@@ -40,6 +41,7 @@ from validate_decisions import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_NAME = ".adr-governance.yaml"
+CUTOVER_CONTRACT = Path("scripts/fixtures/adr-governance/cutover-contract.json")
 CONFIG_MODES = {"partial-mirror", "complete-mirror", "adr-authoritative"}
 STATUSES = {"Accepted", "Deprecated", "Superseded"}
 PROVENANCE_KINDS = {"github-decision", "bootstrap-exception", "prd-mandate"}
@@ -976,6 +978,51 @@ def validate_field_preservation(
                 )
 
 
+def validate_mandate_preservation(
+    adr: Adr,
+    mandate_id: str,
+    cells: list[str],
+    diagnostics: Diagnostics,
+) -> None:
+    """Match a staged mandate mirror to its immutable register provenance."""
+    label = adr.path.as_posix()
+    fixed_choice, source, change_control = cells[1], cells[2], cells[3]
+    comparisons = {
+        "prd_references": (str(adr.metadata.get("prd_references", "")), source),
+        "Authorized verdict": (adr.sections.get("Authorized verdict", ""), fixed_choice),
+        "Reversal criteria": (adr.sections.get("Reversal criteria", ""), change_control),
+    }
+    for field, (actual, expected) in comparisons.items():
+        if normalize_markdown(actual) != normalize_markdown(expected):
+            diagnostics.add(
+                f"{label}: {field} does not losslessly match authoritative mandate {mandate_id}"
+            )
+
+    provenance = adr.metadata.get("provenance") or {}
+    if not isinstance(provenance, dict):
+        return
+    version_matches = re.findall(r"\bv(\d+\.\d+)\b", source)
+    commit_matches = re.findall(r"\b[0-9a-f]{40}\b", source)
+    source_urls = markdown_urls(change_control)
+    issue_urls = [url for url in source_urls if issue_parts(url)]
+    comment_urls = [url for url in source_urls if comment_parts(url)]
+    expected_values: dict[str, list[str]] = {
+        "prd_version": version_matches,
+        "prd_commit": commit_matches,
+        "confirmation_issue": issue_urls,
+        "confirmation_comment": comment_urls,
+    }
+    for field, expected in expected_values.items():
+        if len(expected) != 1:
+            diagnostics.add(
+                f"DECISIONS.md: {mandate_id} must declare exactly one immutable {field.replace('_', ' ')}"
+            )
+        elif provenance.get(field) != expected[0]:
+            diagnostics.add(
+                f"{label}: provenance.{field} does not exactly match authoritative mandate {mandate_id}"
+            )
+
+
 def validate_coexistence(
     root: Path,
     config: dict[str, Any],
@@ -1039,6 +1086,8 @@ def validate_coexistence(
                 )
         elif (adr.metadata.get("provenance") or {}).get("kind") != "prd-mandate":
             diagnostics.add(f"{adr.path.as_posix()}: {alias} must use prd-mandate provenance")
+        else:
+            validate_mandate_preservation(adr, alias, mandates[alias], diagnostics)
 
     for adr in {id(value): value for value in by_alias.values()}.values():
         sources = [alias for alias in adr.aliases if alias in authoritative_ids]
@@ -1059,6 +1108,88 @@ def validate_coexistence(
         extra = by_alias.keys() - authoritative_ids
         for alias in sorted(extra):
             diagnostics.add(f"{CONFIG_NAME}: complete-mirror ADR {alias} has no authoritative source")
+
+
+def validate_cutover_contract(
+    root: Path,
+    config: dict[str, Any],
+    by_id: dict[str, Adr],
+    diagnostics: Diagnostics,
+) -> None:
+    """Keep the approved PRD retain/move boundary executable before cutover."""
+    path = root / CUTOVER_CONTRACT
+    label = CUTOVER_CONTRACT.as_posix()
+    if not path.exists():
+        return
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        diagnostics.add(f"{label}: cannot load cutover contract: {exc}")
+        return
+    if not isinstance(contract, dict) or contract.get("schema_version") != 1:
+        diagnostics.add(f"{label}: schema_version must equal 1")
+        return
+
+    retained = contract.get("retained_prd_requirements")
+    moved = contract.get("moved_architecture_requirements")
+    if not isinstance(retained, dict):
+        diagnostics.add(f"{label}: retained_prd_requirements must be a mapping")
+        return
+    if set(retained) != {"M-004", "M-005", "M-006-product"}:
+        diagnostics.add(f"{label}: retained requirements must be exactly M-004, M-005, and M-006-product")
+    if not isinstance(moved, dict) or set(moved) != {"M-006-provider-storage"}:
+        diagnostics.add(f"{label}: moved requirements must contain exactly M-006-provider-storage")
+        moved = {}
+
+    prd_path = root / "prds/reflo-prd.md"
+    try:
+        prd_text = prd_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        diagnostics.add(f"{label}: cannot read retained PRD source: {exc}")
+        return
+    managed = set(config.get("managed_prd_mandates") or [])
+    for requirement_id, entry in retained.items():
+        entry_label = f"{label}: {requirement_id}"
+        if not isinstance(entry, dict):
+            diagnostics.add(f"{entry_label} must be a mapping")
+            continue
+        if requirement_id in managed:
+            diagnostics.add(f"{entry_label} must remain a PRD requirement, not an ADR-managed mandate")
+        sections = entry.get("source_sections")
+        fragments = entry.get("required_fragments")
+        if not isinstance(sections, list) or not sections:
+            diagnostics.add(f"{entry_label}.source_sections must be a non-empty list")
+        else:
+            for section in sections:
+                section_match = re.search(r"§\s*(\d+)", str(section))
+                if not section_match or not re.search(
+                    rf"^##\s+{re.escape(section_match.group(1))}(?:\.|\s)",
+                    prd_text,
+                    re.MULTILINE,
+                ):
+                    diagnostics.add(f"{entry_label}: PRD section {section!r} is missing")
+        if not isinstance(fragments, list) or not fragments:
+            diagnostics.add(f"{entry_label}.required_fragments must be a non-empty list")
+        else:
+            for fragment in fragments:
+                if not isinstance(fragment, str) or not fragment.strip():
+                    diagnostics.add(f"{entry_label}: required fragments must be non-empty strings")
+                elif fragment not in prd_text:
+                    diagnostics.add(f"{entry_label}: retained PRD fragment is missing")
+
+    moved_entry = moved.get("M-006-provider-storage")
+    if isinstance(moved_entry, dict):
+        aliases = moved_entry.get("adr_aliases")
+        legacy_ids = config.get("legacy_ids") or {}
+        if not isinstance(aliases, list) or not aliases:
+            diagnostics.add(f"{label}: M-006-provider-storage.adr_aliases must be a non-empty list")
+        else:
+            for alias in aliases:
+                canonical_id = legacy_ids.get(alias)
+                if not isinstance(canonical_id, str) or canonical_id not in by_id:
+                    diagnostics.add(
+                        f"{label}: M-006 provider/storage alias {alias!r} has no migrated ADR"
+                    )
 
 
 def git_previous_adrs(root: Path, config: dict[str, Any], base_ref: str, diagnostics: Diagnostics) -> dict[str, Adr]:
@@ -1159,6 +1290,7 @@ def validate_repository(
     by_id, by_alias, urls = collect_adrs(root, config, diagnostics)
     validate_alias_allocation(config, by_id, diagnostics)
     validate_coexistence(root, config, by_alias, diagnostics)
+    validate_cutover_contract(root, config, by_id, diagnostics)
     validate_prd_sources(root, by_id, diagnostics)
     if base_ref:
         previous = git_previous_adrs(root, config, base_ref, diagnostics)

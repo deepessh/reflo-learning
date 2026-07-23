@@ -25,6 +25,7 @@ Agents are stateless between sessions. All durable memory lives in GitHub Issues
 
 - **Task state & handoffs** — the issue is the memory. End every session by commenting on your assigned issue: what you did, what's half-done, exact next step, gotchas. The next agent reads the issue body, the latest handoff and subsequent comments, and linked PRs before touching anything. Link PRs with `Closes #<n>`.
 - **Decisions** — `DECISIONS.md` is the searchable implementation register; GitHub issues labeled `decision` hold proposals, evidence, discussion, and authorization. Before any architectural or library choice, search the PRD mandate index and effective records in `DECISIONS.md`, then search open and closed decision issues (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or silently re-litigate an effective one.
+  File-per-decision records under `docs/adrs/` are non-authoritative mirrors while `.adr-governance.yaml` is in `partial-mirror` or `complete-mirror` mode. Validate them with `python3 scripts/validate_adrs.py`; they do not replace the PRD, GitHub authorization, or `DECISIONS.md` before the separately authorized atomic cutover.
   1. Open a `decision` issue containing the context, independently reversible choice, options, recommendation, decision DRI, authorized decider, deadline, and implementation consequence. A pending index row in `DECISIONS.md` may point to it but has no implementation authority.
   2. Record the authorized verdict in an issue comment identifying the decider and approval basis. An agent may authorize its own choice only when it is outside §7, does not contradict the PRD, and the issue names the agent as authorized decider; all other choices wait for the named human.
   3. Open a PR adding an `Accepted` or `Rejected` effective record linked to the exact verdict comment. The verdict is not effective until that PR merges. A register entry without matching authorization is invalid.
@@ -106,12 +107,14 @@ Don't invent new labels. The work-item helper may create only the decision-autho
 ```
 Doctor:       scripts/doctor.sh
 Install:      corepack pnpm install --frozen-lockfile
+Gov install:  python3 -m pip install --requirement scripts/requirements-governance.txt
 Dev server:   corepack pnpm dev
 Tests:        corepack pnpm test
 Lint/format:  corepack pnpm lint / corepack pnpm format
 Decisions:    python3 scripts/validate_decisions.py
+ADRs:         python3 scripts/validate_adrs.py
 Improvements: python3 scripts/agent_improvements.py validate
-Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py scripts/test_agent_improvements.py
+Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_work_item.py scripts/test_agent_improvements.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build
@@ -131,6 +134,7 @@ infra/                OpenTofu bootstrap/environment/module boundaries
 packages/             Shared runtime contracts, configuration, and tool config
 prds/reflo-prd.md     Product requirements and implementation source of truth
 scripts/              Repository governance utilities
+docs/adrs/            Non-authoritative ADR mirrors during staged coexistence
 ```
 
 ## 5. Code & workflow conventions

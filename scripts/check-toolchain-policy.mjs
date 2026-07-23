@@ -36,6 +36,13 @@ export function checkToolchainPolicy(rootDirectory) {
   }
 
   const packageJson = JSON.parse(read(root, "package.json"));
+  const governanceRequirements = read(
+    root,
+    "scripts/requirements-governance.txt",
+  ).trim();
+  if (governanceRequirements !== "PyYAML==6.0.3") {
+    errors.push("governance tooling must pin exactly PyYAML==6.0.3");
+  }
   if (read(root, ".nvmrc").trim() !== pinned.node) {
     errors.push(`.nvmrc must pin ${pinned.node}`);
   }
@@ -47,12 +54,23 @@ export function checkToolchainPolicy(rootDirectory) {
   }
 
   const ci = read(root, ".github/workflows/ci.yml");
+  const governanceCi = read(root, ".github/workflows/validate-decisions.yml");
   if (!ci.includes(`node-version: ${pinned.node}`)) {
     errors.push(`ci.yml must use Node ${pinned.node}`);
   }
   if (!ci.includes(`image: ${pinned.postgresImage}`)) {
     errors.push(
       "ci.yml must use the digest-pinned PostgreSQL image from the manifest",
+    );
+  }
+  if (
+    !governanceCi.includes(
+      "python3 -m pip install --requirement scripts/requirements-governance.txt",
+    ) ||
+    !governanceCi.includes("python3 scripts/validate_adrs.py")
+  ) {
+    errors.push(
+      "decision validation CI must install the pinned governance requirement and run ADR validation",
     );
   }
 

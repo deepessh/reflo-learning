@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renumber Reflo ADR Drafts"
+  short_description: "Resolve unmerged Reflo ADR collisions"
+  default_prompt: "Use $renumber-adr to check and safely resolve Reflo ADR draft number collisions."

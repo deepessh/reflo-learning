@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Reflo ADRs"
+  short_description: "Create authorized Reflo ADR records"
+  default_prompt: "Use $writing-adrs to create a Reflo ADR from an accepted GitHub decision."

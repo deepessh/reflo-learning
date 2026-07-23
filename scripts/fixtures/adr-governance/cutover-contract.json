@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "retained_prd_requirements": {
+    "M-004": {
+      "boundary": "messaging channel priority",
+      "source_sections": ["§6 F6"],
+      "required_fragments": [
+        "Channel priority: **Telegram first (P0, no approval gate), opted-in email fallback, WhatsApp when Business approval lands (P1)**"
+      ]
+    },
+    "M-005": {
+      "boundary": "P1 scope and default-off behavior",
+      "source_sections": ["§6 F2", "§13"],
+      "required_fragments": [
+        "behind the default-off video flag",
+        "Voice mode remains P1 and is built only if all Week 1–2 P0 exit criteria passed on time"
+      ]
+    },
+    "M-006-product": {
+      "boundary": "offline-demo behavior and honest labeling",
+      "source_sections": ["§9", "§12"],
+      "required_fragments": [
+        "\"offline\" means public internet, model APIs, production backend, and CDN may all be unavailable after a successful rehearsal preflight",
+        "Never present pre-generated offline behavior as live generation."
+      ]
+    }
+  },
+  "moved_architecture_requirements": {
+    "M-006-provider-storage": {
+      "boundary": "provider and storage choices move only at atomic cutover",
+      "source_sections": ["§9", "§12"],
+      "adr_aliases": [
+        "D-GH-4",
+        "D-GH-5",
+        "D-GH-9",
+        "D-GH-10",
+        "D-GH-11",
+        "D-GH-13",
+        "D-GH-120"
+      ],
+      "prohibited_prd_fragments_after_cutover": [
+        "AnalyticDB for PostgreSQL (pgvector-compatible) for the sprint",
+        "RDS PostgreSQL (system of record",
+        "Qwen (tutoring dialogue",
+        "Algorithm: Bayesian mastery update + FSRS-style spaced-repetition scheduling",
+        "`User` (id, auth, prefs, channel opt-ins)"
+      ]
+    }
+  }
+}

@@ -8,6 +8,10 @@ Reflo is a pnpm/Turborepo monorepo with three independently deployable applicati
 
 Shared packages live under `packages/` and expose public package entry points. Applications may import shared packages, but never another application.
 
+Accepted [ADRs](docs/adrs/README.md) authorize architecture and process
+decisions. The [architecture view](docs/architecture.md) keeps those decided
+targets separate from evidence-backed repository state.
+
 ## Local commands
 
 Node.js 24.18.0 LTS and pnpm 10.34.5 are pinned for repeatable local and CI behavior.

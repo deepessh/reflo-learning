@@ -1,10 +1,10 @@
 # AGENTS.md — Operating Manual for Agents Building Reflo
 
-This file covers **how to work**, not what to build. Everything product-side — features, priorities, cut order, stack decisions, quality bars, data model — lives in `prds/reflo-prd.md` (currently v1.7; the version declared in that file is authoritative). Read the PRD before your first task; re-read the relevant section before each task. If this file, `DECISIONS.md`, and the PRD conflict, the PRD wins — comment on the relevant issue or open a `decision` issue to log the conflict, and do not implement through an unresolved contradiction.
+This file covers **how to work**, not what to build. Product outcomes, user-visible behavior, scope, priorities, safety/privacy outcomes, SLOs, pilot/release gates, offline behavior, and honest labeling live in `prds/reflo-prd.md` (currently v1.9; the version declared in that file is authoritative). Accepted architecture and process decisions live in `docs/adrs/`; `docs/architecture.md` is only a non-authoritative target/implemented-state view. Read the PRD before your first task; re-read its relevant section and the relevant accepted ADRs before each task. The PRD wins for product requirements; accepted ADRs win for architecture. If their domains overlap or conflict, comment on the relevant issue or open a `decision` issue and do not implement through the unresolved contradiction.
 
 Hard deadline: sprint ends **Aug 7, 2026**; Demo Day Aug 15.
 
-All coordination happens in **GitHub Issues** via the `gh` CLI. `DECISIONS.md` is the sole repository tracking-file exception: it is the searchable register of effective implementation and process verdicts, not a substitute task tracker. Run `scripts/doctor.sh` before setup or when command discovery changes; it checks the exact Node and pnpm pins, resolves standard `gh` install locations, distinguishes an absent command from one installed outside `PATH`, and reports whether the digest-pinned PostgreSQL client is locally available or CI-only. `scripts/work-item.sh` performs the required `gh` CLI, authentication, and read-only API preflight before its `pick` and `release` operations; do not repeat those checks manually before issue work. In a network-restricted or sandboxed execution environment, retry a helper failure that reports unavailable GitHub API access with the environment's approved network-access/escalation mechanism before diagnosing authentication. Do not ask a human to log in, refresh credentials, or replace a token based only on a sandboxed failure. Never use `--show-token` or print, persist, or paste a token while diagnosing access. If the doctor confirms that `gh` is absent rather than merely outside `PATH`, or a network-enabled run confirms that credentials are absent, invalid, or insufficiently scoped, do not claim work or create local substitute tracking; report the verified setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
+All coordination happens in **GitHub Issues** via the `gh` CLI. Accepted ADRs are effective decision records, not task trackers; proposals, evidence, authorization, implementation state, and handoffs stay in GitHub. Run `scripts/doctor.sh` before setup or when command discovery changes; it checks the exact Node and pnpm pins, resolves standard `gh` install locations, distinguishes an absent command from one installed outside `PATH`, and reports whether the digest-pinned PostgreSQL client is locally available or CI-only. `scripts/work-item.sh` performs the required `gh` CLI, authentication, and read-only API preflight before its `pick` and `release` operations; do not repeat those checks manually before issue work. In a network-restricted or sandboxed execution environment, retry a helper failure that reports unavailable GitHub API access with the environment's approved network-access/escalation mechanism before diagnosing authentication. Do not ask a human to log in, refresh credentials, or replace a token based only on a sandboxed failure. Never use `--show-token` or print, persist, or paste a token while diagnosing access. If the doctor confirms that `gh` is absent rather than merely outside `PATH`, or a network-enabled run confirms that credentials are absent, invalid, or insufficiently scoped, do not claim work or create local substitute tracking; report the verified setup blocker to a human so GitHub access can be restored and the outcome recorded in the relevant issue.
 
 ---
 
@@ -24,16 +24,16 @@ Dependency declarations use one exact body line: `Depends on: #12, #13`. Omit th
 Agents are stateless between sessions. All durable memory lives in GitHub Issues or the code:
 
 - **Task state & handoffs** — the issue is the memory. End every session by commenting on your assigned issue: what you did, what's half-done, exact next step, gotchas. The next agent reads the issue body, the latest handoff and subsequent comments, and linked PRs before touching anything. Link PRs with `Closes #<n>`.
-- **Decisions** — `DECISIONS.md` is the searchable implementation register; GitHub issues labeled `decision` hold proposals, evidence, discussion, and authorization. Before any architectural or library choice, search the PRD mandate index and effective records in `DECISIONS.md`, then search open and closed decision issues (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or silently re-litigate an effective one.
-  1. Open a `decision` issue containing the context, independently reversible choice, options, recommendation, decision DRI, authorized decider, deadline, and implementation consequence. A pending index row in `DECISIONS.md` may point to it but has no implementation authority.
+- **Decisions** — accepted ADRs under `docs/adrs/` are the searchable architecture and process authority; GitHub issues labeled `decision` hold proposals, evidence, discussion, and authorization. Before any architectural or library choice, resolve relevant legacy IDs with `python3 scripts/validate_adrs.py --resolve "<id>"`, search accepted ADRs, then search open and closed decision issues (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or silently re-litigate an effective one.
+  1. Open a `decision` issue containing the context, independently reversible choice, options, recommendation, decision DRI, authorized decider, deadline, and implementation consequence. The issue is a proposal and has no implementation authority before an accepted ADR merges.
   2. Record the authorized verdict in an issue comment identifying the decider and approval basis. An agent may authorize its own choice only when it is outside §7, does not contradict the PRD, and the issue names the agent as authorized decider; all other choices wait for the named human.
-  3. Open a PR adding an `Accepted` or `Rejected` effective record linked to the exact verdict comment. The verdict is not effective until that PR merges. A register entry without matching authorization is invalid.
-  4. Close the decision issue only after the register PR merges. Semantic changes require a new decision that supersedes the old record; clarifications require a linked issue and PR.
-  5. The PRD controls requirements, scope, architecture mandates, priorities, and release gates. PRD-mandated choices can be changed only by revising the PRD. Code that contradicts an effective decision is a defect.
+  3. For an accepted verdict, open a PR adding one `Accepted` ADR linked to the exact verdict comment and record PR. Rejected proposals remain searchable in GitHub and do not produce ADR files. A verdict is not effective until its authorized ADR PR merges; an ADR without matching authorization is invalid.
+  4. Close the decision issue only after the ADR PR merges. Semantic changes require a new authorized ADR that supersedes the old record; only marked typo, formatting, or navigation maintenance may edit accepted content.
+  5. The PRD controls product requirements and accepted ADRs control architecture/process choices. Code that contradicts either applicable authority is a defect.
 - **Bugs & debt** — anything you notice but don't fix: open an issue labeled `bug` or `tech-debt`, one line each. Log it; don't detour.
 - **Local code context** — language-appropriate `AGENT-NOTE:` comments at the spot a future agent needs them.
 
-Do not store state in chat history, external docs, or your own head. If task state is not in an issue/PR, or an effective verdict is not in `DECISIONS.md`, it did not happen.
+Do not store state in chat history, external docs, or your own head. If task state is not in an issue/PR, or an effective verdict is not in an accepted ADR with exact GitHub provenance, it did not happen.
 
 ### Evidence-backed contributor-agent improvements
 
@@ -100,18 +100,21 @@ Don't invent new labels. The work-item helper may create only the decision-autho
 **One-time repo init (human + first agent, day 1):**
 1. Create the three milestones (`W1`, `W2`, `W3` with PRD §13 date ranges) and the labels in §3 — `gh label create` / `gh api` script them.
 2. Install GitHub CLI and provision one GitHub identity per agent where possible. For a private repo, grant issue read/write plus the repository permissions needed for branches and PRs; classic tokens generally require `repo`. Verify CLI, authentication, and API access using the network-aware procedure above before seeding work. Work ownership remains worktree-scoped even when GitHub identities are distinct.
-3. Reconcile the PRD mandate index in `DECISIONS.md` with closed `decision` issues for vector store and model routing (§9), plus the SR algorithm and messaging priority (§6), so both repository and GitHub searches find them. PRD mandates remain authoritative even before those issue links are backfilled.
+3. Validate the accepted ADR baseline, permanent legacy aliases, and exact GitHub provenance so both repository and GitHub searches find every effective decision.
 4. File the sprint-week task issues into their milestones.
 
 ```
 Doctor:       scripts/doctor.sh
 Install:      corepack pnpm install --frozen-lockfile
+Gov install:  python3 -m pip install --requirement scripts/requirements-governance.txt
 Dev server:   corepack pnpm dev
 Tests:        corepack pnpm test
 Lint/format:  corepack pnpm lint / corepack pnpm format
-Decisions:    python3 scripts/validate_decisions.py
+ADRs:         python3 scripts/validate_adrs.py
+Architecture: python3 scripts/validate_architecture.py
+Problems:     python3 scripts/validate_problem_docs.py
 Improvements: python3 scripts/agent_improvements.py validate
-Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_work_item.py scripts/test_agent_improvements.py
+Gov tests:    python3 -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build
@@ -124,13 +127,15 @@ Current repo layout:
 
 ```
 AGENTS.md             Agent operating manual
-DECISIONS.md          Effective decision register and pending index
 .github/workflows/    Repository governance and workspace CI checks
 apps/                 Independently deployable web, API, and jobs applications
 infra/                OpenTofu bootstrap/environment/module boundaries
 packages/             Shared runtime contracts, configuration, and tool config
 prds/reflo-prd.md     Product requirements and implementation source of truth
 scripts/              Repository governance utilities
+docs/adrs/            Authoritative architecture and process decision records
+docs/architecture.md  Decided-target and evidence-backed implemented-state view
+docs/problems/        Non-authoritative durable architecture problem documents
 ```
 
 ## 5. Code & workflow conventions
@@ -143,7 +148,7 @@ scripts/              Repository governance utilities
 - Generated artifacts are never hand-edited. In particular, regenerate `packages/db/schema.sql` only through `packages/db/scripts/dump-schema-from-container.sh`, using `pg_dump` from the exact digest-pinned PostgreSQL service image rather than a host client or a client that merely matches the major version.
 - Turborepo uses strict environment filtering: every environment variable needed inside a task must be declared in that task's `env` or `passThroughEnv`, and a policy or integration test must prove the value reaches the task.
 - Large generated-file comparisons must emit bounded diagnostics: hashes or lengths, the first differing offset, and small surrounding contexts or tails. Do not dump an entire generated artifact into CI logs.
-- Every LLM call goes through the shared model-routing module with tracing — no raw API calls scattered in feature code.
+- Model-backed integrations must follow accepted [ADR 0024](docs/adrs/0024-shared-traced-model-routing-module.md); raw provider calls in feature code are a defect.
 - Any P1 runtime surface ships disabled behind a feature flag. Non-runtime P1 artifacts such as a recorded clip or benchmark are labeled as prototypes and are not presented as shipped functionality.
 - Secrets via environment/KMS only. Never commit keys; never echo them in logs, traces, or issue comments. Never put PII in traces **or issues** — issues are the shared memory, treat them as logs.
 

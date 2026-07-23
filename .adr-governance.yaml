@@ -1,0 +1,52 @@
+schema_version: 1
+mode: adr-authoritative
+baseline_complete: true
+adr_directory: docs/adrs
+register: DECISIONS.md
+authority_transfer_pr: https://github.com/deepessh/reflo-learning/pull/144
+
+# These former PRD technical mandates transferred to ADR authority through the
+# exact atomic pull request above. M-004, M-005, and the product portion of
+# M-006 remain product requirements and are intentionally not ADR-managed.
+managed_prd_mandates:
+  - M-001
+  - M-002
+  - M-003
+
+# Records that predate the ADR foundation may be absent only while the mode is
+# partial-mirror. Remove an entry as its ADR lands. A later effective record is
+# never added here: it must be dual-written immediately.
+partial_mirror_exemptions: []
+
+# Permanent legacy aliases and the bootstrap allocation authorized by
+# D-GH-126. Future effective decisions receive 0029+ in record-merge order.
+legacy_ids:
+  D-BOOTSTRAP-001: "0001"
+  D-GH-2: "0002"
+  D-GH-3: "0003"
+  D-GH-4: "0004"
+  D-GH-5: "0005"
+  D-GH-6: "0006"
+  D-GH-7: "0007"
+  D-GH-8: "0008"
+  D-GH-9: "0009"
+  D-GH-10: "0010"
+  D-GH-11: "0011"
+  D-GH-12: "0012"
+  D-GH-13: "0013"
+  D-GH-14: "0014"
+  D-GH-15: "0015"
+  D-GH-16: "0016"
+  D-GH-67: "0017"
+  D-GH-81: "0018"
+  D-GH-83: "0019"
+  D-GH-95: "0020"
+  D-GH-96: "0021"
+  D-GH-120: "0022"
+  M-001: "0023"
+  M-002: "0024"
+  M-003: "0025"
+  D-GH-125: "0026"
+  D-GH-126: "0027"
+  D-GH-127: "0028"
+  D-GH-145: "0029"

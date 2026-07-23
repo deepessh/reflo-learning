@@ -21,7 +21,7 @@ FIELD = re.compile(r"^- \*\*(.+?):\*\*\s+(.+)$")
 URL = re.compile(r"https://github\.com/[^\s)>]+")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-ALLOWED_STATUSES = {"Accepted", "Rejected", "Superseded"}
+ALLOWED_STATUSES = {"Accepted", "Deprecated", "Rejected", "Superseded"}
 REQUIRED_FIELDS = {
     "Status",
     "Decision date",
@@ -134,7 +134,9 @@ def parse_index(
     return rows
 
 
-def validate_records(records: dict[str, dict[str, str]], errors: list[str]) -> list[str]:
+def validate_records(
+    records: dict[str, dict[str, str]], pending_ids: set[str], errors: list[str]
+) -> list[str]:
     urls: list[str] = []
     supersession: dict[str, list[str]] = {}
 
@@ -194,7 +196,13 @@ def validate_records(records: dict[str, dict[str, str]], errors: list[str]) -> l
                 error(errors, f"{record_id}: Issue and Pull request must belong to the same repository")
 
         for value in fields.values():
-            if re.search(r"\bP-\d{3}\b", value):
+            if any(
+                re.search(
+                    rf"(?<![A-Z0-9-]){re.escape(pending_id)}(?![A-Z0-9-])",
+                    value,
+                )
+                for pending_id in pending_ids
+            ):
                 error(errors, f"{record_id}: effective records cannot use pending IDs as authority")
                 break
 
@@ -277,7 +285,7 @@ def validate_document(text: str) -> tuple[list[str], list[str]]:
         if not markdown_urls(issue) and issue != "Not opened — GitHub bootstrap pending":
             error(errors, f"{pending_id}: issue must be a GitHub URL or the exact bootstrap placeholder")
 
-    urls = validate_records(records, errors)
+    urls = validate_records(records, set(pending), errors)
 
     for label, pattern in SENSITIVE_PATTERNS.items():
         if pattern.search(text):

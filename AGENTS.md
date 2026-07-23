@@ -113,9 +113,10 @@ Tests:        corepack pnpm test
 Lint/format:  corepack pnpm lint / corepack pnpm format
 Decisions:    python3 scripts/validate_decisions.py
 ADRs:         python3 scripts/validate_adrs.py
+Architecture: python3 scripts/validate_architecture.py
 Problems:     python3 scripts/validate_problem_docs.py
 Improvements: python3 scripts/agent_improvements.py validate
-Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
+Gov tests:    python3 -m unittest scripts/test_validate_decisions.py scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build
@@ -136,6 +137,8 @@ packages/             Shared runtime contracts, configuration, and tool config
 prds/reflo-prd.md     Product requirements and implementation source of truth
 scripts/              Repository governance utilities
 docs/adrs/            Non-authoritative ADR mirrors during staged coexistence
+docs/architecture.md  Decided-target and evidence-backed implemented-state view
+docs/problems/        Non-authoritative durable architecture problem documents
 ```
 
 ## 5. Code & workflow conventions

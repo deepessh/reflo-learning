@@ -12,7 +12,7 @@ ownership:
 authorization:
   decider: "@deepessh, repository owner and founding-team decider named in issue #17"
   approval_basis: |
-    Direct owner approval in the Codex task on 2026-07-23 after
+    ** Direct owner approval in the Codex task on 2026-07-23 after
     reviewing proposal v3 in
     [comment 5061879384](https://github.com/deepessh/reflo-learning/issues/17#issuecomment-5061879384),
     the two independent agent reviews, and the revisions they required. The owner
@@ -21,7 +21,7 @@ provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/17
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/17#issuecomment-5062022111
-  record_pr: https://github.com/deepessh/reflo-learning/pull/0
+  record_pr: https://github.com/deepessh/reflo-learning/pull/148
 supersedes: []
 superseded_by: null
 deprecation: null

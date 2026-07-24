@@ -41,8 +41,7 @@ verification, rollout controls, and pilot metrics onto the hackathon critical
 path. The repository owner determined that this is disproportionate to a demo
 build.
 
-This decision controls the sprint boundary through Demo Day on August 15,
-2026. It does not waive protections for any future real-user pilot or authorize
+This decision controls the sprint boundary through Demo Day on August 15, 2026. It does not waive protections for any future real-user pilot or authorize
 use of learner PII, unapproved sources, or external recipients during the
 demo-only period. The PRD remains authoritative for the resulting product
 scope. Existing accepted architecture, including ADR 0031, remains a future

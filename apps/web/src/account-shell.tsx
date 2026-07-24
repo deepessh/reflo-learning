@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -35,9 +41,11 @@ export function AccountShell({
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [progress, setProgress] = useState<CourseProgress | null>(null);
   const [progressScreen, setProgressScreen] = useState<ProgressScreen>("idle");
+  const progressRequestId = useRef(0);
 
   const loadProgress = useCallback(
     async (courseId: string) => {
+      const requestId = ++progressRequestId.current;
       setProgressScreen("loading");
       setProgress(null);
       try {
@@ -45,6 +53,9 @@ export function AccountShell({
           `${apiOrigin}/v1/courses/${encodeURIComponent(courseId)}/progress`,
           { credentials: "include" },
         );
+        if (requestId !== progressRequestId.current) {
+          return;
+        }
         if (response.status === 401) {
           setScreen("signed-out");
           setProgressScreen("idle");
@@ -54,10 +65,15 @@ export function AccountShell({
           throw new Error("course_progress_unavailable");
         }
         const body = (await response.json()) as { progress: CourseProgress };
+        if (requestId !== progressRequestId.current) {
+          return;
+        }
         setProgress(body.progress);
         setProgressScreen("ready");
       } catch {
-        setProgressScreen("error");
+        if (requestId === progressRequestId.current) {
+          setProgressScreen("error");
+        }
       }
     },
     [apiOrigin],
@@ -87,6 +103,7 @@ export function AccountShell({
       const initialCourse = library.courses[0];
       setSelectedCourseId(initialCourse?.courseId ?? null);
       if (initialCourse === undefined) {
+        progressRequestId.current += 1;
         setProgress(null);
         setProgressScreen("idle");
       } else {

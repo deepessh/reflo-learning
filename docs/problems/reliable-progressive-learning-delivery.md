@@ -6,13 +6,13 @@
 
 Reflo presents one learning experience while work happens across interactive
 requests, background generation, model and media providers, durable queues,
-scheduled messages, signed web links, and a bounded offline demonstration. Some
+scheduled messages, signed web links, and a connected online demonstration. Some
 artifacts are needed quickly, others arrive progressively, and optional
 enhancements cannot block the core path.
 
 The durable problem is making progress, retries, fallbacks, and terminal
 outcomes coherent to learners and operators across those boundaries without
-mistaking a target topology, a pre-generated fallback, or provider acceptance
+mistaking a target topology, a seeded artifact, or provider acceptance
 for completed learner value.
 
 ## Forces and constraints
@@ -32,9 +32,8 @@ for completed learner value.
 - Telegram and opted-in email have different interaction models, yet each
   answer must resolve to one intended delivery item and one replay-safe
   attempt.
-- Offline mode removes public internet, model APIs, the production backend, and
-  CDN after preflight. It preserves a labeled, pre-generated Flow B rather than
-  simulating live generation.
+- The connected online demo must preflight required dependencies, surface
+  failures honestly, and recover without duplicating learning effects.
 - A successful provider response is an intermediate fact; usable, authorized,
   source-backed output is the learner-visible completion condition.
 
@@ -50,7 +49,7 @@ for completed learner value.
   completion and blocks P0 behavior.
 - Message retries or webhook replays create duplicate deliveries or attempts;
   an emailed link can be redeemed by the wrong user or more than once.
-- Offline artifacts drift from the online Flow B contract, or the demonstration
+- Seeded artifacts drift from the online Flow B contract, or the demonstration
   implies that pre-generated behavior is live.
 - A benchmark reports favorable completions while excluding cold caches,
   concurrent load, retries, terminal failures, or unsupported output.
@@ -67,8 +66,8 @@ for completed learner value.
 - Delivery tests showing that channel identity, intended learner, delivery
   item, expiry, and submission identity remain bound through retries and
   redemption.
-- Online/offline parity evidence for the stored Flow B state transitions,
-  accompanied by explicit capability and labeling differences.
+- Connected online evidence for the stored Flow B state transitions, mastery
+  delta, bounded re-teach loop, and dependency-failure handling.
 
 ## Open questions
 
@@ -79,8 +78,8 @@ for completed learner value.
 - What evidence lets operators distinguish provider health, queue saturation,
   contract failure, authorization failure, and learner-visible unavailability
   without exposing learner content?
-- How can the offline bundle prove behavioral parity while remaining small,
-  deterministic, clearly pre-generated, and safe to refresh?
+- How can the connected demo preflight its dependencies and recover from
+  transient failures without overstating reliability?
 
 ## Related authoritative sources
 

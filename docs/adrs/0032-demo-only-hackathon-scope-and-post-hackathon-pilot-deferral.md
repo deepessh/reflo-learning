@@ -1,7 +1,7 @@
 ---
 id: "0032"
 title: "Demo-only hackathon scope and post-hackathon pilot deferral"
-status: Accepted
+status: Superseded
 date: "2026-07-23"
 aliases: [D-GH-21]
 prd_references: "`prds/reflo-prd.md` §§3, 6–7, and 11–15; ADR 0028; ADR 0031"
@@ -25,7 +25,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/21#issuecomment-5065684061
   record_pr: https://github.com/deepessh/reflo-learning/pull/151
 supersedes: []
-superseded_by: null
+superseded_by: "0034"
 deprecation: null
 maintenance: []
 ---

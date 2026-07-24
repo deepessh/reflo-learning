@@ -1,7 +1,8 @@
 # Reflo — Product Requirements Document
 
-**Version:** 2.0 · **Date:** July 23, 2026 · **Status:** Approved for build sprint
-**Changelog:** v2.0 — made the hackathon demo-only through Demo Day; removed external pilot recruitment, activation gates, cohort metrics, and experimentation from the sprint; moved the real-user pilot and its consent, privacy, content-rights attestation, authorization, opt-out, deletion/export, provider-verification, and rollout requirements post-hackathon
+**Version:** 2.1 · **Date:** July 24, 2026 · **Status:** Approved for build sprint
+**Changelog:** v2.1 — narrowed Demo Day to the connected online application; removed the offline bundle, service-worker fallback, and online/offline Flow B parity requirements while retaining the seeded online Flow B, separate upload demonstration, honest labeling, rehearsed failure handling, and demo-only safety boundary
+v2.0 — made the hackathon demo-only through Demo Day; removed external pilot recruitment, activation gates, cohort metrics, and experimentation from the sprint; moved the real-user pilot and its consent, privacy, content-rights attestation, authorization, opt-out, deletion/export, provider-verification, and rollout requirements post-hackathon
 v1.9 — separated product requirements from architecture authority; retained product behavior, priorities, safety/privacy outcomes, SLOs, pilot gates, offline behavior, and honest labeling while moving providers, topology, storage, schema catalogs, algorithms, and implementation mechanisms to accepted ADRs
 v1.8 — narrowed the sprint video scope to one source-backed nominal 15-second Wan prototype; deferred production 60–120 second composition and full-course video generation to fast-follow
 v1.7 — removed fixed deployment-location constraints; provider selection still must satisfy the existing privacy, security, consent, quality, and production-path gates
@@ -13,7 +14,7 @@ v1.2 — grounding rule clarified (inline citations for tutoring answers only), 
 v1.1 — priority tiers corrected (not everything is P0), re-teach metric given a proper control, WhatsApp lead-time risk added, vector DB decision made, Builder Day added to plan
 **Program:** AI Agent Builder Challenge (Alibaba Cloud × AMD × Beta University)
 **Sprint:** July 17 – August 7, 2026 · **Demo Day:** August 15, 2026
-**Ways of working:** this PRD defines product outcomes, user-visible behavior, scope, priorities, safety and privacy outcomes, SLOs, the demo-only boundary, offline-demo behavior, and honest labeling. Accepted records under `docs/adrs/` authorize architecture. The non-authoritative `docs/architecture.md` view separates decided targets from evidence-backed implemented state. Operating instructions for agents/contributors live in `AGENTS.md`.
+**Ways of working:** this PRD defines product outcomes, user-visible behavior, scope, priorities, safety and privacy outcomes, SLOs, the demo-only boundary, online-demo behavior, and honest labeling. Accepted records under `docs/adrs/` authorize architecture. The non-authoritative `docs/architecture.md` view separates decided targets from evidence-backed implemented state. Operating instructions for agents/contributors live in `AGENTS.md`.
 
 ---
 
@@ -125,7 +126,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 ### F7. Demo Identity, Library & Progress — *P0*
 - Use clearly labeled seeded, synthetic, or staff-controlled test identities with a demo course library and session history. Public signup, external learner uploads, and collection of real learner PII are unavailable through Demo Day.
-- The online demo may use staff-only test authentication and owner-scoped data paths. The offline demo uses its labeled local identity. Neither is presented as a production account or privacy implementation.
+- The connected online demo may use staff-only test authentication and owner-scoped data paths. It is not presented as a production account or privacy implementation.
 - Demo data is resettable and excluded from learner research, pilot metrics, and shared-model training. Real-user accounts, consent, withdrawal, deletion, export, subscriptions, and production privacy lifecycle move to §7.
 
 ---
@@ -157,13 +158,13 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 ## 9. Product Constraints & Architecture Authority
 
-*This PRD is authoritative for product outcomes, user-visible behavior, scope, priorities, safety and privacy outcomes, SLOs, the demo-only boundary, offline-demo behavior, and honest labeling. Accepted records under [`docs/adrs/`](../docs/adrs/) authorize architecture. [`docs/architecture.md`](../docs/architecture.md) is a non-authoritative view that keeps decided targets separate from evidence-backed implemented state. GitHub `decision` issues hold proposals, evidence, discussion, and authorization; a verdict becomes effective only when its matching ADR merges. A GitHub verdict without a merged ADR is not effective. An ADR cannot waive or change this PRD's product requirements.*
+*This PRD is authoritative for product outcomes, user-visible behavior, scope, priorities, safety and privacy outcomes, SLOs, the demo-only boundary, online-demo behavior, and honest labeling. Accepted records under [`docs/adrs/`](../docs/adrs/) authorize architecture. [`docs/architecture.md`](../docs/architecture.md) is a non-authoritative view that keeps decided targets separate from evidence-backed implemented state. GitHub `decision` issues hold proposals, evidence, discussion, and authorization; a verdict becomes effective only when its matching ADR merges. A GitHub verdict without a merged ADR is not effective. An ADR cannot waive or change this PRD's product requirements.*
 
 - **Security and scope isolation:** course content, assessments, and private assets are encrypted and isolated to an authorized owner scope. Every access path, retrieval, asset delivery, and mutation verifies active authorization. The MVP creates personal test scopes only; organization scopes and non-owner roles remain design-for, not user-visible functionality. Worker privileges are least-privilege, private assets use short-lived authorized delivery, and demo data is resettable.
 - **Provider privacy:** through Demo Day, providers receive only the minimum seeded, synthetic, or staff-controlled test data needed for the demo. No external learner PII, contact details, or private learner uploads are processed. Production consent, retention, training, and deletion verification is required before the post-hackathon real-user pilot.
 - **Untrusted-content boundary:** uploaded/retrieved text is data, never system or tool instruction. Source content cannot change prompts, authorization filters, tool permissions, grading rubrics, or citation rules. Apply scope filters before retrieval enters model context; agents receive no general network/shell authority and only narrowly typed, least-privilege tools. Render citations from server-resolved source-span IDs rather than model-supplied URLs or labels.
-- **Observability:** product behavior is traceable with non-learner test identifiers and supports the offline evaluation suites in §11. Demo traces contain no learner PII and follow the demo reset policy.
-- **Demo offline mode:** "offline" means public internet, model APIs, production backend, and CDN may all be unavailable after a successful rehearsal preflight. A local demo bundle/service worker caches the app shell, seeded course outline and source-span manifest, text/audio assets, two alternative lessons, deterministic multiple-choice items/keys, initial knowledge state, and session-summary logic. It uses a clearly labeled demo-only local identity and local keyed grading; it must support course open → failed question → alternate lesson → re-test → Knowledge Map update → summary without external calls. Upload, new generation, short-answer LLM grading, messaging, OAuth, and production auth are explicitly unavailable in offline mode and are demonstrated separately. Never present pre-generated offline behavior as live generation.
+- **Observability:** product behavior is traceable with non-learner test identifiers and supports the repository-owned evaluation suites in §11. Demo traces contain no learner PII and follow the demo reset policy.
+- **Connected online demo:** The Demo Day product surface is the connected online application. Preflight verifies required application, model, storage, and delivery dependencies; bounded retries and clear learner-visible errors handle transient failures. An unavailable dependency is reported honestly and never converted into a false successful outcome. Never present pre-generated or seeded behavior as live generation. No offline bundle, service-worker fallback, local demo identity, or online/offline parity assertion is required.
 
 ---
 
@@ -196,8 +197,8 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 ## 12. Success Metrics
 
 **Demo Day proof points (Aug 15):**
-- Live adaptive loop on a pre-ingested seeded course: failed question → materially different micro-lesson → re-test → evidence-based map update (≤ 6 min). Demonstrate standard-profile upload → outline separately against the p95 ≤ 2-minute SLO; do not imply that full ingestion and media generation complete inside the 6-minute loop. The offline fallback uses the same seeded course and pre-generated assets.
-- Ten consecutive rehearsals complete the seeded online or offline Flow B without an unrecovered failure; report the run count, mode, failures, and fixes rather than implying production reliability.
+- Live adaptive loop on a pre-ingested seeded course: failed question → materially different micro-lesson → re-test → evidence-based map update (≤ 6 min). Demonstrate standard-profile upload → outline separately against the p95 ≤ 2-minute SLO; do not imply that full ingestion and media generation complete inside the 6-minute loop.
+- Ten consecutive rehearsals complete the seeded online Flow B without an unrecovered failure; report the run count, failures, and fixes rather than implying production reliability.
 - Present only fixture-backed mastery deltas and non-learner evaluation results. Do not claim pilot retention, causal learning lift, certification outcomes, or real-user validation.
 - Architecture story told from accepted targets and evidence-backed implemented state; video is included only if the P1 flag shipped, otherwise shown as a labeled prototype/benchmark; the planned accelerator benchmark result is reported honestly
 
@@ -211,11 +212,11 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 **Week 1 (Jul 17–23) — Pipeline & skeleton.** Secure ingestion end-to-end with source spans, primary + fallback audio generation, authorized private-asset delivery, demo identity + library UI, quiz generation v1, and one nominal 15-second source-backed video prototype behind the P1 video flag. Freeze the rights-cleared seeded demo source and synthetic/test identities. *Exit: the core pipeline works with the seeded course; benchmark and evaluation results are recorded honestly without becoming pilot-activation gates.*
 
-**Week 2 (Jul 24–30) — The loop.** Knowledge model + forgetting-curve scheduling, adaptive quiz selection, executable Tutor Agent re-teach behavior, Knowledge Map UI, durable Telegram/email delivery to dedicated test destinations, privacy-safe tracing, the seeded offline bundle, and non-blocking quiz, grading, and grounding evaluations. WhatsApp remains P1. *Exit: the precise Flow B assertion passes online and offline; delivery retries/webhook replays create no duplicate attempts; no external learner is recruited or activated.*
+**Week 2 (Jul 24–30) — The loop.** Knowledge model + forgetting-curve scheduling, adaptive quiz selection, executable Tutor Agent re-teach behavior, Knowledge Map UI, durable Telegram/email delivery to dedicated test destinations, privacy-safe tracing, connected online demo composition, and non-blocking quiz, grading, and grounding evaluations. WhatsApp remains P1. *Exit: the precise Flow B assertion passes online; delivery retries/webhook replays create no duplicate attempts; no external learner is recruited or activated.*
 
-**Week 3 (Jul 31–Aug 7) — Demo polish.** Complete the planned accelerator benchmark with mentors, eligible readiness-score calibration, non-blocking quality regression checks, and demo hardening across online and offline seeded flows. Voice mode remains P1 and is built only if all Week 1–2 P0 exit criteria passed on time; production 60–120 second composition and full-course video generation remain post–Demo Day fast-follow work. *Exit: seeded Flow B runs reliably in ≤ 6 min, the upload SLO is demonstrated separately, and every claim is tied to demo or evaluation evidence rather than pilots.*
+**Week 3 (Jul 31–Aug 7) — Demo polish.** Complete the planned accelerator benchmark with mentors, eligible readiness-score calibration, non-blocking quality regression checks, and hardening of the connected online seeded flow. Voice mode remains P1 and is built only if all Week 1–2 P0 exit criteria passed on time; production 60–120 second composition and full-course video generation remain post–Demo Day fast-follow work. *Exit: seeded Flow B runs reliably in ≤ 6 min, the upload SLO is demonstrated separately, and every claim is tied to demo or evaluation evidence rather than pilots.*
 
-**Aug 8–14 — Demo Day prep.** Pitch narrative, at least 10 live-demo rehearsals, evidence and limitations slide, and failure-mode rehearsal using the seeded course and pre-generated fallback assets.
+**Aug 8–14 — Demo Day prep.** Pitch narrative, at least 10 connected online demo rehearsals, evidence and limitations slide, and failure-mode and recovery rehearsal using the seeded course.
 
 ---
 
@@ -227,7 +228,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 | LLM grading errors erode trust | Medium | Confidence thresholds, MC fallback, non-blocking evaluation, and honest limitation disclosure |
 | Audio quota/capacity delays block P0 audio | Medium | Verify reserved primary capacity plus a quota-independent fallback; both must pass the §11 audio gate or Week 1 fails |
 | Scope creep (7 feature groups expanding informally) | High | This PRD is the contract; anything not in §6 goes to §7 |
-| Live demo or cloud dependency failure | Medium | Rehearse the explicit §9 offline envelope with the local seeded bundle; label pre-generated behavior honestly and demonstrate upload/live generation separately |
+| Live demo or cloud dependency failure | Medium | Preflight required dependencies, use bounded retries and explicit failure states, rehearse recovery, and never represent unavailable online behavior as successful |
 | Copyright question on stage | Low | Openly licensed demo material; §11 talking points ready |
 | Demo mistaken for real-user validation | High | State the demo-only boundary on stage and in artifacts; make no pilot, retention, or causal-lift claim |
 | WhatsApp Business approval doesn't land in time | Medium–High | Telegram is the P0 channel (no approval needed); WhatsApp is an upgrade, not a dependency — approval started Jul 16 |

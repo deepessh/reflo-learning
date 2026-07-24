@@ -155,7 +155,7 @@ docs/problems/        Non-authoritative durable architecture problem documents
 
 ## 6. Demo-only boundary
 
-Through Demo Day on Aug 15, use only seeded, synthetic, or staff-controlled test identities, dedicated test messaging destinations, and human-approved rights-cleared demo sources. Do not recruit or activate external learners, enable public signup or uploads, send real-user messages, collect learner PII, or run pilot experiments. PRD §11 evaluations support honest demo claims and defect discovery; they are not pilot-activation gates because the sprint has no pilot. The seeded Flow B online/offline assertion and honest labeling remain Demo Day requirements. Any real-user pilot requires a post-hackathon PRD revision and the human escalation process in §7.
+Through Demo Day on Aug 15, use only seeded, synthetic, or staff-controlled test identities, dedicated test messaging destinations, and human-approved rights-cleared demo sources. Do not recruit or activate external learners, enable public signup or uploads, send real-user messages, collect learner PII, or run pilot experiments. PRD §11 evaluations support honest demo claims and defect discovery; they are not pilot-activation gates because the sprint has no pilot. The seeded connected online Flow B assertion, explicit dependency-failure handling, and honest labeling remain Demo Day requirements; no offline fallback or parity assertion is required. Any real-user pilot requires a post-hackathon PRD revision and the human escalation process in §7.
 
 ## 7. Escalate to humans (don't decide alone)
 

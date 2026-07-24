@@ -30,6 +30,9 @@ export type {
 import type {
   AccountRepository,
   AuthenticatedAccount,
+  CourseConceptProgress,
+  CourseProgress,
+  CourseSessionMasteryDelta,
   LibraryCourse,
   LoginTokenIssue,
   SessionHistoryItem,
@@ -69,6 +72,34 @@ interface HistoryRow extends Record<string, unknown> {
   session_id: string;
   started_at: Date;
   status: SessionHistoryItem["status"];
+  summary: Record<string, unknown> | null;
+}
+
+interface ProgressCourseRow extends Record<string, unknown> {
+  generated_at: Date;
+  target_exam_blueprint_id: string | null;
+  title: string;
+}
+
+interface ProgressConceptRow extends Record<string, unknown> {
+  assessment_status: "assessed" | "unassessed" | null;
+  chapter_id: string;
+  chapter_order: number;
+  chapter_title: string;
+  concept_id: string;
+  concept_name: string;
+  concept_order: number | null;
+  confidence: string | null;
+  evidence_count: number | null;
+  fsrs_due_at: Date | null;
+  generation_version: string;
+  last_reviewed_at: Date | null;
+  mastery: string | null;
+  next_delivery_at: Date | null;
+}
+
+interface ProgressSessionRow extends Record<string, unknown> {
+  session_id: string;
   summary: Record<string, unknown> | null;
 }
 
@@ -373,6 +404,138 @@ export class PostgresAccountRepository implements AccountRepository {
     });
   }
 
+  async getCourseProgress(
+    account: AuthenticatedAccount,
+    courseId: string,
+  ): Promise<CourseProgress | null> {
+    return this.#scopedRead(account, async (client) => {
+      const courseResult = await client.query<ProgressCourseRow>(
+        `SELECT course.title, course.target_exam_blueprint_id,
+                transaction_timestamp() AS generated_at
+         FROM course
+         WHERE course.owner_scope_id = $1
+           AND course.id = $2
+           AND course.status <> 'archived'`,
+        [account.ownerScopeId, courseId],
+      );
+      const course = courseResult.rows[0];
+      if (course === undefined) {
+        return null;
+      }
+
+      const conceptResult = await client.query<ProgressConceptRow>(
+        `SELECT chapter.id AS chapter_id, chapter.chapter_order,
+                chapter.title AS chapter_title, concept.id AS concept_id,
+                concept.name AS concept_name, concept.concept_order,
+                concept.generation_version, state.mastery::text,
+                state.confidence::text, state.evidence_count,
+                state.assessment_status, state.last_reviewed_at,
+                schedule.fsrs_due_at, schedule.next_delivery_at
+         FROM course
+         JOIN chapter
+           ON chapter.owner_scope_id = course.owner_scope_id
+          AND chapter.course_id = course.id
+          AND (
+            chapter.curriculum_generation_id = course.active_curriculum_generation_id
+            OR (
+              chapter.curriculum_generation_id IS NULL
+              AND course.active_curriculum_generation_id IS NULL
+            )
+          )
+         JOIN concept
+           ON concept.owner_scope_id = chapter.owner_scope_id
+          AND concept.chapter_id = chapter.id
+          AND (
+            concept.curriculum_generation_id = course.active_curriculum_generation_id
+            OR (
+              concept.curriculum_generation_id IS NULL
+              AND course.active_curriculum_generation_id IS NULL
+            )
+          )
+         LEFT JOIN knowledge_state AS state
+           ON state.owner_scope_id = concept.owner_scope_id
+          AND state.user_id = $3
+          AND state.concept_id = concept.id
+         LEFT JOIN review_schedule AS schedule
+           ON schedule.owner_scope_id = concept.owner_scope_id
+          AND schedule.user_id = $3
+          AND schedule.concept_id = concept.id
+          AND schedule.fsrs_profile_id = 'fsrs-profile-v1'
+         WHERE course.owner_scope_id = $1 AND course.id = $2
+         ORDER BY chapter.chapter_order, chapter.id,
+                  concept.concept_order NULLS LAST, concept.id`,
+        [account.ownerScopeId, courseId, account.userId],
+      );
+      const concepts = conceptResult.rows.map((row) =>
+        projectConceptProgress(row, course.generated_at),
+      );
+      const conceptNames = new Map(
+        concepts.map((concept) => [concept.conceptId, concept.name]),
+      );
+      const sessionResult = await client.query<ProgressSessionRow>(
+        `SELECT study_session.id AS session_id, study_session.summary
+         FROM study_session
+         WHERE study_session.owner_scope_id = $1
+           AND study_session.user_id = $2
+           AND study_session.course_id = $3
+           AND study_session.summary ? 'flowB'
+         ORDER BY study_session.started_at DESC, study_session.id
+         LIMIT 20`,
+        [account.ownerScopeId, account.userId, courseId],
+      );
+      const recentSessionDeltas = sessionResult.rows
+        .flatMap((row) => projectSessionDeltas(row, conceptNames))
+        .sort(
+          (left, right) =>
+            right.completedAt.getTime() - left.completedAt.getTime() ||
+            compareAscii(left.sessionId, right.sessionId) ||
+            compareAscii(left.conceptId, right.conceptId),
+        )
+        .slice(0, 10);
+      const assessed = concepts.filter(
+        (concept) =>
+          concept.assessmentStatus === "assessed" && concept.mastery !== null,
+      );
+      const targetBlueprintId = course.target_exam_blueprint_id;
+
+      return {
+        chapters: groupConceptsByChapter(conceptResult.rows, concepts),
+        courseId,
+        generatedAt: course.generated_at,
+        mastery: {
+          assessedConceptCount: assessed.length,
+          kind: "course_mastery_estimate",
+          label: "Course Mastery Estimate",
+          totalConceptCount: concepts.length,
+          value: averageFixed(assessed.map((concept) => concept.mastery!)),
+        },
+        readiness: {
+          blueprintVersion: null,
+          invalidatedConceptCount: 0,
+          mappedConceptCount: 0,
+          reasons:
+            targetBlueprintId === null
+              ? [
+                  "blueprint_missing",
+                  "evidence_minimum_not_met",
+                  "calibration_unavailable",
+                ]
+              : [
+                  "reviewed_mappings_unavailable",
+                  "evidence_minimum_not_met",
+                  "calibration_unavailable",
+                ],
+          score: null,
+          status: "unavailable",
+          targetBlueprintId,
+          unmappedConceptCount: concepts.length,
+        },
+        recentSessionDeltas,
+        title: course.title,
+      };
+    });
+  }
+
   async listSessionHistory(
     account: AuthenticatedAccount,
   ): Promise<readonly SessionHistoryItem[]> {
@@ -430,6 +593,180 @@ export class PostgresAccountRepository implements AccountRepository {
       client.release();
     }
   }
+}
+
+function projectConceptProgress(
+  row: ProgressConceptRow,
+  generatedAt: Date,
+): CourseConceptProgress {
+  const assessed = row.assessment_status === "assessed";
+  const nextDeliveryAt = assessed ? row.next_delivery_at : null;
+  return {
+    assessmentStatus: assessed ? "assessed" : "unassessed",
+    conceptId: row.concept_id,
+    confidence: assessed ? (row.confidence ?? "0.00000") : "0.00000",
+    evidenceCount: assessed ? (row.evidence_count ?? 0) : 0,
+    generationVersion: row.generation_version,
+    lastReviewedAt: assessed ? row.last_reviewed_at : null,
+    mappingStatus: "unmapped",
+    mastery: assessed ? row.mastery : null,
+    name: row.concept_name,
+    order: row.concept_order ?? 0,
+    review: {
+      fsrsDueAt: assessed ? row.fsrs_due_at : null,
+      nextDeliveryAt,
+      state:
+        nextDeliveryAt === null
+          ? "not_scheduled"
+          : nextDeliveryAt <= generatedAt
+            ? "due"
+            : "scheduled",
+    },
+  };
+}
+
+function groupConceptsByChapter(
+  rows: readonly ProgressConceptRow[],
+  concepts: readonly CourseConceptProgress[],
+): CourseProgress["chapters"] {
+  const chapters = new Map<
+    string,
+    {
+      chapterId: string;
+      concepts: CourseConceptProgress[];
+      order: number;
+      title: string;
+    }
+  >();
+  for (const [index, row] of rows.entries()) {
+    const chapter = chapters.get(row.chapter_id) ?? {
+      chapterId: row.chapter_id,
+      concepts: [],
+      order: row.chapter_order,
+      title: row.chapter_title,
+    };
+    chapter.concepts.push(concepts[index]!);
+    chapters.set(row.chapter_id, chapter);
+  }
+  return [...chapters.values()];
+}
+
+function projectSessionDeltas(
+  row: ProgressSessionRow,
+  conceptNames: ReadonlyMap<string, string>,
+): readonly CourseSessionMasteryDelta[] {
+  const flowB = objectField(row.summary, "flowB");
+  if (flowB === null) {
+    return [];
+  }
+  const deltas: CourseSessionMasteryDelta[] = [];
+  for (const [conceptId, candidate] of Object.entries(flowB)) {
+    const value = asObject(candidate);
+    const conceptName = conceptNames.get(conceptId);
+    if (value === null || conceptName === undefined) {
+      continue;
+    }
+    const completedAt = dateField(value, "completedAt");
+    const finalMastery = fixedField(value, "finalMastery");
+    const initialMastery = fixedField(value, "initialMastery");
+    const masteryDelta = deltaField(value, "masteryDelta");
+    const outcome = value.outcome;
+    if (
+      completedAt === null ||
+      finalMastery === null ||
+      initialMastery === null ||
+      masteryDelta === null ||
+      (outcome !== "retest_succeeded" &&
+        outcome !== "stopped_after_two_replacements")
+    ) {
+      continue;
+    }
+    deltas.push({
+      completedAt,
+      conceptId,
+      conceptName,
+      finalMastery,
+      initialMastery,
+      masteryDelta,
+      outcome,
+      sessionId: row.session_id,
+    });
+  }
+  return deltas;
+}
+
+function averageFixed(values: readonly string[]): string | null {
+  if (values.length === 0) {
+    return null;
+  }
+  const total = values.reduce((sum, value) => sum + fixedUnits(value), 0n);
+  const denominator = BigInt(values.length);
+  let average = total / denominator;
+  if ((total % denominator) * 2n >= denominator) {
+    average += 1n;
+  }
+  return formatFixed(average);
+}
+
+function fixedUnits(value: string): bigint {
+  const match = /^(0|1)\.(\d{5})$/.exec(value);
+  if (match === null) {
+    throw new Error("Database returned invalid fixed-point mastery");
+  }
+  return BigInt(match[1]!) * 100_000n + BigInt(match[2]!);
+}
+
+function formatFixed(value: bigint): string {
+  const digits = value.toString().padStart(6, "0");
+  return `${digits.slice(0, -5)}.${digits.slice(-5)}`;
+}
+
+function objectField(
+  value: Record<string, unknown> | null,
+  key: string,
+): Record<string, unknown> | null {
+  return value === null ? null : asObject(value[key]);
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function dateField(value: Record<string, unknown>, key: string): Date | null {
+  const candidate = value[key];
+  if (typeof candidate !== "string") {
+    return null;
+  }
+  const parsed = new Date(candidate);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function fixedField(
+  value: Record<string, unknown>,
+  key: string,
+): string | null {
+  const candidate = value[key];
+  return typeof candidate === "string" &&
+    /^(?:0\.\d{5}|1\.00000)$/.test(candidate)
+    ? candidate
+    : null;
+}
+
+function deltaField(
+  value: Record<string, unknown>,
+  key: string,
+): string | null {
+  const candidate = value[key];
+  return typeof candidate === "string" &&
+    /^-?(?:0\.\d{5}|1\.00000)$/.test(candidate)
+    ? candidate
+    : null;
+}
+
+function compareAscii(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 async function setScopeContext(

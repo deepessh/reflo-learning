@@ -1,5 +1,6 @@
 import type {
   AuthenticatedAccount,
+  CourseProgress,
   LibraryCourse,
   LoginTokenIssue,
   MagicLinkMessage,
@@ -39,6 +40,7 @@ export class InMemoryAccountRepository implements AccountRepository {
   readonly issues: LoginTokenIssue[] = [];
   readonly library: LibraryCourse[] = [];
   readonly history: SessionHistoryItem[] = [];
+  readonly progress = new Map<string, CourseProgress>();
   readonly sessions = new Map<string, AuthenticatedAccount>();
   readonly deletedUsers = new Set<string>();
   readonly magicLinkDeliveryReservations: Date[] = [];
@@ -131,6 +133,13 @@ export class InMemoryAccountRepository implements AccountRepository {
 
   async listLibrary(): Promise<readonly LibraryCourse[]> {
     return this.library;
+  }
+
+  async getCourseProgress(
+    _account: AuthenticatedAccount,
+    courseId: string,
+  ): Promise<CourseProgress | null> {
+    return this.progress.get(courseId) ?? null;
   }
 
   async listSessionHistory(): Promise<readonly SessionHistoryItem[]> {

@@ -142,6 +142,22 @@ export function createApiServer(
             });
             return;
           }
+          const progressCourseId = courseProgressRoute(url.pathname);
+          if (request.method === "GET" && progressCourseId !== null) {
+            if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+              writeCors(response, origin);
+            }
+            const progress = await accounts.getCourseProgress(
+              account,
+              progressCourseId,
+            );
+            if (progress === null) {
+              sendJson(response, 404, { error: "course_not_found" });
+              return;
+            }
+            sendJson(response, 200, { progress });
+            return;
+          }
 
           if (request.method === "POST") {
             if (
@@ -322,6 +338,14 @@ function studySessionRoute(
     `^/v1/study-sessions/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/${action}$`,
     "i",
   ).exec(pathname);
+  return match?.[1] ?? null;
+}
+
+function courseProgressRoute(pathname: string): string | null {
+  const match =
+    /^\/v1\/courses\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/progress$/i.exec(
+      pathname,
+    );
   return match?.[1] ?? null;
 }
 

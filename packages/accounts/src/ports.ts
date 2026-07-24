@@ -1,5 +1,6 @@
 import type {
   AuthenticatedAccount,
+  CourseProgress,
   LibraryCourse,
   LoginTokenIssue,
   MagicLinkMessage,
@@ -14,6 +15,10 @@ export interface AccountRepository {
   ): Promise<AuthenticatedAccount | null>;
   beginDeletion(userId: string, now: Date): Promise<void>;
   issueLoginToken(issue: LoginTokenIssue): Promise<void>;
+  getCourseProgress(
+    account: AuthenticatedAccount,
+    courseId: string,
+  ): Promise<CourseProgress | null>;
   listLibrary(account: AuthenticatedAccount): Promise<readonly LibraryCourse[]>;
   listSessionHistory(
     account: AuthenticatedAccount,

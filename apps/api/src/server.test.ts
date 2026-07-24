@@ -130,6 +130,99 @@ describe("auth, library, and session-history API", () => {
     });
   });
 
+  it("serves an owner-authorized readiness-safe course progress projection", async () => {
+    const fixture = createAccountFixture();
+    const courseId = "50000000-0000-4000-8000-000000000042";
+    fixture.repository.progress.set(courseId, {
+      chapters: [
+        {
+          chapterId: "40000000-0000-4000-8000-000000000042",
+          concepts: [
+            {
+              assessmentStatus: "assessed",
+              conceptId: "30000000-0000-4000-8000-000000000042",
+              confidence: "0.42857",
+              evidenceCount: 3,
+              generationVersion: "curriculum-v1",
+              lastReviewedAt: new Date("2026-07-24T12:00:00.000Z"),
+              mappingStatus: "unmapped",
+              mastery: "0.28571",
+              name: "Virtual networks",
+              order: 0,
+              review: {
+                fsrsDueAt: new Date("2026-07-25T12:00:00.000Z"),
+                nextDeliveryAt: new Date("2026-07-25T16:00:00.000Z"),
+                state: "scheduled",
+              },
+            },
+          ],
+          order: 1,
+          title: "Networking",
+        },
+      ],
+      courseId,
+      generatedAt: new Date("2026-07-24T12:01:00.000Z"),
+      mastery: {
+        assessedConceptCount: 1,
+        kind: "course_mastery_estimate",
+        label: "Course Mastery Estimate",
+        totalConceptCount: 1,
+        value: "0.28571",
+      },
+      readiness: {
+        blueprintVersion: null,
+        invalidatedConceptCount: 0,
+        mappedConceptCount: 0,
+        reasons: [
+          "blueprint_missing",
+          "evidence_minimum_not_met",
+          "calibration_unavailable",
+        ],
+        score: null,
+        status: "unavailable",
+        targetBlueprintId: null,
+        unmappedConceptCount: 1,
+      },
+      recentSessionDeltas: [],
+      title: "Cloud Architecture Foundations",
+    });
+    const { baseUrl } = await startAccountServer(fixture.service);
+    const cookie = await login(baseUrl, fixture.email);
+
+    const response = await fetch(`${baseUrl}/v1/courses/${courseId}/progress`, {
+      headers: {
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      progress: {
+        courseId,
+        mastery: {
+          assessedConceptCount: 1,
+          kind: "course_mastery_estimate",
+          value: "0.28571",
+        },
+        readiness: {
+          mappedConceptCount: 0,
+          score: null,
+          status: "unavailable",
+          unmappedConceptCount: 1,
+        },
+      },
+    });
+    expect(
+      (
+        await fetch(
+          `${baseUrl}/v1/courses/50000000-0000-4000-8000-000000000043/progress`,
+          { headers: { cookie: cookie.header } },
+        )
+      ).status,
+    ).toBe(404);
+  });
+
   it("rejects unauthenticated and forged-CSRF access and revokes on logout", async () => {
     const fixture = createAccountFixture();
     const { baseUrl } = await startAccountServer(fixture.service);

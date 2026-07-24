@@ -237,11 +237,12 @@ reported separately and never changes core success when its P1 flag is
 disabled or the optional fal experiment is unavailable.
 
 This connected mode is development integration evidence only. Unit and
-integration suites remain deterministic failure/replay evidence. The seeded
-offline demo is a separate service-worker bundle that must work without public
-internet, model APIs, production backend, or CDN. Authoritative performance,
-audio, adversarial, privacy, security, provider, quota, and release-gate
-evaluation runs only in the applicable Alibaba target environment under the
-repository evaluation contract; this command cannot satisfy any of them.
+integration suites remain deterministic failure/replay evidence. The connected
+online application demo is a separate web/API composition with staff-only test
+identity and learner-facing failure handling; this CLI smoke is not that browser
+experience. Authoritative performance, audio, adversarial, privacy, security,
+provider, quota, and release-gate evaluation runs only in the applicable
+Alibaba target environment under the repository evaluation contract; this
+command cannot satisfy any of them.
 
 `pnpm package` stages independently deployable outputs under `.artifacts/`. The web artifact is static; API and jobs artifacts include their production workspace dependencies.

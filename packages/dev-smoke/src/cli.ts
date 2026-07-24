@@ -461,7 +461,7 @@ async function runSmoke(
     return {
       boundary: [
         "development integration evidence only",
-        "not the seeded public-internet-offline demo",
+        "not the connected online application demo",
         "does not attest Alibaba providers, target security, quota, SLO, privacy, quality, or release gates",
       ],
       components,

@@ -17,11 +17,11 @@
       ]
     },
     "M-006-product": {
-      "boundary": "offline-demo behavior and honest labeling",
+      "boundary": "connected online demo behavior and honest labeling",
       "source_sections": ["§9", "§12"],
       "required_fragments": [
-        "\"offline\" means public internet, model APIs, production backend, and CDN may all be unavailable after a successful rehearsal preflight",
-        "Never present pre-generated offline behavior as live generation."
+        "The Demo Day product surface is the connected online application.",
+        "Never present pre-generated or seeded behavior as live generation."
       ]
     }
   },

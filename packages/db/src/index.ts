@@ -20,6 +20,7 @@ export {
   PostgresKnowledgeRepository,
 } from "./knowledge-repository.js";
 export type {
+  DeliveryOverrideProjection,
   KnowledgePersistenceErrorCode,
   LearningEventAppendResult,
 } from "./knowledge-repository.js";

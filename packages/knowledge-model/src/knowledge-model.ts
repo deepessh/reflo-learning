@@ -9,9 +9,10 @@ import {
   type PerConceptEvidence,
 } from "./contracts.js";
 
-interface ValidatedEvidence {
+export interface ValidatedEvidence {
   readonly evidence: PerConceptEvidence;
   readonly occurredAtMs: number;
+  readonly timestampOrder: string;
   readonly scoreQuanta: bigint | null;
 }
 
@@ -79,12 +80,26 @@ function validateEvidence(evidence: PerConceptEvidence): ValidatedEvidence {
     evidence.ownerScopeId.length === 0 ||
     evidence.userId.length === 0 ||
     evidence.attemptId.length === 0 ||
-    evidence.conceptId.length === 0
+    evidence.conceptId.length === 0 ||
+    evidence.gradingPolicyVersion.length === 0 ||
+    evidence.ratingMappingVersion.length === 0
   ) {
     throw new KnowledgeModelError("invalid_evidence");
   }
-  const occurredAtMs = Date.parse(evidence.attemptCreatedAt);
-  if (!Number.isFinite(occurredAtMs)) {
+  if (
+    !["abstained", "graded", "superseded"].includes(evidence.attemptOutcome) ||
+    (evidence.eligibleForMastery && evidence.attemptOutcome !== "graded")
+  ) {
+    throw new KnowledgeModelError("invalid_evidence");
+  }
+  const occurredAtMs = parseTrustedTimestamp(evidence.attemptCreatedAt);
+  const timestampOrder = normalizeTimestampOrder(
+    evidence.attemptCreatedAtOrder,
+  );
+  if (
+    !Number.isFinite(occurredAtMs) ||
+    Date.parse(timestampOrder) !== occurredAtMs
+  ) {
     throw new KnowledgeModelError("invalid_timestamp");
   }
   const scoreQuanta =
@@ -92,7 +107,15 @@ function validateEvidence(evidence: PerConceptEvidence): ValidatedEvidence {
   if (evidence.eligibleForMastery && scoreQuanta === null) {
     throw new KnowledgeModelError("invalid_evidence");
   }
-  return { evidence, occurredAtMs, scoreQuanta };
+  if (
+    evidence.eligibleForMastery !== (evidence.fsrsRating !== null) ||
+    (evidence.fsrsRating !== null &&
+      evidence.fsrsRating !== 1 &&
+      evidence.fsrsRating !== 3)
+  ) {
+    throw new KnowledgeModelError("invalid_evidence");
+  }
+  return { evidence, occurredAtMs, scoreQuanta, timestampOrder };
 }
 
 function parseScoreQuanta(score: string): bigint {
@@ -109,9 +132,16 @@ function sameEvidence(
 ): boolean {
   return (
     left.occurredAtMs === right.occurredAtMs &&
+    left.timestampOrder === right.timestampOrder &&
     left.scoreQuanta === right.scoreQuanta &&
     left.evidence.userId === right.evidence.userId &&
+    left.evidence.attemptOutcome === right.evidence.attemptOutcome &&
     left.evidence.eligibleForMastery === right.evidence.eligibleForMastery &&
+    left.evidence.fsrsRating === right.evidence.fsrsRating &&
+    left.evidence.gradingPolicyVersion ===
+      right.evidence.gradingPolicyVersion &&
+    left.evidence.ratingMappingVersion ===
+      right.evidence.ratingMappingVersion &&
     left.evidence.knowledgeAlgorithmVersion ===
       right.evidence.knowledgeAlgorithmVersion &&
     left.evidence.knowledgeConfigurationId ===
@@ -124,10 +154,34 @@ function compareEvidence(
   right: ValidatedEvidence,
 ): number {
   return (
-    left.occurredAtMs - right.occurredAtMs ||
+    compareAscii(left.timestampOrder, right.timestampOrder) ||
     compareAscii(left.evidence.attemptId, right.evidence.attemptId) ||
     compareAscii(left.evidence.conceptId, right.evidence.conceptId)
   );
+}
+
+function parseTrustedTimestamp(value: string): number {
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+      value,
+    )
+  ) {
+    throw new KnowledgeModelError("invalid_timestamp");
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw new KnowledgeModelError("invalid_timestamp");
+  }
+  return timestamp;
+}
+
+function normalizeTimestampOrder(value: string): string {
+  const matched =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/.exec(value);
+  if (matched === null) {
+    throw new KnowledgeModelError("invalid_timestamp");
+  }
+  return `${matched[1]}.${(matched[2] ?? "").padEnd(6, "0")}Z`;
 }
 
 function compareAscii(left: string, right: string): number {

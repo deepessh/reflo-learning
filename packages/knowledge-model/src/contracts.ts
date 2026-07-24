@@ -103,12 +103,17 @@ export interface AssessmentEvidenceWrite {
 
 export interface PerConceptEvidence {
   readonly attemptCreatedAt: string;
+  readonly attemptCreatedAtOrder: string;
   readonly attemptId: string;
+  readonly attemptOutcome: "abstained" | "graded" | "superseded";
   readonly conceptId: string;
   readonly eligibleForMastery: boolean;
+  readonly fsrsRating: EvidenceFsrsRating | null;
+  readonly gradingPolicyVersion: string;
   readonly knowledgeAlgorithmVersion: typeof KNOWLEDGE_ALGORITHM_VERSION;
   readonly knowledgeConfigurationId: typeof KNOWLEDGE_CONFIGURATION_ID;
   readonly ownerScopeId: string;
+  readonly ratingMappingVersion: string;
   readonly score: string | null;
   readonly userId: string;
 }

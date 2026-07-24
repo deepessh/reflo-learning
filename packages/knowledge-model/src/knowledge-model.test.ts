@@ -10,11 +10,16 @@ import {
 
 const base = {
   attemptCreatedAt: "2026-07-23T17:00:00.000Z",
+  attemptCreatedAtOrder: "2026-07-23T17:00:00.000000Z",
+  attemptOutcome: "graded",
   conceptId: "concept-a",
   eligibleForMastery: true,
+  fsrsRating: 3,
+  gradingPolicyVersion: "grading-policy-v1",
   knowledgeAlgorithmVersion: KNOWLEDGE_ALGORITHM_VERSION,
   knowledgeConfigurationId: KNOWLEDGE_CONFIGURATION_ID,
   ownerScopeId: "scope-a",
+  ratingMappingVersion: "grading-policy-v1-rating-map",
   score: "1.00000",
   userId: "user-a",
 } as const;
@@ -58,11 +63,15 @@ describe("knowledge-model-v1", () => {
       evidence(0, "1.00000"),
       {
         ...evidence(1, null),
+        attemptOutcome: "abstained",
         eligibleForMastery: false,
+        fsrsRating: null,
       },
       {
         ...evidence(2, "0.00000"),
+        attemptOutcome: "superseded",
         eligibleForMastery: false,
+        fsrsRating: null,
       },
     ]);
 
@@ -151,6 +160,50 @@ describe("knowledge-model-v1", () => {
     );
   });
 
+  it("rejects offsetless or mismatched trusted timestamp ordering", () => {
+    expect(() =>
+      replayKnowledgeState([
+        {
+          ...evidence(0, "1.00000"),
+          attemptCreatedAt: "2026-07-23T17:00:00.000",
+        },
+      ]),
+    ).toThrowError(
+      expect.objectContaining<Partial<KnowledgeModelError>>({
+        code: "invalid_timestamp",
+      }),
+    );
+    expect(() =>
+      replayKnowledgeState([
+        {
+          ...evidence(0, "1.00000"),
+          attemptCreatedAtOrder: "2026-07-23T17:00:01.000000Z",
+        },
+      ]),
+    ).toThrowError(
+      expect.objectContaining<Partial<KnowledgeModelError>>({
+        code: "invalid_timestamp",
+      }),
+    );
+  });
+
+  it("rejects eligible evidence from an abstained or superseded attempt", () => {
+    for (const attemptOutcome of ["abstained", "superseded"] as const) {
+      expect(() =>
+        replayKnowledgeState([
+          {
+            ...evidence(0, "1.00000"),
+            attemptOutcome,
+          },
+        ]),
+      ).toThrowError(
+        expect.objectContaining<Partial<KnowledgeModelError>>({
+          code: "invalid_evidence",
+        }),
+      );
+    }
+  });
+
   it("proves the seeded Flow B delta comes only from the correct re-test", () => {
     const failed = replayKnowledgeState([
       evidence(0, "0.00000"),
@@ -159,12 +212,20 @@ describe("knowledge-model-v1", () => {
     const afterReplacementLesson = replayKnowledgeState([
       evidence(0, "0.00000"),
       evidence(1, "0.00000"),
-      { ...evidence(2, null), eligibleForMastery: false },
+      {
+        ...evidence(2, null),
+        eligibleForMastery: false,
+        fsrsRating: null,
+      },
     ]);
     const afterCorrectRetest = replayKnowledgeState([
       evidence(0, "0.00000"),
       evidence(1, "0.00000"),
-      { ...evidence(2, null), eligibleForMastery: false },
+      {
+        ...evidence(2, null),
+        eligibleForMastery: false,
+        fsrsRating: null,
+      },
       evidence(3, "1.00000"),
     ]);
 
@@ -181,11 +242,18 @@ function evidence(
   attemptCreatedAt = base.attemptCreatedAt,
   conceptId = base.conceptId,
 ): PerConceptEvidence {
+  const attemptCreatedAtOrder = attemptCreatedAt.replace(
+    /\.(\d{3})Z$/,
+    ".$1000Z",
+  );
   return {
     ...base,
     attemptCreatedAt,
+    attemptCreatedAtOrder,
     attemptId: `attempt-${index.toString().padStart(5, "0")}`,
     conceptId,
+    eligibleForMastery: score !== null,
+    fsrsRating: score === null ? null : score === "1.00000" ? 3 : 1,
     score,
   };
 }

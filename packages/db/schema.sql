@@ -739,13 +739,20 @@ CREATE TABLE public.asset (
     narration_script_id uuid,
     narration_script_sha256 text,
     audio_payload_metadata jsonb,
+    reteach_session_id uuid,
+    reteach_replacement_ordinal smallint,
+    reteach_baseline_mastery numeric(6,5),
+    reteach_semantic_similarity numeric(6,5),
+    reteach_generation_id uuid,
+    reteach_served_at timestamp with time zone,
     CONSTRAINT asset_asset_type_check CHECK ((asset_type = ANY (ARRAY['audio'::text, 'video'::text, 'text'::text]))),
     CONSTRAINT asset_byte_size_check CHECK (((byte_size IS NULL) OR (byte_size >= 0))),
     CONSTRAINT asset_check CHECK (((status <> 'ready'::text) OR (object_key IS NOT NULL))),
     CONSTRAINT asset_content_hash_check CHECK (((content_hash IS NULL) OR (content_hash ~ '^[a-f0-9]{64}$'::text))),
     CONSTRAINT asset_narration_script_sha256_check CHECK (((narration_script_sha256 IS NULL) OR (narration_script_sha256 ~ '^[a-f0-9]{64}$'::text))),
     CONSTRAINT asset_ready_audio_metadata_check CHECK (((asset_type <> 'audio'::text) OR (status <> 'ready'::text) OR ((audio_generation_operation_id IS NOT NULL) AND (generation_operation_id IS NULL) AND (narration_script_id IS NOT NULL) AND (narration_script_sha256 IS NOT NULL) AND (model_provenance IS NOT NULL) AND (content_hash IS NOT NULL) AND (content_type = 'audio/wav'::text) AND (byte_size IS NOT NULL) AND (byte_size > 44) AND (etag IS NOT NULL) AND ((audio_payload_metadata ->> 'contractVersion'::text) = 'audio-payload-v1'::text) AND ((audio_payload_metadata ->> 'container'::text) = 'wav'::text) AND ((audio_payload_metadata ->> 'codec'::text) = 'pcm_s16le'::text) AND (((audio_payload_metadata ->> 'channels'::text))::integer = 1) AND (((audio_payload_metadata ->> 'sampleRateHz'::text))::integer = ANY (ARRAY[22050, 24000])) AND ((audio_payload_metadata ->> 'headerValidated'::text) = 'true'::text) AND ((audio_payload_metadata ->> 'payloadSha256'::text) = content_hash)))),
-    CONSTRAINT asset_ready_text_metadata_check CHECK (((asset_type <> 'text'::text) OR (status <> 'ready'::text) OR ((generation_operation_id IS NOT NULL) AND (model_provenance IS NOT NULL) AND (content_hash IS NOT NULL) AND (content_type IS NOT NULL) AND (byte_size IS NOT NULL) AND (etag IS NOT NULL)))),
+    CONSTRAINT asset_ready_text_metadata_check CHECK (((asset_type <> 'text'::text) OR (status <> 'ready'::text) OR ((model_provenance IS NOT NULL) AND (content_hash IS NOT NULL) AND (content_type IS NOT NULL) AND (byte_size IS NOT NULL) AND (etag IS NOT NULL) AND (((generation_operation_id IS NOT NULL) AND (reteach_session_id IS NULL)) OR ((generation_operation_id IS NULL) AND (reteach_session_id IS NOT NULL)))))),
+    CONSTRAINT asset_reteach_shape CHECK ((((reteach_session_id IS NULL) AND (reteach_replacement_ordinal IS NULL) AND (reteach_baseline_mastery IS NULL) AND (reteach_semantic_similarity IS NULL) AND (reteach_generation_id IS NULL) AND (reteach_served_at IS NULL)) OR ((reteach_session_id IS NOT NULL) AND ((reteach_replacement_ordinal >= 1) AND (reteach_replacement_ordinal <= 2)) AND ((reteach_baseline_mastery >= (0)::numeric) AND (reteach_baseline_mastery <= (1)::numeric)) AND (reteach_semantic_similarity >= ('-1'::integer)::numeric) AND (reteach_semantic_similarity < 0.85) AND (reteach_generation_id IS NOT NULL) AND (reteach_served_at IS NOT NULL) AND (asset_type = 'text'::text) AND (status = 'ready'::text) AND (chapter_id IS NOT NULL) AND (concept_id IS NOT NULL) AND (generation_operation_id IS NULL) AND (audio_generation_operation_id IS NULL) AND (generation_version = 'reteach-generation-v1'::text) AND ((model_provenance ->> 'task'::text) = 'lesson.reteach.v1'::text) AND ((model_provenance ->> 'validationOutcome'::text) = 'passed'::text)))),
     CONSTRAINT asset_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'generating'::text, 'ready'::text, 'failed'::text, 'tombstoned'::text])))
 );
 
@@ -2054,6 +2061,14 @@ ALTER TABLE ONLY public.asset
 
 ALTER TABLE ONLY public.asset
     ADD CONSTRAINT asset_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: asset asset_reteach_identity; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asset
+    ADD CONSTRAINT asset_reteach_identity UNIQUE (owner_scope_id, reteach_session_id, concept_id, reteach_replacement_ordinal);
 
 
 --
@@ -3460,6 +3475,14 @@ ALTER TABLE ONLY public.asset
 
 ALTER TABLE ONLY public.asset
     ADD CONSTRAINT asset_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
+-- Name: asset asset_reteach_session_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asset
+    ADD CONSTRAINT asset_reteach_session_scope_fk FOREIGN KEY (owner_scope_id, reteach_session_id) REFERENCES public.study_session(owner_scope_id, id);
 
 
 --
@@ -5062,4 +5085,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260721000500'),
     ('20260723000100'),
     ('20260723000200'),
-    ('20260724000100');
+    ('20260724000100'),
+    ('20260724000200');

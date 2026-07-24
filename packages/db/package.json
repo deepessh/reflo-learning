@@ -34,6 +34,7 @@
     "@reflo/knowledge-model": "workspace:*",
     "@reflo/model-router": "workspace:*",
     "@reflo/retrieval": "workspace:*",
+    "@reflo/tutor-agent": "workspace:*",
     "dbmate": "2.34.1",
     "pg": "8.16.3"
   },

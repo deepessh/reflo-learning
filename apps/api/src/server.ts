@@ -12,12 +12,14 @@ import {
 } from "@reflo/accounts";
 import type { ServerEnvironment } from "@reflo/config";
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from "@reflo/contracts";
+import { TutorAgentError, type TutorAgentService } from "@reflo/tutor-agent";
 
 const SESSION_COOKIE = "__Host-reflo_session";
 const CSRF_COOKIE = "__Host-reflo_csrf";
 
 export interface ApiDependencies {
   readonly accounts?: AccountService;
+  readonly tutorAgent?: Pick<TutorAgentService, "ask" | "nextAction">;
 }
 
 export function createApiServer(
@@ -171,9 +173,72 @@ export function createApiServer(
               response.end(JSON.stringify({ accepted: true }));
               return;
             }
+            const nextActionSessionId = studySessionRoute(url.pathname, "next");
+            if (nextActionSessionId !== null) {
+              const tutorAgent = dependencies.tutorAgent;
+              if (tutorAgent === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const action = await tutorAgent.nextAction({
+                authorization: {
+                  actorId: account.userId,
+                  authorizationId: account.sessionId,
+                  ownerScopeId: account.ownerScopeId,
+                },
+                deadlineMs: 30_000,
+                sessionId: nextActionSessionId,
+              });
+              writeCors(response, origin!);
+              sendJson(response, 200, { action });
+              return;
+            }
+            const askSessionId = studySessionRoute(url.pathname, "ask");
+            if (askSessionId !== null) {
+              const tutorAgent = dependencies.tutorAgent;
+              if (tutorAgent === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const body = await readJsonBody(request);
+              const answer = await tutorAgent.ask({
+                authorization: {
+                  actorId: account.userId,
+                  authorizationId: account.sessionId,
+                  ownerScopeId: account.ownerScopeId,
+                },
+                courseId: stringField(body, "courseId"),
+                deadlineMs: 30_000,
+                idempotencyKey: stringField(body, "idempotencyKey"),
+                question: stringField(body, "question"),
+                sessionId: askSessionId,
+                sourceDocumentId: stringField(body, "sourceDocumentId"),
+              });
+              writeCors(response, origin!);
+              sendJson(response, 200, { answer });
+              return;
+            }
           }
         }
       } catch (error) {
+        if (error instanceof TutorAgentError) {
+          if (
+            error.code === "authorization_denied" ||
+            error.code === "invalid_session"
+          ) {
+            sendJson(response, 404, { error: "study_session_not_found" });
+            return;
+          }
+          if (
+            error.code === "invalid_configuration" ||
+            error.code === "retest_unavailable"
+          ) {
+            sendJson(response, 400, { error: error.code });
+            return;
+          }
+          sendJson(response, 503, { error: "tutor_unavailable" });
+          return;
+        }
         if (error instanceof RecentAuthenticationRequiredError) {
           sendJson(response, 403, { error: error.message });
           return;
@@ -247,6 +312,17 @@ function stringField(body: Record<string, unknown>, name: string): string {
     throw new JsonBodyError();
   }
   return value;
+}
+
+function studySessionRoute(
+  pathname: string,
+  action: "ask" | "next",
+): string | null {
+  const match = new RegExp(
+    `^/v1/study-sessions/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/${action}$`,
+    "i",
+  ).exec(pathname);
+  return match?.[1] ?? null;
 }
 
 function parseCookies(header: string | undefined): Map<string, string> {

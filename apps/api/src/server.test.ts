@@ -1,6 +1,6 @@
 import { once } from "node:events";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AccountService, FixedWindowAuthAbuseLimiter } from "@reflo/accounts";
 import {
@@ -189,6 +189,87 @@ describe("auth, library, and session-history API", () => {
       ).status,
     ).toBe(401);
   });
+
+  it("serves authenticated, CSRF-protected online Tutor Agent actions", async () => {
+    const fixture = createAccountFixture();
+    const tutorAgent = {
+      ask: vi.fn().mockResolvedValue({
+        citations: [
+          {
+            sectionPath: ["Networking", "VPC"],
+            sourceSpanId: "90000000-0000-4000-8000-000000000001",
+          },
+        ],
+        content: "A VPC is an isolated network.",
+        kind: "answer",
+      }),
+      nextAction: vi.fn().mockResolvedValue({
+        conceptId: "40000000-0000-4000-8000-000000000001",
+        kind: "advance",
+      }),
+    };
+    const { baseUrl } = await startAccountServer(fixture.service, tutorAgent);
+    const cookie = await login(baseUrl, fixture.email);
+    const sessionId = "70000000-0000-4000-8000-000000000001";
+
+    const nextResponse = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/next`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(nextResponse.status).toBe(200);
+    expect(await nextResponse.json()).toEqual({
+      action: {
+        conceptId: "40000000-0000-4000-8000-000000000001",
+        kind: "advance",
+      },
+    });
+    expect(tutorAgent.nextAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: expect.objectContaining({
+          ownerScopeId: expect.any(String),
+        }),
+        sessionId,
+      }),
+    );
+
+    const askResponse = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/ask`,
+      {
+        body: JSON.stringify({
+          courseId: "50000000-0000-4000-8000-000000000001",
+          idempotencyKey: "api/tutor-question/v1/one",
+          question: "What is a VPC?",
+          sourceDocumentId: "80000000-0000-4000-8000-000000000001",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(askResponse.status).toBe(200);
+    expect(await askResponse.json()).toMatchObject({
+      answer: {
+        citations: [
+          {
+            sectionPath: ["Networking", "VPC"],
+            sourceSpanId: "90000000-0000-4000-8000-000000000001",
+          },
+        ],
+        kind: "answer",
+      },
+    });
+  });
 });
 
 function createAccountFixture() {
@@ -212,7 +293,10 @@ function createAccountFixture() {
   return { email, repository, service };
 }
 
-async function startAccountServer(service: AccountService) {
+async function startAccountServer(
+  service: AccountService,
+  tutorAgent?: Parameters<typeof createApiServer>[1]["tutorAgent"],
+) {
   const server = createApiServer(
     {
       deployment: "dev",
@@ -220,7 +304,10 @@ async function startAccountServer(service: AccountService) {
       port: 0,
       service: "api",
     },
-    { accounts: service },
+    {
+      accounts: service,
+      ...(tutorAgent === undefined ? {} : { tutorAgent }),
+    },
   );
   servers.push(server);
   server.listen(0, "127.0.0.1");

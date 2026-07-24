@@ -33,6 +33,7 @@ test("toolchain policy reports Turbo environment drift", () => {
       "scripts/toolchain-versions.sh",
       "scripts/requirements-governance.txt",
       "scripts/doctor.sh",
+      "scripts/governance-python.sh",
       ".github/workflows/validate-decisions.yml",
       "packages/db/package.json",
       "packages/db/README.md",
@@ -63,6 +64,18 @@ test("toolchain policy reports Turbo environment drift", () => {
     assert.match(
       checkToolchainPolicy(fixture).join("\n"),
       /turbo test env must pass REFLO_POSTGRES_CONTAINER_REWRITE_FROM/,
+    );
+
+    const packagePath = path.join(fixture, "package.json");
+    const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
+    packageJson.scripts.test = packageJson.scripts.test.replace(
+      "pnpm governance:check && ",
+      "",
+    );
+    writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    assert.match(
+      checkToolchainPolicy(fixture).join("\n"),
+      /root lint and test must preflight and run governance Python through the repository wrapper/,
     );
   } finally {
     rmSync(fixture, { recursive: true, force: true });

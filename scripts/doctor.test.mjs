@@ -96,3 +96,41 @@ test("doctor distinguishes an installed command outside PATH", (t) => {
   );
   assert.doesNotMatch(result.stderr, /gh is not installed/);
 });
+
+test("doctor reports an installed inactive pinned Node activation command", (t) => {
+  const { bin, directory } = fixture();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  executable(path.join(bin, "node"), '#!/usr/bin/env sh\necho "v20.20.2"\n');
+  const nvm = path.join(directory, "nvm");
+  const pinnedBin = path.join(nvm, "versions/node/v24.18.0/bin");
+  mkdirSync(pinnedBin, { recursive: true });
+  executable(
+    path.join(pinnedBin, "node"),
+    '#!/usr/bin/env sh\necho "v24.18.0"\n',
+  );
+
+  const result = spawnSync("/bin/sh", [doctor], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${bin}:/usr/bin:/bin`,
+      NVM_DIR: nvm,
+      REFLO_DOCTOR_ROOT: directory,
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /node is 20\.20\.2; expected exactly 24\.18\.0/);
+  assert.match(
+    result.stdout,
+    new RegExp(
+      `node 24\\.18\\.0 installed: ${pinnedBin.replaceAll("/", "\\/")}\\/node`,
+    ),
+  );
+  assert.match(
+    result.stdout,
+    new RegExp(
+      `activate pinned node: export PATH="${pinnedBin.replaceAll("/", "\\/")}:\\$PATH"`,
+    ),
+  );
+});

@@ -10,7 +10,7 @@ Validation is configured by `.adr-governance.yaml` and run with:
 
 ```sh
 python3 -m pip install --requirement scripts/requirements-governance.txt
-python3 scripts/validate_adrs.py
+scripts/governance-python.sh scripts/validate_adrs.py
 ```
 
 The validator requires exactly `PyYAML==6.0.3` and uses a duplicate-key-rejecting

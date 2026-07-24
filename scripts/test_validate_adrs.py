@@ -417,6 +417,51 @@ class AdrValidationTests(unittest.TestCase):
                 )
                 self.assertIn(expected, "\n".join(case_diagnostics.finish()))
 
+    def test_bold_and_unbold_approval_labels_normalize_identically(self) -> None:
+        expected = (
+            "Direct owner approval after review.\n"
+            "The owner instructed Codex to proceed."
+        )
+        for label in (
+            "Approval basis:",
+            "**Approval basis:**",
+            "**Approval basis**:",
+            "__Approval basis:__",
+        ):
+            with self.subTest(label=label):
+                comment = (
+                    f"Accepted. Authorized decider: @owner.\n\n{label} {expected}"
+                )
+                self.assertEqual(expected, validator.exact_approval_basis(comment))
+
+    def test_live_github_provenance_accepts_bold_approval_label_and_legacy_artifact(
+        self,
+    ) -> None:
+        metadata = github_metadata()
+        metadata["authorization"]["decider"] = "@owner"
+        metadata["authorization"]["approval_basis"] = (
+            "** repository-owner authorization."
+        )
+        diagnostics = validator.Diagnostics()
+        path = self.fixture.write_adr(metadata)
+        adr = validator.parse_adr(path, diagnostics)
+        assert adr
+        responses = live_github_responses(
+            canonical_path=validator.canonical_adr_path(adr)
+        )
+        responses["/repos/acme/reflo/issues/comments/99"]["body"] = (
+            "Accepted. Authorized decider: @owner.\n\n"
+            "**Approval basis:** repository-owner authorization."
+        )
+
+        validator.validate_live_github_evidence(
+            {"0029": adr},
+            diagnostics,
+            evidence=validator.GitHubEvidence(responses=responses),
+        )
+
+        self.assertEqual([], diagnostics.finish())
+
     def test_live_github_provenance_allows_the_issue_named_agent_decider(self) -> None:
         metadata = github_metadata()
         metadata["authorization"]["decider"] = (

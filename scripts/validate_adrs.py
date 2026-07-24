@@ -191,6 +191,14 @@ def normalize_markdown(value: str) -> str:
     return "\n".join(lines)
 
 
+def normalize_approval_basis(value: str) -> str:
+    normalized = normalize_markdown(value)
+    for marker in ("**", "__"):
+        if normalized.startswith(f"{marker} ") and normalized.count(marker) == 1:
+            return normalized[len(marker) :].lstrip()
+    return normalized
+
+
 def parse_register_records(text: str, diagnostics: Diagnostics) -> dict[str, dict[str, str]]:
     lines = text.splitlines()
     records: dict[str, dict[str, str]] = {}
@@ -713,10 +721,12 @@ def accepted_verdict_signal(body: str) -> bool:
 
 def exact_approval_basis(body: str) -> str:
     match = re.search(
-        r"(?is)\bapproval\s+basis\s*:\s*(.+?)(?:\n\s*\n|$)",
+        r"(?is)(?:\*\*|__)?(?<![A-Za-z0-9])approval\s+basis"
+        r"(?:\*\*|__)?\s*:"
+        r"\s*(?:\*\*|__)?\s*(.+?)(?:\n\s*\n|$)",
         body,
     )
-    return normalize_markdown(match.group(1)) if match else ""
+    return normalize_approval_basis(match.group(1)) if match else ""
 
 
 def issue_has_decision_label(issue: dict[str, Any]) -> bool:
@@ -800,7 +810,10 @@ def validate_exact_comment(
         if not accepted_verdict_signal(comment_body):
             diagnostics.add(f"{label}: exact comment is not an authorized Accepted verdict")
         has_approval_basis = bool(
-            re.search(r"(?i)\bapproval\s+basis\b", comment_body)
+            re.search(
+                r"(?i)(?<![A-Za-z0-9])approval\s+basis(?![A-Za-z0-9])",
+                comment_body,
+            )
             or re.search(
                 r"(?is)\bI\s+approve\b.{0,240}\bbased\s+on\b",
                 comment_body,
@@ -810,7 +823,7 @@ def validate_exact_comment(
             diagnostics.add(f"{label}: exact verdict comment does not state its approval basis")
         elif require_exact_approval_basis:
             expected_basis = (
-                normalize_markdown(expected_approval_basis)
+                normalize_approval_basis(expected_approval_basis)
                 if isinstance(expected_approval_basis, str)
                 else ""
             )

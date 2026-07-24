@@ -36,6 +36,7 @@ export function checkToolchainPolicy(rootDirectory) {
   }
 
   const packageJson = JSON.parse(read(root, "package.json"));
+  const rootScripts = packageJson.scripts ?? {};
   const governanceRequirements = read(
     root,
     "scripts/requirements-governance.txt",
@@ -51,6 +52,18 @@ export function checkToolchainPolicy(rootDirectory) {
   }
   if (packageJson.packageManager !== `pnpm@${pinned.pnpm}`) {
     errors.push(`package.json packageManager must pin pnpm@${pinned.pnpm}`);
+  }
+  if (
+    rootScripts["governance:check"] !==
+      "scripts/governance-python.sh --check" ||
+    !rootScripts.lint?.startsWith("pnpm governance:check &&") ||
+    !rootScripts.test?.startsWith("pnpm governance:check &&") ||
+    !rootScripts.test?.includes("scripts/governance-python.sh -m unittest") ||
+    rootScripts.test?.includes("python3 ")
+  ) {
+    errors.push(
+      "root lint and test must preflight and run governance Python through the repository wrapper",
+    );
   }
 
   const ci = read(root, ".github/workflows/ci.yml");
@@ -70,7 +83,9 @@ export function checkToolchainPolicy(rootDirectory) {
     !governanceCi.includes(
       "python3 -m pip install --requirement scripts/requirements-governance.txt",
     ) ||
-    !governanceCi.includes("python3 scripts/validate_adrs.py")
+    !governanceCi.includes(
+      "scripts/governance-python.sh scripts/validate_adrs.py",
+    )
   ) {
     errors.push(
       "workspace and decision validation CI must install the pinned governance requirement, and decision CI must run ADR validation",
@@ -97,6 +112,7 @@ export function checkToolchainPolicy(rootDirectory) {
 
   for (const script of [
     "scripts/doctor.sh",
+    "scripts/governance-python.sh",
     "packages/db/scripts/dump-schema-from-container.sh",
     "packages/db/scripts/pg-dump-from-container.sh",
   ]) {

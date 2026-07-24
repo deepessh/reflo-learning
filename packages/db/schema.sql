@@ -222,6 +222,20 @@ $$;
 
 
 --
+-- Name: reflo_reject_append_only_mutation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_reject_append_only_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END
+$$;
+
+
+--
 -- Name: reflo_resolve_ingestion_authorization(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -470,14 +484,33 @@ CREATE TABLE public.attempt_concept_evidence (
     owner_scope_id uuid NOT NULL,
     attempt_id uuid NOT NULL,
     concept_id uuid NOT NULL,
-    score numeric(6,5) NOT NULL,
-    rubric_band text NOT NULL,
-    confidence numeric(6,5) NOT NULL,
+    score numeric(6,5),
+    rubric_band text,
+    grader_confidence numeric(6,5),
     rationale_ref text,
     knowledge_algorithm_version text NOT NULL,
     eligible_for_mastery boolean NOT NULL,
-    CONSTRAINT attempt_concept_evidence_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
-    CONSTRAINT attempt_concept_evidence_score_check CHECK (((score >= (0)::numeric) AND (score <= (1)::numeric)))
+    judgment_kind text NOT NULL,
+    grading_method text NOT NULL,
+    rubric_id text NOT NULL,
+    rubric_version text NOT NULL,
+    grading_policy_version text NOT NULL,
+    rating_mapping_version text NOT NULL,
+    knowledge_configuration_id text NOT NULL,
+    ineligibility_reason text,
+    fsrs_rating smallint,
+    replacement_for_attempt_id uuid,
+    CONSTRAINT attempt_concept_evidence_confidence_check CHECK (((grader_confidence >= (0)::numeric) AND (grader_confidence <= (1)::numeric))),
+    CONSTRAINT attempt_concept_evidence_score_check CHECK (((score >= (0)::numeric) AND (score <= (1)::numeric))),
+    CONSTRAINT evidence_band_score_rating_shape CHECK ((((rubric_band = 'incorrect'::text) AND (score = 0.00000) AND ((eligible_for_mastery = false) OR (fsrs_rating = 1))) OR ((rubric_band = 'partially_correct'::text) AND (score = 0.50000) AND ((eligible_for_mastery = false) OR (fsrs_rating = 1))) OR ((rubric_band = 'correct'::text) AND (score = 1.00000) AND ((eligible_for_mastery = false) OR (fsrs_rating = 3))) OR (judgment_kind = 'unanswerable'::text))),
+    CONSTRAINT evidence_eligibility_shape CHECK (((eligible_for_mastery AND (judgment_kind = 'scored'::text) AND (ineligibility_reason IS NULL) AND (fsrs_rating IS NOT NULL)) OR ((eligible_for_mastery = false) AND (ineligibility_reason IS NOT NULL) AND (fsrs_rating IS NULL)))),
+    CONSTRAINT evidence_fsrs_rating_closed CHECK (((fsrs_rating IS NULL) OR (fsrs_rating = ANY (ARRAY[1, 3])))),
+    CONSTRAINT evidence_grading_method_closed CHECK ((grading_method = ANY (ARRAY['llm_short_answer'::text, 'keyed_mc'::text]))),
+    CONSTRAINT evidence_grading_method_shape CHECK ((((grading_method = 'llm_short_answer'::text) AND ((judgment_kind = 'unanswerable'::text) OR (grader_confidence IS NOT NULL))) OR ((grading_method = 'keyed_mc'::text) AND (judgment_kind = 'scored'::text) AND (grader_confidence IS NULL)))),
+    CONSTRAINT evidence_ineligibility_reason_closed CHECK (((ineligibility_reason IS NULL) OR (ineligibility_reason = ANY (ARRAY['attempt_abstained'::text, 'below_threshold'::text, 'legacy_unversioned'::text, 'policy_ineligible'::text, 'semantic_unanswerable'::text, 'superseded'::text])))),
+    CONSTRAINT evidence_judgment_kind_closed CHECK ((judgment_kind = ANY (ARRAY['scored'::text, 'unanswerable'::text]))),
+    CONSTRAINT evidence_judgment_shape CHECK ((((judgment_kind = 'scored'::text) AND (score IS NOT NULL) AND (rubric_band IS NOT NULL)) OR ((judgment_kind = 'unanswerable'::text) AND (score IS NULL) AND (rubric_band IS NULL) AND (grader_confidence IS NULL) AND (eligible_for_mastery = false) AND (fsrs_rating IS NULL)))),
+    CONSTRAINT evidence_rubric_band_closed CHECK (((rubric_band IS NULL) OR (rubric_band = ANY (ARRAY['incorrect'::text, 'partially_correct'::text, 'correct'::text]))))
 );
 
 ALTER TABLE ONLY public.attempt_concept_evidence FORCE ROW LEVEL SECURITY;
@@ -789,12 +822,22 @@ CREATE TABLE public.knowledge_state (
     concept_id uuid NOT NULL,
     mastery numeric(6,5) NOT NULL,
     confidence numeric(6,5) NOT NULL,
-    half_life interval NOT NULL,
+    half_life interval,
     last_reviewed_at timestamp with time zone,
     review_count integer DEFAULT 0 NOT NULL,
     algorithm_version text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    alpha_quanta bigint NOT NULL,
+    beta_quanta bigint NOT NULL,
+    evidence_count integer NOT NULL,
+    assessment_status text NOT NULL,
+    knowledge_configuration_id text NOT NULL,
+    CONSTRAINT knowledge_state_alpha_quanta_check CHECK ((alpha_quanta >= 100000)),
+    CONSTRAINT knowledge_state_assessment_status_check CHECK ((assessment_status = ANY (ARRAY['unassessed'::text, 'assessed'::text]))),
+    CONSTRAINT knowledge_state_beta_quanta_check CHECK ((beta_quanta >= 300000)),
     CONSTRAINT knowledge_state_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
+    CONSTRAINT knowledge_state_evidence_count_check CHECK ((evidence_count >= 0)),
+    CONSTRAINT knowledge_state_exact_shape CHECK ((((evidence_count = 0) AND (assessment_status = 'unassessed'::text) AND (alpha_quanta = 100000) AND (beta_quanta = 300000) AND (mastery = 0.25000) AND (confidence = 0.00000) AND (last_reviewed_at IS NULL) AND (review_count = 0)) OR ((evidence_count > 0) AND (assessment_status = 'assessed'::text) AND (last_reviewed_at IS NOT NULL) AND (review_count = evidence_count)))),
     CONSTRAINT knowledge_state_half_life_check CHECK ((half_life > '00:00:00'::interval)),
     CONSTRAINT knowledge_state_mastery_check CHECK (((mastery >= (0)::numeric) AND (mastery <= (1)::numeric))),
     CONSTRAINT knowledge_state_review_count_check CHECK ((review_count >= 0))
@@ -814,10 +857,17 @@ CREATE TABLE public.learning_event (
     session_id uuid,
     delivery_id uuid,
     event_type text NOT NULL,
-    idempotency_key text,
+    idempotency_key text NOT NULL,
     payload jsonb NOT NULL,
     occurred_at timestamp with time zone NOT NULL,
-    recorded_at timestamp with time zone DEFAULT now() NOT NULL
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    event_version integer NOT NULL,
+    producer text NOT NULL,
+    correlation_id uuid NOT NULL,
+    causation_id uuid,
+    attempt_id uuid,
+    CONSTRAINT learning_event_event_version_check CHECK ((event_version > 0)),
+    CONSTRAINT learning_event_type_v1_closed CHECK ((event_type = ANY (ARRAY['assessment_graded'::text, 'assessment_submitted'::text, 'course_opened'::text, 'delivery_received'::text, 'lesson_abandoned'::text, 'lesson_completed'::text, 'lesson_started'::text, 'question_asked'::text, 'question_presented'::text, 'reteach_served'::text, 'review_rescheduled'::text, 'review_scheduled'::text, 'session_abandoned'::text, 'session_completed'::text, 'session_started'::text])))
 );
 
 ALTER TABLE ONLY public.learning_event FORCE ROW LEVEL SECURITY;
@@ -2211,10 +2261,31 @@ CREATE TRIGGER async_operation_terminal_is_final BEFORE UPDATE ON public.async_o
 
 
 --
+-- Name: attempt_concept_evidence attempt_concept_evidence_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER attempt_concept_evidence_is_append_only BEFORE DELETE OR UPDATE ON public.attempt_concept_evidence FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
 -- Name: inbox_claim inbox_claim_terminal_is_final; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER inbox_claim_terminal_is_final BEFORE UPDATE ON public.inbox_claim FOR EACH ROW EXECUTE FUNCTION public.reflo_preserve_terminal_row();
+
+
+--
+-- Name: learning_event_concept learning_event_concept_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER learning_event_concept_is_append_only BEFORE DELETE OR UPDATE ON public.learning_event_concept FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: learning_event learning_event_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER learning_event_is_append_only BEFORE DELETE OR UPDATE ON public.learning_event FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
 
 
 --
@@ -2584,6 +2655,14 @@ ALTER TABLE ONLY public.delivery_item
 
 
 --
+-- Name: attempt_concept_evidence evidence_replacement_attempt_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt_concept_evidence
+    ADD CONSTRAINT evidence_replacement_attempt_scope_fk FOREIGN KEY (owner_scope_id, replacement_for_attempt_id) REFERENCES public.attempt(owner_scope_id, id);
+
+
+--
 -- Name: inbox_claim inbox_claim_owner_scope_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2629,6 +2708,14 @@ ALTER TABLE ONLY public.knowledge_state
 
 ALTER TABLE ONLY public.knowledge_state
     ADD CONSTRAINT knowledge_state_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: learning_event learning_event_attempt_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.learning_event
+    ADD CONSTRAINT learning_event_attempt_scope_fk FOREIGN KEY (owner_scope_id, attempt_id) REFERENCES public.attempt(owner_scope_id, id);
 
 
 --
@@ -3411,4 +3498,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260721000200'),
     ('20260721000300'),
     ('20260721000400'),
-    ('20260721000500');
+    ('20260721000500'),
+    ('20260723000100');

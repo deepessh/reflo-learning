@@ -1,6 +1,7 @@
 import { readServerEnvironment } from "@reflo/config";
 
 import { createAccountRuntime } from "./account-composition.js";
+import { createDeliveryRuntime } from "./delivery-composition.js";
 import { createApiServer } from "./server.js";
 
 const environment = readServerEnvironment(process.env, {
@@ -14,8 +15,13 @@ const accountRuntime = createAccountRuntime(
   process.env,
   environment.deployment,
 );
+const deliveryRuntime = createDeliveryRuntime(
+  process.env,
+  environment.deployment,
+);
 const server = createApiServer(environment, {
   accounts: accountRuntime.accounts,
+  delivery: deliveryRuntime.delivery,
 });
 
 server.listen(environment.port, environment.host, () => {
@@ -28,6 +34,9 @@ function shutdown(signal: NodeJS.Signals) {
   console.info(`Reflo API received ${signal}; shutting down`);
   server.close(async (error) => {
     await accountRuntime.close().catch(() => {
+      process.exitCode = 1;
+    });
+    await deliveryRuntime.close().catch(() => {
       process.exitCode = 1;
     });
     if (error) {

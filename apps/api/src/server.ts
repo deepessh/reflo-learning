@@ -12,6 +12,11 @@ import {
 } from "@reflo/accounts";
 import type { ServerEnvironment } from "@reflo/config";
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from "@reflo/contracts";
+import {
+  DeliveryError,
+  type DemoDeliveryService,
+  type DemoDeliveryProvider,
+} from "@reflo/delivery";
 import { TutorAgentError, type TutorAgentService } from "@reflo/tutor-agent";
 
 const SESSION_COOKIE = "__Host-reflo_session";
@@ -19,6 +24,10 @@ const CSRF_COOKIE = "__Host-reflo_csrf";
 
 export interface ApiDependencies {
   readonly accounts?: AccountService;
+  readonly delivery?: Pick<
+    DemoDeliveryService,
+    "dispatch" | "handleTelegramWebhook" | "previewEmail" | "submitEmail"
+  >;
   readonly tutorAgent?: Pick<TutorAgentService, "ask" | "nextAction">;
 }
 
@@ -39,6 +48,39 @@ export function createApiServer(
         "content-type": "application/json; charset=utf-8",
       });
       response.end(JSON.stringify(body));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/v1/webhooks/telegram") {
+      const delivery = dependencies.delivery;
+      if (delivery === undefined) {
+        sendJson(response, 503, { error: "service_unavailable" });
+        return;
+      }
+      try {
+        const results = await delivery.handleTelegramWebhook(
+          await readRawBody(request),
+          singleHeader(request.headers["x-telegram-bot-api-secret-token"]),
+        );
+        sendJson(response, 200, { accepted: true, results });
+      } catch (error) {
+        if (error instanceof DeliveryError) {
+          sendJson(response, deliveryErrorStatus(error), {
+            error: error.code,
+          });
+        } else if (error instanceof JsonBodyError) {
+          sendJson(response, 400, { error: "invalid_request" });
+        } else {
+          sendJson(response, 503, { error: "service_unavailable" });
+        }
+      }
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/v1/webhooks/email") {
+      request.resume();
+      response.writeHead(204);
+      response.end();
       return;
     }
 
@@ -121,6 +163,25 @@ export function createApiServer(
             });
             return;
           }
+          if (request.method === "GET" && url.pathname === "/v1/csrf-token") {
+            if (origin !== undefined && !accounts.isTrustedOrigin(origin)) {
+              sendJson(response, 403, { error: "origin_not_allowed" });
+              return;
+            }
+            const csrfToken = cookies.get(CSRF_COOKIE);
+            if (
+              csrfToken === undefined ||
+              !accounts.verifyCsrf(sessionSecret, csrfToken, csrfToken)
+            ) {
+              sendJson(response, 403, { error: "csrf_rejected" });
+              return;
+            }
+            if (origin !== undefined) {
+              writeCors(response, origin);
+            }
+            sendJson(response, 200, { csrfToken });
+            return;
+          }
           if (request.method === "GET" && url.pathname === "/v1/library") {
             if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
               writeCors(response, origin);
@@ -139,6 +200,31 @@ export function createApiServer(
             }
             sendJson(response, 200, {
               sessions: await accounts.listSessionHistory(account),
+            });
+            return;
+          }
+          if (
+            request.method === "GET" &&
+            url.pathname === "/v1/demo/email-quiz"
+          ) {
+            const delivery = dependencies.delivery;
+            if (delivery === undefined) {
+              sendJson(response, 503, { error: "service_unavailable" });
+              return;
+            }
+            const token = url.searchParams.get("token");
+            if (token === null) {
+              throw new JsonBodyError();
+            }
+            if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+              writeCors(response, origin);
+            }
+            sendJson(response, 200, {
+              quiz: await delivery.previewEmail(
+                deliveryAuthorization(account),
+                token,
+                new Date().toISOString(),
+              ),
             });
             return;
           }
@@ -189,6 +275,41 @@ export function createApiServer(
               response.end(JSON.stringify({ accepted: true }));
               return;
             }
+            if (url.pathname === "/v1/demo/deliveries/dispatch") {
+              const delivery = dependencies.delivery;
+              if (delivery === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const body = await readJsonBody(request);
+              const provider = deliveryProvider(body, "provider");
+              const result = await delivery.dispatch({
+                authorization: deliveryAuthorization(account),
+                idempotencyKey: stringField(body, "idempotencyKey"),
+                now: new Date().toISOString(),
+                provider,
+              });
+              writeCors(response, origin!);
+              sendJson(response, 200, { result });
+              return;
+            }
+            if (url.pathname === "/v1/demo/email-quiz/submit") {
+              const delivery = dependencies.delivery;
+              if (delivery === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const body = await readJsonBody(request);
+              const results = await delivery.submitEmail(
+                deliveryAuthorization(account),
+                stringField(body, "token"),
+                answerFields(body, "answers"),
+                new Date().toISOString(),
+              );
+              writeCors(response, origin!);
+              sendJson(response, 200, { results });
+              return;
+            }
             const nextActionSessionId = studySessionRoute(url.pathname, "next");
             if (nextActionSessionId !== null) {
               const tutorAgent = dependencies.tutorAgent;
@@ -237,6 +358,12 @@ export function createApiServer(
           }
         }
       } catch (error) {
+        if (error instanceof DeliveryError) {
+          sendJson(response, deliveryErrorStatus(error), {
+            error: error.code,
+          });
+          return;
+        }
         if (error instanceof TutorAgentError) {
           if (
             error.code === "authorization_denied" ||
@@ -298,18 +425,9 @@ function writeCors(response: ServerResponse, origin: string): void {
 async function readJsonBody(
   request: IncomingMessage,
 ): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    length += buffer.length;
-    if (length > 16_384) {
-      throw new JsonBodyError();
-    }
-    chunks.push(buffer);
-  }
+  const raw = await readRawBody(request);
   try {
-    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const value: unknown = JSON.parse(raw);
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       throw new JsonBodyError();
     }
@@ -322,12 +440,95 @@ async function readJsonBody(
   }
 }
 
+async function readRawBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > 16_384) {
+      throw new JsonBodyError();
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function stringField(body: Record<string, unknown>, name: string): string {
   const value = body[name];
   if (typeof value !== "string") {
     throw new JsonBodyError();
   }
   return value;
+}
+
+function deliveryProvider(
+  body: Record<string, unknown>,
+  name: string,
+): DemoDeliveryProvider {
+  const value = stringField(body, name);
+  if (value !== "email" && value !== "telegram") {
+    throw new JsonBodyError();
+  }
+  return value;
+}
+
+function answerFields(
+  body: Record<string, unknown>,
+  name: string,
+): readonly { readonly answer: string; readonly deliveryItemId: string }[] {
+  const value = body[name];
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > 3 ||
+    value.some(
+      (answer) =>
+        answer === null ||
+        typeof answer !== "object" ||
+        Array.isArray(answer) ||
+        typeof (answer as Record<string, unknown>).answer !== "string" ||
+        typeof (answer as Record<string, unknown>).deliveryItemId !== "string",
+    )
+  ) {
+    throw new JsonBodyError();
+  }
+  return value as {
+    readonly answer: string;
+    readonly deliveryItemId: string;
+  }[];
+}
+
+function deliveryAuthorization(account: {
+  readonly ownerScopeId: string;
+  readonly sessionId: string;
+  readonly userId: string;
+}) {
+  return {
+    actorId: account.userId,
+    authorizationId: account.sessionId,
+    ownerScopeId: account.ownerScopeId,
+  };
+}
+
+function deliveryErrorStatus(error: DeliveryError): number {
+  switch (error.code) {
+    case "invalid_signature":
+      return 401;
+    case "authorization_denied":
+    case "not_found":
+      return 404;
+    case "delivery_expired":
+    case "link_redeemed":
+      return 410;
+    case "conflicting_duplicate":
+    case "invalid_input":
+      return 400;
+    case "dispatch_ambiguous":
+    case "dispatch_failed":
+    case "invalid_configuration":
+      return 503;
+  }
 }
 
 function studySessionRoute(

@@ -483,31 +483,44 @@ test(
           const channel = "00000000-0000-4000-8000-000000000501";
           await client.query(
             `INSERT INTO channel_identity
-             (id, owner_scope_id, user_id, provider, encrypted_external_id, external_id_lookup_digest, verified_at)
-           VALUES ($1, $2, $3, 'telegram', decode('aa', 'hex'), decode('bb', 'hex'), now())`,
+             (id, owner_scope_id, user_id, provider, encrypted_external_id,
+              external_id_lookup_digest, verified_at, identity_class)
+           VALUES ($1, $2, $3, 'telegram', decode('aa', 'hex'),
+                   decode('bb', 'hex'), now(), 'demo_staff')`,
             [channel, ids.scopeA, ids.userA],
           );
           await client.query(
             `INSERT INTO quiz_delivery
-             (id, owner_scope_id, channel_identity_id, provider, provider_message_id, idempotency_key, status, expires_at)
-           VALUES ('00000000-0000-4000-8000-000000000511', $1, $2, 'telegram', 'provider-1', 'dev/delivery/v1/a', 'submitted', now() + interval '1 day')`,
-            [ids.scopeA, channel],
+             (id, owner_scope_id, channel_identity_id, provider,
+              provider_message_id, idempotency_key, request_digest,
+              status, expires_at)
+           VALUES ('00000000-0000-4000-8000-000000000511', $1, $2,
+                   'telegram', 'provider-1', 'dev/delivery/v1/a', $3,
+                   'submitted', now() + interval '1 day')`,
+            [ids.scopeA, channel, "a".repeat(64)],
           );
           await expectSqlState(
             client,
             "23505",
             `INSERT INTO quiz_delivery
-             (id, owner_scope_id, channel_identity_id, provider, provider_message_id, status, expires_at)
-           VALUES ('00000000-0000-4000-8000-000000000512', $1, $2, 'telegram', 'provider-1', 'submitted', now() + interval '1 day')`,
-            [ids.scopeA, channel],
+             (id, owner_scope_id, channel_identity_id, provider,
+              provider_message_id, idempotency_key, request_digest,
+              status, expires_at)
+           VALUES ('00000000-0000-4000-8000-000000000512', $1, $2,
+                   'telegram', 'provider-1', 'dev/delivery/v1/b', $3,
+                   'submitted', now() + interval '1 day')`,
+            [ids.scopeA, channel, "b".repeat(64)],
           );
           await expectSqlState(
             client,
             "23505",
             `INSERT INTO quiz_delivery
-             (id, owner_scope_id, channel_identity_id, provider, idempotency_key, status, expires_at)
-           VALUES ('00000000-0000-4000-8000-000000000513', $1, $2, 'telegram', 'dev/delivery/v1/a', 'pending', now() + interval '1 day')`,
-            [ids.scopeA, channel],
+             (id, owner_scope_id, channel_identity_id, provider,
+              idempotency_key, request_digest, status, expires_at)
+           VALUES ('00000000-0000-4000-8000-000000000513', $1, $2,
+                   'telegram', 'dev/delivery/v1/a', $3, 'pending',
+                   now() + interval '1 day')`,
+            [ids.scopeA, channel, "c".repeat(64)],
           );
         },
       );

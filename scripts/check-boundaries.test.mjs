@@ -214,17 +214,29 @@ test("rejects transactional email provider SDK imports from domain code", () => 
     );
     assert.match(
       checkBoundaries(root)[0],
-      /transactional email provider SDK @alicloud\/dm20151123 is only allowed in packages\/accounts\/src\/adapters/,
+      /transactional email provider SDK @alicloud\/dm20151123 is only allowed in approved email adapter modules/,
     );
   });
 });
 
-test("allows transactional email SDKs only inside account adapter modules", () => {
+test("allows transactional email SDKs only inside approved adapter modules", () => {
   withFixture((root) => {
-    const adapterDirectory = path.join(root, "packages/accounts/src/adapters");
-    mkdirSync(adapterDirectory, { recursive: true });
+    const accountAdapterDirectory = path.join(
+      root,
+      "packages/accounts/src/adapters",
+    );
+    const deliveryAdapterDirectory = path.join(
+      root,
+      "packages/delivery/src/adapters",
+    );
+    mkdirSync(accountAdapterDirectory, { recursive: true });
+    mkdirSync(deliveryAdapterDirectory, { recursive: true });
     writeFileSync(
-      path.join(adapterDirectory, "directmail.ts"),
+      path.join(accountAdapterDirectory, "directmail.ts"),
+      'import "@alicloud/credentials";\nimport "@alicloud/dm20151123";\n',
+    );
+    writeFileSync(
+      path.join(deliveryAdapterDirectory, "directmail.ts"),
       'import "@alicloud/credentials";\nimport "@alicloud/dm20151123";\n',
     );
     assert.deepEqual(checkBoundaries(root), []);

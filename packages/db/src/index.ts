@@ -15,6 +15,7 @@ export { PostgresActivationRepository } from "./activation-repository.js";
 export { PostgresAudioGenerationRepository } from "./audio-generation-repository.js";
 export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generation-repository.js";
 export { PostgresAssessmentRepository } from "./assessment-repository.js";
+export { PostgresDemoDeliveryRepository } from "./delivery-repository.js";
 export { PostgresTutorAgentRepository } from "./tutor-agent-repository.js";
 export { PostgresGateAttestationIndex } from "./gate-attestation-index.js";
 export {

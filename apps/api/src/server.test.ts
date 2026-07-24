@@ -128,6 +128,21 @@ describe("auth, library, and session-history API", () => {
     expect(await historyResponse.json()).toMatchObject({
       sessions: [{ status: "completed", courseId: "course-a" }],
     });
+
+    const csrfResponse = await fetch(`${baseUrl}/v1/csrf-token`, {
+      headers: { cookie, origin: "https://app.reflo.example" },
+    });
+    expect(csrfResponse.status).toBe(200);
+    expect(await csrfResponse.json()).toEqual({
+      csrfToken: setCookies[1]!.split("=", 2)[1]!.split(";", 1)[0],
+    });
+    expect(
+      (
+        await fetch(`${baseUrl}/v1/csrf-token`, {
+          headers: { cookie, origin: "https://attacker.example" },
+        })
+      ).status,
+    ).toBe(403);
   });
 
   it("serves an owner-authorized readiness-safe course progress projection", async () => {
@@ -221,6 +236,119 @@ describe("auth, library, and session-history API", () => {
         )
       ).status,
     ).toBe(404);
+  });
+
+  it("serves authenticated demo delivery paths and ignores email replies", async () => {
+    const fixture = createAccountFixture();
+    const deliveryItemId = "40000000-0000-4000-8000-000000000043";
+    const delivery = {
+      dispatch: vi.fn().mockResolvedValue({
+        delivery: {
+          deliveryId: "30000000-0000-4000-8000-000000000043",
+          expiresAt: "2026-07-25T12:00:00.000Z",
+          items: [],
+          provider: "email",
+          providerMessageId: "message-43",
+          status: "submitted",
+        },
+        status: "created",
+      }),
+      handleTelegramWebhook: vi.fn().mockResolvedValue([]),
+      previewEmail: vi.fn().mockResolvedValue({
+        deliveryId: "30000000-0000-4000-8000-000000000043",
+        demoOnly: true,
+        expiresAt: "2026-07-25T12:00:00.000Z",
+        questions: [],
+      }),
+      submitEmail: vi.fn().mockResolvedValue([
+        {
+          attemptId: "70000000-0000-4000-8000-000000000043",
+          correct: true,
+          status: "created",
+          streak: { current: 2, longest: 4 },
+        },
+      ]),
+    };
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      delivery,
+    );
+    const cookie = await login(baseUrl, fixture.email);
+
+    const dispatch = await fetch(`${baseUrl}/v1/demo/deliveries/dispatch`, {
+      body: JSON.stringify({
+        idempotencyKey: "api/demo-delivery/v1/43",
+        provider: "email",
+      }),
+      headers: {
+        "content-type": "application/json",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+      },
+      method: "POST",
+    });
+    expect(dispatch.status).toBe(200);
+    expect(delivery.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: expect.objectContaining({
+          ownerScopeId: expect.any(String),
+        }),
+        provider: "email",
+      }),
+    );
+
+    const preview = await fetch(
+      `${baseUrl}/v1/demo/email-quiz?token=signed-token`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).quiz.demoOnly).toBe(true);
+
+    const submission = await fetch(`${baseUrl}/v1/demo/email-quiz/submit`, {
+      body: JSON.stringify({
+        answers: [{ answer: "B", deliveryItemId }],
+        token: "signed-token",
+      }),
+      headers: {
+        "content-type": "application/json",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+      },
+      method: "POST",
+    });
+    expect(submission.status).toBe(200);
+    expect(delivery.submitEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+      "signed-token",
+      [{ answer: "B", deliveryItemId }],
+      expect.stringMatching(/Z$/),
+    );
+
+    const telegram = await fetch(`${baseUrl}/v1/webhooks/telegram`, {
+      body: "{}",
+      headers: { "x-telegram-bot-api-secret-token": "telegram-secret" },
+      method: "POST",
+    });
+    expect(telegram.status).toBe(200);
+    expect(delivery.handleTelegramWebhook).toHaveBeenCalledWith(
+      "{}",
+      "telegram-secret",
+    );
+
+    const reply = await fetch(`${baseUrl}/v1/webhooks/email`, {
+      body: "free-form reply that must never be parsed",
+      method: "POST",
+    });
+    expect(reply.status).toBe(204);
+    expect(delivery.submitEmail).toHaveBeenCalledTimes(1);
   });
 
   it("rejects unauthenticated and forged-CSRF access and revokes on logout", async () => {
@@ -389,6 +517,7 @@ function createAccountFixture() {
 async function startAccountServer(
   service: AccountService,
   tutorAgent?: Parameters<typeof createApiServer>[1]["tutorAgent"],
+  delivery?: Parameters<typeof createApiServer>[1]["delivery"],
 ) {
   const server = createApiServer(
     {
@@ -399,6 +528,7 @@ async function startAccountServer(
     },
     {
       accounts: service,
+      ...(delivery === undefined ? {} : { delivery }),
       ...(tutorAgent === undefined ? {} : { tutorAgent }),
     },
   );

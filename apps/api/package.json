@@ -20,6 +20,7 @@
     "@reflo/config": "workspace:*",
     "@reflo/contracts": "workspace:*",
     "@reflo/db": "workspace:*",
+    "@reflo/delivery": "workspace:*",
     "@reflo/tutor-agent": "workspace:*"
   },
   "devDependencies": {

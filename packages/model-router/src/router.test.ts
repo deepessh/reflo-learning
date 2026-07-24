@@ -70,6 +70,7 @@ describe("typed model router", () => {
     expect(Object.isFrozen(scripted.invocations[0]?.input)).toBe(false);
     expect(traces.traces).toHaveLength(1);
     expect(traces.traces[0]?.attempts).toHaveLength(1);
+    expect(traces.traces[0]?.promptVersion).toBe("1");
   });
 
   it("retries one normalized transient language failure without tracing diagnostics", async () => {
@@ -630,6 +631,47 @@ describe("trace allowlist", () => {
           [field]: "secret",
         } as never),
       ).toThrow("non-allowlisted fields");
+    }
+  });
+
+  it("rejects unbounded or content-shaped values in allowlisted fields", () => {
+    for (const trace of [
+      {
+        attempts: [],
+        callId: "learner@example.com",
+        durationMs: 1,
+        finishedAt: "2026-07-19T00:00:00.001Z",
+        outcome: "success",
+        routePolicyVersion: "route-policy-v3",
+        startedAt: "2026-07-19T00:00:00.000Z",
+        task: "curriculum.structure.v1",
+      },
+      {
+        attempts: [
+          {
+            adapterVersion: "source passage with spaces",
+            attempt: 1,
+            durationMs: 1,
+            effectiveModel: "qwen-plus",
+            effectiveModelVersion: "1",
+            outcome: "success",
+            requestedSelector: "qwen.structured",
+            startedAt: "2026-07-19T00:00:00.000Z",
+            validationStatus: "passed",
+          },
+        ],
+        callId: "call-1",
+        durationMs: 1,
+        finishedAt: "2026-07-19T00:00:00.001Z",
+        outcome: "success",
+        routePolicyVersion: "route-policy-v3",
+        startedAt: "2026-07-19T00:00:00.000Z",
+        task: "curriculum.structure.v1",
+      },
+    ]) {
+      expect(() => assertSafeTraceEnvelope(trace as never)).toThrow(
+        "unsafe field values",
+      );
     }
   });
 });

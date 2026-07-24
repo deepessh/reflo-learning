@@ -18,6 +18,11 @@ import {
   PostgresDemoDeliveryRepository,
   PostgresKnowledgeRepository,
 } from "@reflo/db";
+import {
+  createDemoTraceRuntime,
+  type DemoOperationName,
+  type DemoTraceRuntime,
+} from "@reflo/observability";
 
 const DELIVERY_MODE = "staff-only-demo-v1";
 const DIRECTMAIL_ELIGIBILITY = "approved-free-quota-v1";
@@ -31,7 +36,10 @@ const DIRECTMAIL_REGIONS = new Set<DemoDirectMailRegion>([
 ]);
 
 export interface DeliveryRuntime {
-  readonly delivery?: DemoDeliveryService;
+  readonly delivery?: Pick<
+    DemoDeliveryService,
+    "dispatch" | "handleTelegramWebhook" | "previewEmail" | "submitEmail"
+  >;
   close(): Promise<void>;
 }
 
@@ -125,8 +133,12 @@ export function createDeliveryRuntime(
     messagePorts: [telegramPort, emailPort],
     repository,
   });
+  const tracing = createDemoTraceRuntime(input, {
+    component: "api",
+    deployment,
+  });
   return {
-    delivery,
+    delivery: instrumentDemoDelivery(delivery, tracing),
     close: async () => {
       await Promise.all([
         repository.close(),
@@ -135,6 +147,109 @@ export function createDeliveryRuntime(
       ]);
     },
   };
+}
+
+export function instrumentDemoDelivery(
+  delivery: Pick<
+    DemoDeliveryService,
+    "dispatch" | "handleTelegramWebhook" | "previewEmail" | "submitEmail"
+  >,
+  tracing: DemoTraceRuntime,
+): NonNullable<DeliveryRuntime["delivery"]> {
+  return {
+    dispatch: (command) =>
+      traced(tracing, "test_delivery_dispatch", async () => {
+        const result = await delivery.dispatch(command);
+        return {
+          outcome:
+            result?.status === "replayed" ? ("replayed" as const) : "success",
+          value: result,
+        };
+      }),
+    handleTelegramWebhook: (rawBody, secretToken) =>
+      traced(tracing, "test_delivery_response", async () => {
+        const value = await delivery.handleTelegramWebhook(
+          rawBody,
+          secretToken,
+        );
+        return {
+          outcome: replayOutcome(value.map((result) => result.status)),
+          value,
+        };
+      }),
+    previewEmail: (authorization, token, now) =>
+      delivery.previewEmail(authorization, token, now),
+    submitEmail: (authorization, token, answers, now) =>
+      traced(tracing, "test_delivery_response", async () => {
+        const value = await delivery.submitEmail(
+          authorization,
+          token,
+          answers,
+          now,
+        );
+        return {
+          outcome: replayOutcome(value.map((result) => result.status)),
+          value,
+        };
+      }),
+  };
+}
+
+async function traced<Value>(
+  tracing: DemoTraceRuntime,
+  operation: DemoOperationName,
+  work: () => Promise<{
+    readonly outcome: "replayed" | "success";
+    readonly value: Value;
+  }>,
+): Promise<Value> {
+  const started = Date.now();
+  const startedAt = new Date(started).toISOString();
+  try {
+    const result = await work();
+    const finished = Date.now();
+    await recordOperationalBestEffort(tracing, {
+      durationMs: Math.max(0, finished - started),
+      finishedAt: new Date(finished).toISOString(),
+      operation,
+      outcome: result.outcome,
+      stage: "test_delivery",
+      startedAt,
+    });
+    return result.value;
+  } catch (error) {
+    const finished = Date.now();
+    await recordOperationalBestEffort(tracing, {
+      durationMs: Math.max(0, finished - started),
+      finishedAt: new Date(finished).toISOString(),
+      operation,
+      outcome: "failure",
+      stage: "test_delivery",
+      startedAt,
+    });
+    throw error;
+  }
+}
+
+async function recordOperationalBestEffort(
+  tracing: DemoTraceRuntime,
+  trace: Parameters<DemoTraceRuntime["recordOperational"]>[0],
+): Promise<void> {
+  try {
+    await tracing.recordOperational(trace);
+  } catch {
+    // The bounded event was validated before transport. SLS availability does
+    // not reinterpret an already committed delivery outcome.
+  }
+}
+
+function replayOutcome(
+  statuses: readonly ("created" | "replayed")[],
+): "replayed" | "success" {
+  return statuses.length > 0 &&
+    statuses.every((status) => status === "replayed")
+    ? "replayed"
+    : "success";
 }
 
 class CapacityGuardedEmailPort implements DemoMessagePort {

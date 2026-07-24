@@ -43,6 +43,11 @@ import {
   createPiperTtsAdapter,
 } from "@reflo/model-router/tts";
 import {
+  createCompositeModelTraceSink,
+  createDemoTraceRuntime,
+  type DemoTraceRuntime,
+} from "@reflo/observability";
+import {
   DevelopmentPgVectorStore,
   RetrievalService,
   sha256,
@@ -125,6 +130,10 @@ async function runSmoke(
   const fixtureSha256 = digest(fixtureBytes);
   const components: ComponentResult[] = [];
   const traces = new BoundedTraceSink();
+  const externalTracing = createDemoTraceRuntime(process.env, {
+    component: "dev-smoke",
+    deployment: "dev",
+  });
   const objects = new LocalSmokeObjectStore(configuration.artifactRoot);
   const smokeRepository = new PostgresDevelopmentSmokeRepository({
     connectionString: configuration.databaseUrl,
@@ -204,12 +213,36 @@ async function runSmoke(
         path.join(configuration.scratchRoot, "ingestion"),
       ),
     });
-    const ingestionResult = await ingestion.execute({
-      expectedInputSha256: fixtureSha256,
-      operationId: IDS.ingestionOperation,
-      ownerScopeId: IDS.scope,
-      sourceDocumentId: IDS.source,
-    });
+    const ingestionStarted = Date.now();
+    const ingestionStartedAt = new Date(ingestionStarted).toISOString();
+    let ingestionResult: Awaited<ReturnType<IngestionSupervisor["execute"]>>;
+    try {
+      ingestionResult = await ingestion.execute({
+        expectedInputSha256: fixtureSha256,
+        operationId: IDS.ingestionOperation,
+        ownerScopeId: IDS.scope,
+        sourceDocumentId: IDS.source,
+      });
+    } catch (error) {
+      await recordSmokeOperationalBestEffort(
+        externalTracing,
+        ingestionStarted,
+        ingestionStartedAt,
+        "failure",
+      );
+      throw error;
+    }
+    await recordSmokeOperationalBestEffort(
+      externalTracing,
+      ingestionStarted,
+      ingestionStartedAt,
+      ingestionResult.kind === "completed" &&
+        ingestionResult.outcome.kind === "parsed"
+        ? ingestionAtStart === null
+          ? "success"
+          : "replayed"
+        : "failure",
+    );
     if (
       ingestionResult.kind !== "completed" ||
       ingestionResult.outcome.kind !== "parsed"
@@ -252,7 +285,10 @@ async function runSmoke(
         key === "p1.media.video" &&
         configuration.videoEnabled &&
         context.videoOperationKind === "chapter_explainer",
-      traceSink: traces,
+      traceSink: createCompositeModelTraceSink([
+        traces,
+        externalTracing.modelTraces,
+      ]),
     });
     const vectors = new DevelopmentPgVectorStore(
       vectorPool,
@@ -797,6 +833,28 @@ class BoundedTraceSink implements ModelTraceSink {
       throw new Error("local smoke trace bound exceeded");
     }
     this.traces.push(trace);
+  }
+}
+
+async function recordSmokeOperationalBestEffort(
+  tracing: DemoTraceRuntime,
+  started: number,
+  startedAt: string,
+  outcome: "failure" | "replayed" | "success",
+): Promise<void> {
+  const finished = Date.now();
+  try {
+    await tracing.recordOperational({
+      durationMs: Math.max(0, finished - started),
+      finishedAt: new Date(finished).toISOString(),
+      operation: "document_ingestion",
+      outcome,
+      stage: "ingestion",
+      startedAt,
+    });
+  } catch {
+    // The connected smoke result remains authoritative when the demo-only
+    // operational sink is unavailable.
   }
 }
 

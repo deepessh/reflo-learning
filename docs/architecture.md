@@ -48,6 +48,7 @@ Detailed rules live in the linked records.
 | [ADR 0030](adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md) | Versioned grading, abstention, fallback, and FSRS rating contract | `D-GH-17` | ADR |
 | [ADR 0031](adrs/0031-versioned-privacy-lifecycle-and-deletion-control-plane.md) | Versioned privacy lifecycle and deletion control plane | `D-GH-18` | ADR |
 | [ADR 0032](adrs/0032-demo-only-hackathon-scope-and-post-hackathon-pilot-deferral.md) | Demo-only hackathon scope and post-hackathon pilot deferral | `D-GH-21` | ADR |
+| [ADR 0033](adrs/0033-pinned-fsrs6-scheduler-profile-and-deterministic-replay.md) | Pinned FSRS-6 scheduler profile and deterministic replay | `D-GH-152` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -76,7 +77,8 @@ Detailed rules live in the linked records.
   [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md),
   [ADR 0025](adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md),
   [ADR 0031](adrs/0031-versioned-privacy-lifecycle-and-deletion-control-plane.md),
-  and [ADR 0032](adrs/0032-demo-only-hackathon-scope-and-post-hackathon-pilot-deferral.md).
+  [ADR 0032](adrs/0032-demo-only-hackathon-scope-and-post-hackathon-pilot-deferral.md),
+  and [ADR 0033](adrs/0033-pinned-fsrs6-scheduler-profile-and-deterministic-replay.md).
 - Decision and contributor governance:
   [ADR 0017](adrs/0017-worktree-based-issue-pickup-and-claim-labels.md),
   [ADR 0018](adrs/0018-reproducible-agent-toolchain-and-required-check-recovery-policy.md),

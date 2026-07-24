@@ -39,7 +39,7 @@ const TEXT_TASKS = {
 
 const TEXT_OUTPUT_CONTRACTS = Object.freeze({
   "assessment.grade-short-answer.v1":
-    '{"evidence":[{"conceptId":string,"confidence":number,"rubricBand":string,"score":number}]}',
+    '{"judgments":[{"conceptId":string,"judgmentKind":"scored","confidence":number,"rubricBand":"incorrect"|"partially_correct"|"correct","score":0|0.5|1}|{"conceptId":string,"judgmentKind":"unanswerable","reason":"source_insufficient"|"source_conflict"|"rubric_insufficient"|"rubric_conflict"}]}',
   "assessment.quiz.v1":
     '{"items":[{"conceptIds":string[],"difficulty":1|2|3|4|5,"itemType":"multiple_choice"|"short_answer"|"concept_linking","keyedAnswer":string,"prompt":string,"sourceSpanIds":string[],"responseOptions"?:string[],"rubric"?:string}]}',
   "curriculum.structure.v1":

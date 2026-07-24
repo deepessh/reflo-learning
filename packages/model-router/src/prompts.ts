@@ -24,6 +24,7 @@ export interface PromptDefinition {
 }
 
 export interface PromptBundle extends PromptDefinition {
+  readonly definitionDigest: string;
   readonly digest: string;
   readonly learnerAnswer?: string;
   readonly sourceMaterial: readonly AuthorizedSourceSpan[];
@@ -52,14 +53,15 @@ const definitions = {
   "assessment.grade-short-answer.v1": definePrompt({
     fixedInstructions: [
       ...COMMON_GROUNDING_INSTRUCTIONS,
-      "Apply only the supplied rubric and return per-concept evidence candidates.",
+      "Apply each supplied versioned per-concept rubric independently and cover every expected concept exactly once.",
+      "Use only the closed incorrect, partially_correct, correct, or semantic unanswerable judgments and their declared shapes.",
     ],
     generationParameters: { temperature: 0 },
-    generationParametersVersion: "grading-generation-parameters-v1",
+    generationParametersVersion: "grading-generation-parameters-v2",
     id: "assessment-grade-short-answer",
-    outputSchemaId: "short-answer-evidence-candidate-v1",
+    outputSchemaId: "short-answer-judgment-result-v2",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "assessment.quiz.v1": definePrompt({
     fixedInstructions: [
@@ -166,6 +168,7 @@ export function buildPromptBundle<Task extends PromptedTaskId>(
   const definition = PROMPT_REGISTRY_V1[task];
   const sourceMaterial = getSourceMaterial(input);
   const learnerAnswer = getLearnerAnswer(input);
+  const definitionDigest = digestValue(definition);
   const digest = digestValue({
     ...definition,
     learnerAnswer,
@@ -174,6 +177,7 @@ export function buildPromptBundle<Task extends PromptedTaskId>(
 
   return deepFreeze({
     ...definition,
+    definitionDigest,
     digest,
     ...(learnerAnswer === undefined ? {} : { learnerAnswer }),
     sourceMaterial,

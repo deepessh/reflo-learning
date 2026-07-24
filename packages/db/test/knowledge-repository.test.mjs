@@ -344,6 +344,7 @@ test(
           judgmentKind: "unanswerable",
           rubricBand: null,
           score: null,
+          unanswerableReason: "source_insufficient",
         },
         deliveryPreference,
       );
@@ -899,6 +900,7 @@ function evidenceBase(attemptIdValue, conceptId) {
     replacementForAttemptId: null,
     rubricId: "rubric-fixture",
     rubricVersion: "1",
+    unanswerableReason: null,
   };
 }
 

@@ -25,20 +25,7 @@ type Validator = (
 export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
   "assessment.grade-short-answer.v1":
     validator<"assessment.grade-short-answer.v1">((value, input) =>
-      isRecordWith(value, {
-        evidence: (evidence) =>
-          Array.isArray(evidence) &&
-          evidence.length > 0 &&
-          evidence.every((entry) =>
-            isRecordWith(entry, {
-              conceptId: (conceptId) =>
-                isString(conceptId) && input.conceptIds.includes(conceptId),
-              confidence: isUnitNumber,
-              rubricBand: isString,
-              score: isUnitNumber,
-            }),
-          ),
-      }),
+      isShortAnswerGradingResult(value, input),
     ),
   "assessment.quiz.v1": validator<"assessment.quiz.v1">((value, input) =>
     isQuizGenerationResult(value, input),
@@ -70,6 +57,71 @@ export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
   ),
   "tutor.answer.v1": validator<"tutor.answer.v1">(isTutorAnswerResult),
 };
+
+function isShortAnswerGradingResult(
+  value: unknown,
+  input: ModelTaskInput<"assessment.grade-short-answer.v1">,
+): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ["judgments"])) {
+    return false;
+  }
+  if (
+    !Array.isArray(value.judgments) ||
+    value.judgments.length !== input.rubrics.length
+  ) {
+    return false;
+  }
+  const expected = new Set(input.rubrics.map((rubric) => rubric.conceptId));
+  const seen = new Set<string>();
+  for (const judgment of value.judgments) {
+    if (
+      !isRecord(judgment) ||
+      typeof judgment.conceptId !== "string" ||
+      !expected.has(judgment.conceptId) ||
+      seen.has(judgment.conceptId)
+    ) {
+      return false;
+    }
+    seen.add(judgment.conceptId);
+    if (judgment.judgmentKind === "scored") {
+      if (
+        !hasExactKeys(judgment, [
+          "conceptId",
+          "confidence",
+          "judgmentKind",
+          "rubricBand",
+          "score",
+        ]) ||
+        !isUnitNumber(judgment.confidence) ||
+        !isBandScorePair(judgment.rubricBand, judgment.score)
+      ) {
+        return false;
+      }
+      continue;
+    }
+    if (
+      judgment.judgmentKind !== "unanswerable" ||
+      !hasExactKeys(judgment, ["conceptId", "judgmentKind", "reason"]) ||
+      ![
+        "source_insufficient",
+        "source_conflict",
+        "rubric_insufficient",
+        "rubric_conflict",
+      ].includes(String(judgment.reason))
+    ) {
+      return false;
+    }
+  }
+  return seen.size === expected.size;
+}
+
+function isBandScorePair(band: unknown, score: unknown): boolean {
+  return (
+    (band === "incorrect" && score === 0) ||
+    (band === "partially_correct" && score === 0.5) ||
+    (band === "correct" && score === 1)
+  );
+}
 
 function validator<Task extends ModelTaskId>(
   validate: (value: unknown, input: ModelTaskInput<Task>) => boolean,

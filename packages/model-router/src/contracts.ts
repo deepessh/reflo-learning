@@ -47,11 +47,19 @@ export interface QuizGenerationInput {
   readonly sourceSpans: readonly AuthorizedSourceSpan[];
 }
 
+export interface ShortAnswerRubricInput {
+  readonly conceptId: string;
+  readonly materialContradictions: readonly string[];
+  readonly requiredCriteria: readonly string[];
+  readonly rubricId: string;
+  readonly rubricVersion: string;
+  readonly sourceSpanIds: readonly string[];
+}
+
 export interface ShortAnswerGradingInput {
   readonly answer: string;
-  readonly conceptIds: readonly string[];
   readonly question: string;
-  readonly rubric: string;
+  readonly rubrics: readonly ShortAnswerRubricInput[];
   readonly sourceSpans: readonly AuthorizedSourceSpan[];
 }
 
@@ -133,13 +141,31 @@ export interface QuizGenerationResult {
   }[];
 }
 
+export type ShortAnswerRubricBand =
+  "incorrect" | "partially_correct" | "correct";
+
+export type ShortAnswerUnanswerableReason =
+  | "source_insufficient"
+  | "source_conflict"
+  | "rubric_insufficient"
+  | "rubric_conflict";
+
+export type ShortAnswerJudgment =
+  | {
+      readonly conceptId: string;
+      readonly confidence: number;
+      readonly judgmentKind: "scored";
+      readonly rubricBand: ShortAnswerRubricBand;
+      readonly score: 0 | 0.5 | 1;
+    }
+  | {
+      readonly conceptId: string;
+      readonly judgmentKind: "unanswerable";
+      readonly reason: ShortAnswerUnanswerableReason;
+    };
+
 export interface ShortAnswerGradingResult {
-  readonly evidence: readonly {
-    readonly conceptId: string;
-    readonly confidence: number;
-    readonly rubricBand: string;
-    readonly score: number;
-  }[];
+  readonly judgments: readonly ShortAnswerJudgment[];
 }
 
 export type TutorAnswerResult =

@@ -2,6 +2,7 @@ import type {
   AuthorizedSourceSpan,
   ModelCallProvenance,
   QuizGenerationResult,
+  ShortAnswerRubricInput,
 } from "@reflo/model-router";
 import type { ScopeAuthorizationContext } from "@reflo/retrieval";
 
@@ -103,10 +104,14 @@ export interface GeneratedTextLesson {
   readonly strategyTag: string;
 }
 
-export type GeneratedQuizItem = QuizGenerationResult["items"][number] & {
+export type GeneratedQuizItem = Omit<
+  QuizGenerationResult["items"][number],
+  "rubric"
+> & {
   readonly id: string;
   readonly itemOrder: number;
   readonly normalizedPromptHash: string;
+  readonly rubric?: readonly ShortAnswerRubricInput[];
 };
 
 export interface GeneratedQuizBank {

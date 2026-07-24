@@ -27,6 +27,7 @@
   "dependencies": {
     "@reflo/accounts": "workspace:*",
     "@reflo/activation": "workspace:*",
+    "@reflo/assessment": "workspace:*",
     "@reflo/audio": "workspace:*",
     "@reflo/evaluation": "workspace:*",
     "@reflo/ingestion": "workspace:*",

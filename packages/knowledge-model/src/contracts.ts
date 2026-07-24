@@ -70,6 +70,11 @@ export interface LearningEventV1 {
 }
 
 export type EvidenceJudgmentKind = "scored" | "unanswerable";
+export type EvidenceUnanswerableReason =
+  | "source_conflict"
+  | "source_insufficient"
+  | "rubric_conflict"
+  | "rubric_insufficient";
 export type EvidenceGradingMethod = "keyed_mc" | "llm_short_answer";
 export type EvidenceRubricBand = "correct" | "incorrect" | "partially_correct";
 export type EvidenceIneligibilityReason =
@@ -99,6 +104,7 @@ export interface AssessmentEvidenceWrite {
   readonly rubricId: string;
   readonly rubricVersion: string;
   readonly score: string | null;
+  readonly unanswerableReason: EvidenceUnanswerableReason | null;
 }
 
 export interface PerConceptEvidence {

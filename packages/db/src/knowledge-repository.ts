@@ -273,9 +273,9 @@ export class PostgresKnowledgeRepository {
             rubric_version, grading_policy_version, rating_mapping_version,
             knowledge_configuration_id, ineligibility_reason, fsrs_rating,
             replacement_for_attempt_id, attempt_created_at, attempt_user_id,
-            attempt_outcome)
+            attempt_outcome, unanswerable_reason)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                 $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                 $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
          ON CONFLICT DO NOTHING
          RETURNING attempt_id`,
         [
@@ -301,6 +301,7 @@ export class PostgresKnowledgeRepository {
           attemptProvenance.created_at_order,
           attemptProvenance.user_id,
           attemptProvenance.outcome,
+          evidence.unanswerableReason,
         ],
       );
       if (inserted.rows[0] === undefined) {
@@ -325,6 +326,7 @@ export class PostgresKnowledgeRepository {
              AND attempt_created_at = $20::timestamptz
              AND attempt_user_id = $21::uuid
              AND attempt_outcome = $22
+             AND unanswerable_reason IS NOT DISTINCT FROM $23
            ) AS matches
            FROM attempt_concept_evidence
            WHERE owner_scope_id = $1 AND attempt_id = $2 AND concept_id = $3`,
@@ -351,6 +353,7 @@ export class PostgresKnowledgeRepository {
             attemptProvenance.created_at_order,
             attemptProvenance.user_id,
             attemptProvenance.outcome,
+            evidence.unanswerableReason,
           ],
         );
         if (same.rows[0]?.matches !== true) {
@@ -1247,12 +1250,14 @@ function validEvidenceShape(evidence: AssessmentEvidenceWrite): boolean {
       evidence.graderConfidence === null &&
       !evidence.eligibleForMastery &&
       evidence.fsrsRating === null &&
-      evidence.ineligibilityReason !== null
+      evidence.ineligibilityReason !== null &&
+      evidence.unanswerableReason !== null
     );
   }
   if (
     evidence.score === null ||
     evidence.rubricBand === null ||
+    evidence.unanswerableReason !== null ||
     (evidence.gradingMethod === "llm_short_answer" &&
       evidence.graderConfidence === null) ||
     (evidence.gradingMethod === "keyed_mc" &&

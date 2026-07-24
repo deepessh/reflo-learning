@@ -152,9 +152,9 @@ docs/problems/        Non-authoritative durable architecture problem documents
 - Any P1 runtime surface ships disabled behind a feature flag. Non-runtime P1 artifacts such as a recorded clip or benchmark are labeled as prototypes and are not presented as shipped functionality.
 - Secrets via environment/KMS only. Never commit keys; never echo them in logs, traces, or issue comments. Never put PII in traces **or issues** — issues are the shared memory, treat them as logs.
 
-## 6. Release gates
+## 6. Demo-only boundary
 
-Before pilot activation, every PRD §11 gate marked "before pilot launch" or "blocks pilots" must pass. The seeded Flow B online/offline assertion must pass by the Week 2 exit before that adaptive loop is released to pilots. Other gates follow the timing explicitly stated in the PRD. If PRD §13 schedules pilot activation before a required §11 pre-pilot gate, treat that as an unresolved PRD conflict: add `needs-human` to the relevant issue and do not infer that the schedule waives the gate.
+Through Demo Day on Aug 15, use only seeded, synthetic, or staff-controlled test identities, dedicated test messaging destinations, and human-approved rights-cleared demo sources. Do not recruit or activate external learners, enable public signup or uploads, send real-user messages, collect learner PII, or run pilot experiments. PRD §11 evaluations support honest demo claims and defect discovery; they are not pilot-activation gates because the sprint has no pilot. The seeded Flow B online/offline assertion and honest labeling remain Demo Day requirements. Any real-user pilot requires a post-hackathon PRD revision and the human escalation process in §7.
 
 ## 7. Escalate to humans (don't decide alone)
 

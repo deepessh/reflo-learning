@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -275,29 +276,28 @@ describe("deterministic FSRS-6 replay", () => {
     const packageName = ["ts", "fsrs"].join("-");
     const sourceFiles = (
       await Promise.all(
-        ["../../apps", "../../packages", "../../scripts"].map(async (root) =>
-          (await readdir(root, { recursive: true })).map(
-            (name) => `${root}/${name}`,
-          ),
+        ["../../apps", "../../packages", "../../scripts"].map(
+          collectSourceFiles,
         ),
       )
     )
       .flat()
-      .filter(
-        (name) =>
-          /\.(?:[cm]?[jt]sx?)$/.test(name) &&
-          !name.includes("/dist/") &&
-          !name.includes("/node_modules/") &&
-          !name.endsWith("/fsrs-adapter.ts"),
-      );
-    for (const sourceFile of sourceFiles) {
-      const source = await readFile(sourceFile, "utf8");
-      expect(source).not.toMatch(
+      .filter((name) => !name.endsWith("/fsrs-adapter.ts"));
+    const forbiddenImports = (
+      await Promise.all(
+        sourceFiles.map(async (sourceFile) => ({
+          source: await readFile(sourceFile, "utf8"),
+          sourceFile,
+        })),
+      )
+    )
+      .filter(({ source }) =>
         new RegExp(
           `(?:from\\s+["']${packageName}["']|import\\(["']${packageName}["']\\))`,
-        ),
-      );
-    }
+        ).test(source),
+      )
+      .map(({ sourceFile }) => sourceFile);
+    expect(forbiddenImports).toEqual([]);
   });
 });
 
@@ -368,6 +368,33 @@ describe("deterministic local delivery resolution", () => {
     );
   });
 });
+
+const ignoredSourceDirectories = new Set([
+  ".artifacts",
+  ".git",
+  ".next",
+  "coverage",
+  "dist",
+  "node_modules",
+]);
+
+async function collectSourceFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const paths = await Promise.all(
+    entries.map(async (entry): Promise<string[]> => {
+      const entryPath = join(root, entry.name);
+      if (entry.isDirectory()) {
+        return ignoredSourceDirectories.has(entry.name)
+          ? []
+          : collectSourceFiles(entryPath);
+      }
+      return entry.isFile() && /\.(?:[cm]?[jt]sx?)$/.test(entry.name)
+        ? [entryPath]
+        : [];
+    }),
+  );
+  return paths.flat();
+}
 
 function evidence(
   attemptId: string,

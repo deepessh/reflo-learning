@@ -15,6 +15,15 @@ export { PostgresActivationRepository } from "./activation-repository.js";
 export { PostgresAudioGenerationRepository } from "./audio-generation-repository.js";
 export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generation-repository.js";
 export { PostgresGateAttestationIndex } from "./gate-attestation-index.js";
+export {
+  KnowledgePersistenceError,
+  PostgresKnowledgeRepository,
+} from "./knowledge-repository.js";
+export type {
+  DeliveryOverrideProjection,
+  KnowledgePersistenceErrorCode,
+  LearningEventAppendResult,
+} from "./knowledge-repository.js";
 
 import type {
   AccountRepository,

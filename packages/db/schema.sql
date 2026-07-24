@@ -186,6 +186,27 @@ $$;
 
 
 --
+-- Name: reflo_learning_scope_delete_is_authorized(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_learning_scope_delete_is_authorized(p_owner_scope_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+  SELECT
+    current_user = pg_get_userbyid((
+      SELECT proowner
+      FROM pg_proc
+      WHERE oid = 'public.reflo_reset_learning_scope(uuid)'::regprocedure
+    ))
+    AND current_setting(
+      'reflo.authorized_learning_scope_delete',
+      true
+    ) = p_owner_scope_id::text
+$$;
+
+
+--
 -- Name: reflo_preserve_terminal_activation_operation(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -217,6 +238,120 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
+END
+$$;
+
+
+--
+-- Name: reflo_protect_attempt_evidence_provenance(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_protect_attempt_evidence_provenance() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'attempt.created_at is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM attempt_concept_evidence
+    WHERE owner_scope_id = OLD.owner_scope_id
+      AND attempt_id = OLD.id
+  ) AND (
+    NEW.user_id IS DISTINCT FROM OLD.user_id
+    OR NEW.quiz_item_id IS DISTINCT FROM OLD.quiz_item_id
+    OR NEW.outcome IS DISTINCT FROM OLD.outcome
+  ) THEN
+    RAISE EXCEPTION 'evidenced attempt provenance is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+
+--
+-- Name: reflo_reject_append_only_mutation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_reject_append_only_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  table_owner name;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    SELECT pg_get_userbyid(relowner)
+    INTO table_owner
+    FROM pg_class
+    WHERE oid = TG_RELID;
+
+    IF current_user = table_owner
+       AND current_setting(
+         'reflo.authorized_learning_scope_delete',
+         true
+       ) = OLD.owner_scope_id::text THEN
+      RETURN OLD;
+    END IF;
+  END IF;
+
+  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END
+$$;
+
+
+--
+-- Name: reflo_reset_learning_scope(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_reset_learning_scope(p_owner_scope_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM set_config(
+    'reflo.authorized_learning_scope_delete',
+    p_owner_scope_id::text,
+    true
+  );
+
+  DELETE FROM public.fsrs_replay_manifest
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.fsrs_transition_payload
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.attempt_concept_evidence
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.learning_event_concept
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.learning_event
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.attempt
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.delivery_item
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.review_schedule
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.scheduler_delivery_resolution
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.fsrs_replay_run
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.fsrs_card_payload
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.delivery_override_cancellation
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.delivery_override
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.knowledge_state
+  WHERE owner_scope_id = p_owner_scope_id;
+
+  PERFORM set_config(
+    'reflo.authorized_learning_scope_delete',
+    '',
+    true
+  );
 END
 $$;
 
@@ -470,14 +605,38 @@ CREATE TABLE public.attempt_concept_evidence (
     owner_scope_id uuid NOT NULL,
     attempt_id uuid NOT NULL,
     concept_id uuid NOT NULL,
-    score numeric(6,5) NOT NULL,
-    rubric_band text NOT NULL,
-    confidence numeric(6,5) NOT NULL,
+    score numeric(6,5),
+    rubric_band text,
+    grader_confidence numeric(6,5),
     rationale_ref text,
     knowledge_algorithm_version text NOT NULL,
     eligible_for_mastery boolean NOT NULL,
-    CONSTRAINT attempt_concept_evidence_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
-    CONSTRAINT attempt_concept_evidence_score_check CHECK (((score >= (0)::numeric) AND (score <= (1)::numeric)))
+    judgment_kind text NOT NULL,
+    grading_method text NOT NULL,
+    rubric_id text NOT NULL,
+    rubric_version text NOT NULL,
+    grading_policy_version text NOT NULL,
+    rating_mapping_version text NOT NULL,
+    knowledge_configuration_id text NOT NULL,
+    ineligibility_reason text,
+    fsrs_rating smallint,
+    replacement_for_attempt_id uuid,
+    attempt_created_at timestamp with time zone NOT NULL,
+    attempt_user_id uuid NOT NULL,
+    attempt_outcome text NOT NULL,
+    CONSTRAINT attempt_concept_evidence_confidence_check CHECK (((grader_confidence >= (0)::numeric) AND (grader_confidence <= (1)::numeric))),
+    CONSTRAINT attempt_concept_evidence_score_check CHECK (((score >= (0)::numeric) AND (score <= (1)::numeric))),
+    CONSTRAINT evidence_attempt_outcome_closed CHECK ((attempt_outcome = ANY (ARRAY['graded'::text, 'abstained'::text, 'superseded'::text]))),
+    CONSTRAINT evidence_band_score_rating_shape CHECK ((((rubric_band = 'incorrect'::text) AND (score = 0.00000) AND ((eligible_for_mastery = false) OR (fsrs_rating = 1))) OR ((rubric_band = 'partially_correct'::text) AND (score = 0.50000) AND ((eligible_for_mastery = false) OR (fsrs_rating = 1))) OR ((rubric_band = 'correct'::text) AND (score = 1.00000) AND ((eligible_for_mastery = false) OR (fsrs_rating = 3))) OR (judgment_kind = 'unanswerable'::text))),
+    CONSTRAINT evidence_eligibility_shape CHECK (((eligible_for_mastery AND (judgment_kind = 'scored'::text) AND (ineligibility_reason IS NULL) AND (fsrs_rating IS NOT NULL)) OR ((eligible_for_mastery = false) AND (ineligibility_reason IS NOT NULL) AND (fsrs_rating IS NULL)))),
+    CONSTRAINT evidence_eligible_attempt_outcome CHECK (((eligible_for_mastery = false) OR (attempt_outcome = 'graded'::text))),
+    CONSTRAINT evidence_fsrs_rating_closed CHECK (((fsrs_rating IS NULL) OR (fsrs_rating = ANY (ARRAY[1, 3])))),
+    CONSTRAINT evidence_grading_method_closed CHECK ((grading_method = ANY (ARRAY['llm_short_answer'::text, 'keyed_mc'::text]))),
+    CONSTRAINT evidence_grading_method_shape CHECK ((((grading_method = 'llm_short_answer'::text) AND ((judgment_kind = 'unanswerable'::text) OR (grader_confidence IS NOT NULL))) OR ((grading_method = 'keyed_mc'::text) AND (judgment_kind = 'scored'::text) AND (grader_confidence IS NULL)))),
+    CONSTRAINT evidence_ineligibility_reason_closed CHECK (((ineligibility_reason IS NULL) OR (ineligibility_reason = ANY (ARRAY['attempt_abstained'::text, 'below_threshold'::text, 'legacy_unversioned'::text, 'policy_ineligible'::text, 'semantic_unanswerable'::text, 'superseded'::text])))),
+    CONSTRAINT evidence_judgment_kind_closed CHECK ((judgment_kind = ANY (ARRAY['scored'::text, 'unanswerable'::text]))),
+    CONSTRAINT evidence_judgment_shape CHECK ((((judgment_kind = 'scored'::text) AND (score IS NOT NULL) AND (rubric_band IS NOT NULL)) OR ((judgment_kind = 'unanswerable'::text) AND (score IS NULL) AND (rubric_band IS NULL) AND (grader_confidence IS NULL) AND (eligible_for_mastery = false) AND (fsrs_rating IS NULL)))),
+    CONSTRAINT evidence_rubric_band_closed CHECK (((rubric_band IS NULL) OR (rubric_band = ANY (ARRAY['incorrect'::text, 'partially_correct'::text, 'correct'::text]))))
 );
 
 ALTER TABLE ONLY public.attempt_concept_evidence FORCE ROW LEVEL SECURITY;
@@ -743,6 +902,158 @@ ALTER TABLE ONLY public.delivery_item FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: delivery_override; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.delivery_override (
+    owner_scope_id uuid NOT NULL,
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    concept_id uuid NOT NULL,
+    reason text NOT NULL,
+    deliver_not_before_at timestamp with time zone NOT NULL,
+    actor_id uuid NOT NULL,
+    authorization_id text NOT NULL,
+    causation_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT delivery_override_reason_check CHECK ((reason = ANY (ARRAY['user_snooze'::text, 'reteach_follow_up'::text, 'channel_unavailable'::text, 'operator_demo_control'::text])))
+);
+
+ALTER TABLE ONLY public.delivery_override FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: delivery_override_cancellation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.delivery_override_cancellation (
+    owner_scope_id uuid NOT NULL,
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    concept_id uuid NOT NULL,
+    target_override_id uuid NOT NULL,
+    actor_id uuid NOT NULL,
+    authorization_id text NOT NULL,
+    causation_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.delivery_override_cancellation FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: fsrs_card_payload; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fsrs_card_payload (
+    owner_scope_id uuid NOT NULL,
+    card_digest text NOT NULL,
+    fsrs_profile_id text NOT NULL,
+    canonical_card text NOT NULL,
+    due_at timestamp with time zone NOT NULL,
+    last_reviewed_at timestamp with time zone,
+    stability numeric(13,8) NOT NULL,
+    difficulty numeric(10,8) NOT NULL,
+    card_state smallint NOT NULL,
+    elapsed_days integer NOT NULL,
+    scheduled_days integer NOT NULL,
+    reps integer NOT NULL,
+    lapses integer NOT NULL,
+    learning_steps integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT fsrs_card_payload_card_digest_check CHECK ((card_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_card_payload_card_state_check CHECK ((card_state = ANY (ARRAY[0, 2]))),
+    CONSTRAINT fsrs_card_payload_check CHECK ((((card_state = 0) AND (last_reviewed_at IS NULL) AND (stability = (0)::numeric) AND (difficulty = (0)::numeric) AND (reps = 0) AND (lapses = 0)) OR ((card_state = 2) AND (last_reviewed_at IS NOT NULL) AND (stability > (0)::numeric) AND (difficulty >= (1)::numeric)))),
+    CONSTRAINT fsrs_card_payload_difficulty_check CHECK (((difficulty >= (0)::numeric) AND (difficulty <= (10)::numeric))),
+    CONSTRAINT fsrs_card_payload_elapsed_days_check CHECK ((elapsed_days >= 0)),
+    CONSTRAINT fsrs_card_payload_fsrs_profile_id_check CHECK ((fsrs_profile_id = 'fsrs-profile-v1'::text)),
+    CONSTRAINT fsrs_card_payload_lapses_check CHECK ((lapses >= 0)),
+    CONSTRAINT fsrs_card_payload_learning_steps_check CHECK ((learning_steps = 0)),
+    CONSTRAINT fsrs_card_payload_reps_check CHECK ((reps >= 0)),
+    CONSTRAINT fsrs_card_payload_scheduled_days_check CHECK ((scheduled_days >= 0)),
+    CONSTRAINT fsrs_card_payload_stability_check CHECK ((stability >= (0)::numeric))
+);
+
+ALTER TABLE ONLY public.fsrs_card_payload FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: fsrs_replay_manifest; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fsrs_replay_manifest (
+    owner_scope_id uuid NOT NULL,
+    run_id text NOT NULL,
+    sequence integer NOT NULL,
+    concept_id uuid NOT NULL,
+    fsrs_profile_id text NOT NULL,
+    transition_digest text NOT NULL,
+    CONSTRAINT fsrs_replay_manifest_fsrs_profile_id_check CHECK ((fsrs_profile_id = 'fsrs-profile-v1'::text)),
+    CONSTRAINT fsrs_replay_manifest_run_id_check CHECK ((run_id ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_replay_manifest_sequence_check CHECK (((sequence >= 0) AND (sequence < 512))),
+    CONSTRAINT fsrs_replay_manifest_transition_digest_check CHECK ((transition_digest ~ '^[0-9a-f]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.fsrs_replay_manifest FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: fsrs_replay_run; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fsrs_replay_run (
+    owner_scope_id uuid NOT NULL,
+    run_id text NOT NULL,
+    user_id uuid NOT NULL,
+    concept_id uuid NOT NULL,
+    fsrs_profile_id text NOT NULL,
+    profile_digest text NOT NULL,
+    evidence_digest text NOT NULL,
+    manifest_digest text NOT NULL,
+    current_card_digest text NOT NULL,
+    transition_count integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT fsrs_replay_run_current_card_digest_check CHECK ((current_card_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_replay_run_evidence_digest_check CHECK ((evidence_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_replay_run_fsrs_profile_id_check CHECK ((fsrs_profile_id = 'fsrs-profile-v1'::text)),
+    CONSTRAINT fsrs_replay_run_manifest_digest_check CHECK ((manifest_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_replay_run_profile_digest_check CHECK ((profile_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_replay_run_run_id_check CHECK ((run_id ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_replay_run_transition_count_check CHECK (((transition_count > 0) AND (transition_count <= 512)))
+);
+
+ALTER TABLE ONLY public.fsrs_replay_run FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: fsrs_transition_payload; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fsrs_transition_payload (
+    owner_scope_id uuid NOT NULL,
+    transition_digest text NOT NULL,
+    evidence_identity text NOT NULL,
+    attempt_id uuid NOT NULL,
+    concept_id uuid NOT NULL,
+    rating smallint NOT NULL,
+    reviewed_at timestamp with time zone NOT NULL,
+    fsrs_profile_id text NOT NULL,
+    prior_card_digest text NOT NULL,
+    next_card_digest text NOT NULL,
+    canonical_transition text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT fsrs_transition_payload_check CHECK ((evidence_identity = (((((owner_scope_id)::text || '/'::text) || (attempt_id)::text) || '/'::text) || (concept_id)::text))),
+    CONSTRAINT fsrs_transition_payload_fsrs_profile_id_check CHECK ((fsrs_profile_id = 'fsrs-profile-v1'::text)),
+    CONSTRAINT fsrs_transition_payload_next_card_digest_check CHECK ((next_card_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_transition_payload_prior_card_digest_check CHECK ((prior_card_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fsrs_transition_payload_rating_check CHECK ((rating = ANY (ARRAY[1, 3]))),
+    CONSTRAINT fsrs_transition_payload_transition_digest_check CHECK ((transition_digest ~ '^[0-9a-f]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.fsrs_transition_payload FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: inbox_claim; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -789,12 +1100,22 @@ CREATE TABLE public.knowledge_state (
     concept_id uuid NOT NULL,
     mastery numeric(6,5) NOT NULL,
     confidence numeric(6,5) NOT NULL,
-    half_life interval NOT NULL,
+    half_life interval,
     last_reviewed_at timestamp with time zone,
     review_count integer DEFAULT 0 NOT NULL,
     algorithm_version text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    alpha_quanta bigint NOT NULL,
+    beta_quanta bigint NOT NULL,
+    evidence_count integer NOT NULL,
+    assessment_status text NOT NULL,
+    knowledge_configuration_id text NOT NULL,
+    CONSTRAINT knowledge_state_alpha_quanta_check CHECK ((alpha_quanta >= 100000)),
+    CONSTRAINT knowledge_state_assessment_status_check CHECK ((assessment_status = ANY (ARRAY['unassessed'::text, 'assessed'::text]))),
+    CONSTRAINT knowledge_state_beta_quanta_check CHECK ((beta_quanta >= 300000)),
     CONSTRAINT knowledge_state_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
+    CONSTRAINT knowledge_state_evidence_count_check CHECK ((evidence_count >= 0)),
+    CONSTRAINT knowledge_state_exact_shape CHECK ((((evidence_count = 0) AND (assessment_status = 'unassessed'::text) AND (alpha_quanta = 100000) AND (beta_quanta = 300000) AND (mastery = 0.25000) AND (confidence = 0.00000) AND (last_reviewed_at IS NULL) AND (review_count = 0)) OR ((evidence_count > 0) AND (assessment_status = 'assessed'::text) AND (last_reviewed_at IS NOT NULL) AND (review_count = evidence_count)))),
     CONSTRAINT knowledge_state_half_life_check CHECK ((half_life > '00:00:00'::interval)),
     CONSTRAINT knowledge_state_mastery_check CHECK (((mastery >= (0)::numeric) AND (mastery <= (1)::numeric))),
     CONSTRAINT knowledge_state_review_count_check CHECK ((review_count >= 0))
@@ -814,10 +1135,17 @@ CREATE TABLE public.learning_event (
     session_id uuid,
     delivery_id uuid,
     event_type text NOT NULL,
-    idempotency_key text,
+    idempotency_key text NOT NULL,
     payload jsonb NOT NULL,
     occurred_at timestamp with time zone NOT NULL,
-    recorded_at timestamp with time zone DEFAULT now() NOT NULL
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    event_version integer NOT NULL,
+    producer text NOT NULL,
+    correlation_id uuid NOT NULL,
+    causation_id uuid,
+    attempt_id uuid,
+    CONSTRAINT learning_event_event_version_check CHECK ((event_version > 0)),
+    CONSTRAINT learning_event_type_v1_closed CHECK ((event_type = ANY (ARRAY['assessment_graded'::text, 'assessment_submitted'::text, 'course_opened'::text, 'delivery_received'::text, 'lesson_abandoned'::text, 'lesson_completed'::text, 'lesson_started'::text, 'question_asked'::text, 'question_presented'::text, 'reteach_served'::text, 'review_rescheduled'::text, 'review_scheduled'::text, 'session_abandoned'::text, 'session_completed'::text, 'session_started'::text])))
 );
 
 ALTER TABLE ONLY public.learning_event FORCE ROW LEVEL SECURITY;
@@ -1075,16 +1403,71 @@ CREATE TABLE public.review_schedule (
     owner_scope_id uuid NOT NULL,
     user_id uuid NOT NULL,
     concept_id uuid NOT NULL,
-    due_at timestamp with time zone NOT NULL,
+    fsrs_due_at timestamp with time zone NOT NULL,
     time_zone text NOT NULL,
-    fsrs_version text NOT NULL,
-    state jsonb NOT NULL,
-    reschedule_reason text,
+    fsrs_profile_id text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    base_next_delivery_at timestamp with time zone NOT NULL,
+    next_delivery_at timestamp with time zone NOT NULL,
+    chosen_local_time time(0) without time zone NOT NULL,
+    delivery_profile_id text NOT NULL,
+    tzdb_version text NOT NULL,
+    delivery_disambiguation text NOT NULL,
+    current_replay_run_id text NOT NULL,
+    current_delivery_resolution_id text NOT NULL,
+    current_card_digest text NOT NULL,
+    card_last_reviewed_at timestamp with time zone NOT NULL,
+    stability numeric(13,8) NOT NULL,
+    difficulty numeric(10,8) NOT NULL,
+    card_state smallint NOT NULL,
+    elapsed_days integer NOT NULL,
+    scheduled_days integer NOT NULL,
+    reps integer NOT NULL,
+    lapses integer NOT NULL,
+    learning_steps integer NOT NULL,
+    CONSTRAINT review_schedule_card_state_check CHECK ((card_state = 2)),
+    CONSTRAINT review_schedule_current_card_digest_check CHECK ((current_card_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT review_schedule_delivery_disambiguation_check CHECK ((delivery_disambiguation = ANY (ARRAY['exact'::text, 'fold_earlier'::text, 'fold_later'::text, 'gap_forward'::text]))),
+    CONSTRAINT review_schedule_delivery_not_before_fsrs CHECK (((base_next_delivery_at >= fsrs_due_at) AND (next_delivery_at >= base_next_delivery_at))),
+    CONSTRAINT review_schedule_difficulty_check CHECK (((difficulty >= (1)::numeric) AND (difficulty <= (10)::numeric))),
+    CONSTRAINT review_schedule_elapsed_days_check CHECK ((elapsed_days >= 0)),
+    CONSTRAINT review_schedule_lapses_check CHECK ((lapses >= 0)),
+    CONSTRAINT review_schedule_learning_steps_check CHECK ((learning_steps = 0)),
+    CONSTRAINT review_schedule_profile_v1 CHECK (((fsrs_profile_id = 'fsrs-profile-v1'::text) AND (delivery_profile_id = 'delivery-time-profile-v1'::text) AND (tzdb_version = '2026b'::text))),
+    CONSTRAINT review_schedule_reps_check CHECK ((reps > 0)),
+    CONSTRAINT review_schedule_scheduled_days_check CHECK ((scheduled_days >= 0)),
+    CONSTRAINT review_schedule_stability_check CHECK ((stability > (0)::numeric))
 );
 
 ALTER TABLE ONLY public.review_schedule FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: scheduler_delivery_resolution; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scheduler_delivery_resolution (
+    owner_scope_id uuid NOT NULL,
+    resolution_id text NOT NULL,
+    run_id text NOT NULL,
+    time_zone text NOT NULL,
+    chosen_local_time time(0) without time zone NOT NULL,
+    delivery_profile_id text NOT NULL,
+    tzdb_version text NOT NULL,
+    disambiguation text NOT NULL,
+    fsrs_due_at timestamp with time zone NOT NULL,
+    base_next_delivery_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT scheduler_delivery_resolution_check CHECK ((base_next_delivery_at >= fsrs_due_at)),
+    CONSTRAINT scheduler_delivery_resolution_delivery_profile_id_check CHECK ((delivery_profile_id = 'delivery-time-profile-v1'::text)),
+    CONSTRAINT scheduler_delivery_resolution_disambiguation_check CHECK ((disambiguation = ANY (ARRAY['exact'::text, 'fold_earlier'::text, 'fold_later'::text, 'gap_forward'::text]))),
+    CONSTRAINT scheduler_delivery_resolution_resolution_id_check CHECK ((resolution_id ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT scheduler_delivery_resolution_run_id_check CHECK ((run_id ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT scheduler_delivery_resolution_tzdb_version_check CHECK ((tzdb_version = '2026b'::text))
+);
+
+ALTER TABLE ONLY public.scheduler_delivery_resolution FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1367,6 +1750,14 @@ ALTER TABLE ONLY public.attempt_concept_evidence
 
 
 --
+-- Name: attempt attempt_evidence_provenance_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt
+    ADD CONSTRAINT attempt_evidence_provenance_key UNIQUE (owner_scope_id, id, user_id, created_at, outcome);
+
+
+--
 -- Name: attempt attempt_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1639,6 +2030,110 @@ ALTER TABLE ONLY public.delivery_item
 
 
 --
+-- Name: delivery_override_cancellation delivery_override_cancellatio_owner_scope_id_target_overrid_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override_cancellation
+    ADD CONSTRAINT delivery_override_cancellatio_owner_scope_id_target_overrid_key UNIQUE (owner_scope_id, target_override_id);
+
+
+--
+-- Name: delivery_override_cancellation delivery_override_cancellation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override_cancellation
+    ADD CONSTRAINT delivery_override_cancellation_pkey PRIMARY KEY (owner_scope_id, id);
+
+
+--
+-- Name: delivery_override delivery_override_owner_scope_id_id_user_id_concept_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override
+    ADD CONSTRAINT delivery_override_owner_scope_id_id_user_id_concept_id_key UNIQUE (owner_scope_id, id, user_id, concept_id);
+
+
+--
+-- Name: delivery_override delivery_override_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override
+    ADD CONSTRAINT delivery_override_pkey PRIMARY KEY (owner_scope_id, id);
+
+
+--
+-- Name: fsrs_card_payload fsrs_card_payload_owner_scope_id_card_digest_fsrs_profile_i_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_card_payload
+    ADD CONSTRAINT fsrs_card_payload_owner_scope_id_card_digest_fsrs_profile_i_key UNIQUE (owner_scope_id, card_digest, fsrs_profile_id);
+
+
+--
+-- Name: fsrs_card_payload fsrs_card_payload_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_card_payload
+    ADD CONSTRAINT fsrs_card_payload_pkey PRIMARY KEY (owner_scope_id, card_digest);
+
+
+--
+-- Name: fsrs_replay_manifest fsrs_replay_manifest_owner_scope_id_run_id_transition_diges_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_manifest
+    ADD CONSTRAINT fsrs_replay_manifest_owner_scope_id_run_id_transition_diges_key UNIQUE (owner_scope_id, run_id, transition_digest);
+
+
+--
+-- Name: fsrs_replay_manifest fsrs_replay_manifest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_manifest
+    ADD CONSTRAINT fsrs_replay_manifest_pkey PRIMARY KEY (owner_scope_id, run_id, sequence);
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_owner_scope_id_run_id_concept_id_fsrs_profi_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_run
+    ADD CONSTRAINT fsrs_replay_run_owner_scope_id_run_id_concept_id_fsrs_profi_key UNIQUE (owner_scope_id, run_id, concept_id, fsrs_profile_id);
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_owner_scope_id_run_id_user_id_concept_id_fs_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_run
+    ADD CONSTRAINT fsrs_replay_run_owner_scope_id_run_id_user_id_concept_id_fs_key UNIQUE (owner_scope_id, run_id, user_id, concept_id, fsrs_profile_id, current_card_digest);
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_run
+    ADD CONSTRAINT fsrs_replay_run_pkey PRIMARY KEY (owner_scope_id, run_id);
+
+
+--
+-- Name: fsrs_transition_payload fsrs_transition_payload_owner_scope_id_transition_digest_co_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_transition_payload
+    ADD CONSTRAINT fsrs_transition_payload_owner_scope_id_transition_digest_co_key UNIQUE (owner_scope_id, transition_digest, concept_id, fsrs_profile_id);
+
+
+--
+-- Name: fsrs_transition_payload fsrs_transition_payload_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_transition_payload
+    ADD CONSTRAINT fsrs_transition_payload_pkey PRIMARY KEY (owner_scope_id, transition_digest);
+
+
+--
 -- Name: inbox_claim inbox_claim_message_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1879,6 +2374,30 @@ ALTER TABLE ONLY public.review_schedule
 
 
 --
+-- Name: review_schedule review_schedule_unique_profile; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.review_schedule
+    ADD CONSTRAINT review_schedule_unique_profile UNIQUE (owner_scope_id, user_id, concept_id, fsrs_profile_id);
+
+
+--
+-- Name: scheduler_delivery_resolution scheduler_delivery_resolution_owner_scope_id_resolution_id__key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scheduler_delivery_resolution
+    ADD CONSTRAINT scheduler_delivery_resolution_owner_scope_id_resolution_id__key UNIQUE (owner_scope_id, resolution_id, run_id);
+
+
+--
+-- Name: scheduler_delivery_resolution scheduler_delivery_resolution_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scheduler_delivery_resolution
+    ADD CONSTRAINT scheduler_delivery_resolution_pkey PRIMARY KEY (owner_scope_id, resolution_id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2043,6 +2562,13 @@ CREATE UNIQUE INDEX asset_generation_operation_idx ON public.asset USING btree (
 
 
 --
+-- Name: attempt_concept_evidence_replay_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX attempt_concept_evidence_replay_idx ON public.attempt_concept_evidence USING btree (owner_scope_id, attempt_user_id, concept_id, attempt_created_at, attempt_id);
+
+
+--
 -- Name: attempt_provider_submission_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2103,6 +2629,13 @@ CREATE UNIQUE INDEX concept_chapter_order_idx ON public.concept USING btree (own
 --
 
 CREATE UNIQUE INDEX concept_generation_key_idx ON public.concept USING btree (owner_scope_id, curriculum_generation_id, concept_key) WHERE (curriculum_generation_id IS NOT NULL);
+
+
+--
+-- Name: delivery_override_projection_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX delivery_override_projection_idx ON public.delivery_override USING btree (owner_scope_id, user_id, concept_id, created_at, id);
 
 
 --
@@ -2169,10 +2702,10 @@ CREATE UNIQUE INDEX release_gate_attestation_current_idx ON public.release_gate_
 
 
 --
--- Name: review_schedule_due_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: review_schedule_delivery_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX review_schedule_due_idx ON public.review_schedule USING btree (due_at, owner_scope_id) WHERE (reschedule_reason IS NULL);
+CREATE INDEX review_schedule_delivery_due_idx ON public.review_schedule USING btree (next_delivery_at, owner_scope_id);
 
 
 --
@@ -2211,10 +2744,80 @@ CREATE TRIGGER async_operation_terminal_is_final BEFORE UPDATE ON public.async_o
 
 
 --
+-- Name: attempt_concept_evidence attempt_concept_evidence_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER attempt_concept_evidence_is_append_only BEFORE DELETE OR UPDATE ON public.attempt_concept_evidence FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: attempt attempt_evidence_provenance_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER attempt_evidence_provenance_is_immutable BEFORE UPDATE ON public.attempt FOR EACH ROW EXECUTE FUNCTION public.reflo_protect_attempt_evidence_provenance();
+
+
+--
+-- Name: delivery_override_cancellation delivery_override_cancellation_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER delivery_override_cancellation_is_append_only BEFORE DELETE OR UPDATE ON public.delivery_override_cancellation FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: delivery_override delivery_override_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER delivery_override_is_append_only BEFORE DELETE OR UPDATE ON public.delivery_override FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: fsrs_card_payload fsrs_card_payload_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER fsrs_card_payload_is_append_only BEFORE DELETE OR UPDATE ON public.fsrs_card_payload FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: fsrs_replay_manifest fsrs_replay_manifest_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER fsrs_replay_manifest_is_append_only BEFORE DELETE OR UPDATE ON public.fsrs_replay_manifest FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER fsrs_replay_run_is_append_only BEFORE DELETE OR UPDATE ON public.fsrs_replay_run FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: fsrs_transition_payload fsrs_transition_payload_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER fsrs_transition_payload_is_append_only BEFORE DELETE OR UPDATE ON public.fsrs_transition_payload FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
 -- Name: inbox_claim inbox_claim_terminal_is_final; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER inbox_claim_terminal_is_final BEFORE UPDATE ON public.inbox_claim FOR EACH ROW EXECUTE FUNCTION public.reflo_preserve_terminal_row();
+
+
+--
+-- Name: learning_event_concept learning_event_concept_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER learning_event_concept_is_append_only BEFORE DELETE OR UPDATE ON public.learning_event_concept FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: learning_event learning_event_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER learning_event_is_append_only BEFORE DELETE OR UPDATE ON public.learning_event FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
 
 
 --
@@ -2229,6 +2832,13 @@ CREATE CONSTRAINT TRIGGER membership_preserves_scope_owner AFTER INSERT OR DELET
 --
 
 CREATE CONSTRAINT TRIGGER owner_scope_requires_owner AFTER INSERT OR UPDATE OF status, retired_at ON public.owner_scope DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_check_scope_owner_from_scope();
+
+
+--
+-- Name: scheduler_delivery_resolution scheduler_delivery_resolution_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scheduler_delivery_resolution_is_append_only BEFORE DELETE OR UPDATE ON public.scheduler_delivery_resolution FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
 
 
 --
@@ -2584,6 +3194,158 @@ ALTER TABLE ONLY public.delivery_item
 
 
 --
+-- Name: delivery_override_cancellation delivery_override_cancellatio_owner_scope_id_target_overri_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override_cancellation
+    ADD CONSTRAINT delivery_override_cancellatio_owner_scope_id_target_overri_fkey FOREIGN KEY (owner_scope_id, target_override_id, user_id, concept_id) REFERENCES public.delivery_override(owner_scope_id, id, user_id, concept_id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_override_cancellation delivery_override_cancellation_owner_scope_id_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override_cancellation
+    ADD CONSTRAINT delivery_override_cancellation_owner_scope_id_actor_id_fkey FOREIGN KEY (owner_scope_id, actor_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_override_cancellation delivery_override_cancellation_owner_scope_id_concept_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override_cancellation
+    ADD CONSTRAINT delivery_override_cancellation_owner_scope_id_concept_id_fkey FOREIGN KEY (owner_scope_id, concept_id) REFERENCES public.concept(owner_scope_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_override_cancellation delivery_override_cancellation_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override_cancellation
+    ADD CONSTRAINT delivery_override_cancellation_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_override delivery_override_owner_scope_id_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override
+    ADD CONSTRAINT delivery_override_owner_scope_id_actor_id_fkey FOREIGN KEY (owner_scope_id, actor_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_override delivery_override_owner_scope_id_concept_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override
+    ADD CONSTRAINT delivery_override_owner_scope_id_concept_id_fkey FOREIGN KEY (owner_scope_id, concept_id) REFERENCES public.concept(owner_scope_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_override delivery_override_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_override
+    ADD CONSTRAINT delivery_override_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
+
+
+--
+-- Name: attempt_concept_evidence evidence_attempt_provenance_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt_concept_evidence
+    ADD CONSTRAINT evidence_attempt_provenance_fk FOREIGN KEY (owner_scope_id, attempt_id, attempt_user_id, attempt_created_at, attempt_outcome) REFERENCES public.attempt(owner_scope_id, id, user_id, created_at, outcome);
+
+
+--
+-- Name: attempt_concept_evidence evidence_attempt_user_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt_concept_evidence
+    ADD CONSTRAINT evidence_attempt_user_scope_fk FOREIGN KEY (owner_scope_id, attempt_user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: attempt_concept_evidence evidence_replacement_attempt_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt_concept_evidence
+    ADD CONSTRAINT evidence_replacement_attempt_scope_fk FOREIGN KEY (owner_scope_id, replacement_for_attempt_id) REFERENCES public.attempt(owner_scope_id, id);
+
+
+--
+-- Name: fsrs_card_payload fsrs_card_payload_owner_scope_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_card_payload
+    ADD CONSTRAINT fsrs_card_payload_owner_scope_id_fkey FOREIGN KEY (owner_scope_id) REFERENCES public.owner_scope(id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_replay_manifest fsrs_replay_manifest_owner_scope_id_run_id_concept_id_fsrs_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_manifest
+    ADD CONSTRAINT fsrs_replay_manifest_owner_scope_id_run_id_concept_id_fsrs_fkey FOREIGN KEY (owner_scope_id, run_id, concept_id, fsrs_profile_id) REFERENCES public.fsrs_replay_run(owner_scope_id, run_id, concept_id, fsrs_profile_id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_replay_manifest fsrs_replay_manifest_owner_scope_id_transition_digest_conc_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_manifest
+    ADD CONSTRAINT fsrs_replay_manifest_owner_scope_id_transition_digest_conc_fkey FOREIGN KEY (owner_scope_id, transition_digest, concept_id, fsrs_profile_id) REFERENCES public.fsrs_transition_payload(owner_scope_id, transition_digest, concept_id, fsrs_profile_id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_owner_scope_id_concept_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_run
+    ADD CONSTRAINT fsrs_replay_run_owner_scope_id_concept_id_fkey FOREIGN KEY (owner_scope_id, concept_id) REFERENCES public.concept(owner_scope_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_owner_scope_id_current_card_digest_fsrs_pr_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_run
+    ADD CONSTRAINT fsrs_replay_run_owner_scope_id_current_card_digest_fsrs_pr_fkey FOREIGN KEY (owner_scope_id, current_card_digest, fsrs_profile_id) REFERENCES public.fsrs_card_payload(owner_scope_id, card_digest, fsrs_profile_id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_replay_run fsrs_replay_run_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_replay_run
+    ADD CONSTRAINT fsrs_replay_run_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_transition_payload fsrs_transition_payload_owner_scope_id_attempt_id_concept__fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_transition_payload
+    ADD CONSTRAINT fsrs_transition_payload_owner_scope_id_attempt_id_concept__fkey FOREIGN KEY (owner_scope_id, attempt_id, concept_id) REFERENCES public.attempt_concept_evidence(owner_scope_id, attempt_id, concept_id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_transition_payload fsrs_transition_payload_owner_scope_id_next_card_digest_fs_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_transition_payload
+    ADD CONSTRAINT fsrs_transition_payload_owner_scope_id_next_card_digest_fs_fkey FOREIGN KEY (owner_scope_id, next_card_digest, fsrs_profile_id) REFERENCES public.fsrs_card_payload(owner_scope_id, card_digest, fsrs_profile_id) ON DELETE CASCADE;
+
+
+--
+-- Name: fsrs_transition_payload fsrs_transition_payload_owner_scope_id_prior_card_digest_f_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fsrs_transition_payload
+    ADD CONSTRAINT fsrs_transition_payload_owner_scope_id_prior_card_digest_f_fkey FOREIGN KEY (owner_scope_id, prior_card_digest, fsrs_profile_id) REFERENCES public.fsrs_card_payload(owner_scope_id, card_digest, fsrs_profile_id) ON DELETE CASCADE;
+
+
+--
 -- Name: inbox_claim inbox_claim_owner_scope_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2629,6 +3391,14 @@ ALTER TABLE ONLY public.knowledge_state
 
 ALTER TABLE ONLY public.knowledge_state
     ADD CONSTRAINT knowledge_state_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: learning_event learning_event_attempt_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.learning_event
+    ADD CONSTRAINT learning_event_attempt_scope_fk FOREIGN KEY (owner_scope_id, attempt_id) REFERENCES public.attempt(owner_scope_id, id);
 
 
 --
@@ -2784,6 +3554,30 @@ ALTER TABLE ONLY public.quiz_item_source_span
 
 
 --
+-- Name: review_schedule review_schedule_current_card_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.review_schedule
+    ADD CONSTRAINT review_schedule_current_card_fk FOREIGN KEY (owner_scope_id, current_card_digest, fsrs_profile_id) REFERENCES public.fsrs_card_payload(owner_scope_id, card_digest, fsrs_profile_id);
+
+
+--
+-- Name: review_schedule review_schedule_current_resolution_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.review_schedule
+    ADD CONSTRAINT review_schedule_current_resolution_fk FOREIGN KEY (owner_scope_id, current_delivery_resolution_id, current_replay_run_id) REFERENCES public.scheduler_delivery_resolution(owner_scope_id, resolution_id, run_id);
+
+
+--
+-- Name: review_schedule review_schedule_current_run_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.review_schedule
+    ADD CONSTRAINT review_schedule_current_run_fk FOREIGN KEY (owner_scope_id, current_replay_run_id, user_id, concept_id, fsrs_profile_id, current_card_digest) REFERENCES public.fsrs_replay_run(owner_scope_id, run_id, user_id, concept_id, fsrs_profile_id, current_card_digest);
+
+
+--
 -- Name: review_schedule review_schedule_owner_scope_id_concept_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2797,6 +3591,14 @@ ALTER TABLE ONLY public.review_schedule
 
 ALTER TABLE ONLY public.review_schedule
     ADD CONSTRAINT review_schedule_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: scheduler_delivery_resolution scheduler_delivery_resolution_owner_scope_id_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scheduler_delivery_resolution
+    ADD CONSTRAINT scheduler_delivery_resolution_owner_scope_id_run_id_fkey FOREIGN KEY (owner_scope_id, run_id) REFERENCES public.fsrs_replay_run(owner_scope_id, run_id) ON DELETE CASCADE;
 
 
 --
@@ -2956,6 +3758,104 @@ CREATE POLICY audio_generation_operation_active_membership ON public.audio_gener
 
 
 --
+-- Name: attempt authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.attempt FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: attempt_concept_evidence authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.attempt_concept_evidence FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: delivery_item authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.delivery_item FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: delivery_override authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.delivery_override FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: delivery_override_cancellation authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.delivery_override_cancellation FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: fsrs_card_payload authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.fsrs_card_payload FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: fsrs_replay_manifest authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.fsrs_replay_manifest FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: fsrs_replay_run authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.fsrs_replay_run FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: fsrs_transition_payload authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.fsrs_transition_payload FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: knowledge_state authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.knowledge_state FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: learning_event authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.learning_event FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: learning_event_concept authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.learning_event_concept FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: review_schedule authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.review_schedule FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: scheduler_delivery_resolution authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.scheduler_delivery_resolution FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
 -- Name: channel_identity; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3015,6 +3915,42 @@ CREATE POLICY curriculum_generation_active_membership ON public.curriculum_gener
 --
 
 ALTER TABLE public.delivery_item ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: delivery_override; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.delivery_override ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: delivery_override_cancellation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.delivery_override_cancellation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: fsrs_card_payload; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.fsrs_card_payload ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: fsrs_replay_manifest; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.fsrs_replay_manifest ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: fsrs_replay_run; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.fsrs_replay_run ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: fsrs_transition_payload; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.fsrs_transition_payload ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: inbox_claim; Type: ROW SECURITY; Schema: public; Owner: -
@@ -3170,6 +4106,12 @@ ALTER TABLE public.quiz_item_source_span ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.review_schedule ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: scheduler_delivery_resolution; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.scheduler_delivery_resolution ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: scope_membership; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3274,6 +4216,48 @@ CREATE POLICY scoped_active_membership ON public.delivery_item USING (public.ref
 
 
 --
+-- Name: delivery_override scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.delivery_override USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: delivery_override_cancellation scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.delivery_override_cancellation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: fsrs_card_payload scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.fsrs_card_payload USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: fsrs_replay_manifest scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.fsrs_replay_manifest USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: fsrs_replay_run scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.fsrs_replay_run USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: fsrs_transition_payload scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.fsrs_transition_payload USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: inbox_claim scoped_active_membership; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -3327,6 +4311,13 @@ CREATE POLICY scoped_active_membership ON public.quiz_item_source_span USING (pu
 --
 
 CREATE POLICY scoped_active_membership ON public.review_schedule USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: scheduler_delivery_resolution scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.scheduler_delivery_resolution USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
 
 
 --
@@ -3411,4 +4402,6 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260721000200'),
     ('20260721000300'),
     ('20260721000400'),
-    ('20260721000500');
+    ('20260721000500'),
+    ('20260723000100'),
+    ('20260723000200');

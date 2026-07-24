@@ -611,8 +611,11 @@ test(
           const eventId = "00000000-0000-4000-8000-000000000701";
           await client.query(
             `INSERT INTO learning_event
-               (id, owner_scope_id, user_id, event_type, payload, occurred_at)
-             VALUES ($1, $2, $3, 'lesson_completed', '{}', now())`,
+               (id, owner_scope_id, user_id, event_type, event_version,
+                producer, correlation_id, idempotency_key, payload, occurred_at)
+             VALUES ($1, $2, $3, 'lesson_completed', 1, 'schema-test',
+                     $1, 'test/learning.lesson-completed/v1/event-701',
+                     '{}', now())`,
             [eventId, ids.scopeA, ids.userA],
           );
           await client.query("BEGIN");

@@ -233,6 +233,9 @@ importers:
       "@reflo/ingestion":
         specifier: workspace:*
         version: link:../ingestion
+      "@reflo/knowledge-model":
+        specifier: workspace:*
+        version: link:../knowledge-model
       "@reflo/model-router":
         specifier: workspace:*
         version: link:../model-router
@@ -313,6 +316,22 @@ importers:
       "@alicloud/kms20160120":
         specifier: 3.0.0
         version: 3.0.0
+    devDependencies:
+      "@types/node":
+        specifier: 24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.1))
+
+  packages/knowledge-model:
+    dependencies:
+      ts-fsrs:
+        specifier: 5.4.1
+        version: 5.4.1
     devDependencies:
       "@types/node":
         specifier: 24.13.3
@@ -4271,6 +4290,13 @@ packages:
     peerDependencies:
       typescript: ">=4.8.4"
 
+  ts-fsrs@5.4.1:
+    resolution:
+      {
+        integrity: sha512-mOp9+oexJexBTkwjg/jQI1aSUQRLIAvbimeKHLSmVdNJPwObugFNKmZkoggH5d6kZ0uaWLboP1Al1DnXAfIb9w==,
+      }
+    engines: { node: ">=20.0.0" }
+
   tsconfig-paths@3.15.0:
     resolution:
       {
@@ -7146,6 +7172,8 @@ snapshots:
   ts-api-utils@2.5.0(typescript@5.9.3):
     dependencies:
       typescript: 5.9.3
+
+  ts-fsrs@5.4.1: {}
 
   tsconfig-paths@3.15.0:
     dependencies:

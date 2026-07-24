@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { createDeliveryRuntime } from "./delivery-composition.js";
+import {
+  createDeliveryRuntime,
+  instrumentDemoDelivery,
+} from "./delivery-composition.js";
 
 const key = (value: number) => Buffer.alloc(32, value).toString("base64");
 
@@ -37,6 +40,49 @@ describe("demo delivery composition", () => {
     const runtime = createDeliveryRuntime(environment(), "staging");
     expect(runtime.delivery).toBeDefined();
     await runtime.close();
+  });
+
+  it("records bounded delivery health without changing delivery outcomes", async () => {
+    const recorded: unknown[] = [];
+    const dispatch = vi.fn(async () => null);
+    const traced = instrumentDemoDelivery(
+      {
+        dispatch,
+        handleTelegramWebhook: vi.fn(),
+        previewEmail: vi.fn(),
+        submitEmail: vi.fn(),
+      } as never,
+      {
+        enabled: true,
+        modelTraces: { record: () => undefined },
+        async recordOperational(trace) {
+          recorded.push(trace);
+          throw new Error("SLS unavailable");
+        },
+      },
+    );
+    const result = await traced.dispatch({
+      authorization: {
+        actorId: "staff-test",
+        authorizationId: "staff-demo-config-v1",
+        ownerScopeId: "staff-scope",
+      },
+      idempotencyKey: "delivery-1",
+      now: "2026-07-24T20:00:00.000Z",
+      provider: "telegram",
+    });
+
+    expect(result).toBeNull();
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(recorded).toEqual([
+      expect.objectContaining({
+        operation: "test_delivery_dispatch",
+        outcome: "success",
+        stage: "test_delivery",
+      }),
+    ]);
+    expect(JSON.stringify(recorded)).not.toContain("staff-test");
+    expect(JSON.stringify(recorded)).not.toContain("staff-scope");
   });
 });
 

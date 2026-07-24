@@ -624,6 +624,7 @@ function traceEnvelope(options: {
       : {
           promptDigest: options.prompt.digest,
           promptId: options.prompt.id,
+          promptVersion: options.prompt.version,
         }),
     routePolicyVersion: ROUTE_POLICY_VERSION,
     startedAt: toIso(options.logicalStartedAt),

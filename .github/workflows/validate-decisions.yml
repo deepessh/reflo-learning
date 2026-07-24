@@ -16,6 +16,8 @@ on:
       - scripts/validate_architecture.py
       - scripts/validate_problem_docs.py
       - scripts/requirements-governance.txt
+      - scripts/governance-python.sh
+      - scripts/governance-python.test.mjs
       - scripts/test_validate_adrs.py
       - scripts/test_validate_architecture.py
       - scripts/test_validate_problem_docs.py
@@ -71,10 +73,10 @@ jobs:
         run: python3 -m pip install --requirement scripts/requirements-governance.txt
       - name: Test governance tooling
         run: |
-          python3 -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
-          node --test scripts/check-required-checks.test.mjs scripts/check-toolchain-policy.test.mjs scripts/doctor.test.mjs
+          scripts/governance-python.sh -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
+          node --test scripts/check-required-checks.test.mjs scripts/check-toolchain-policy.test.mjs scripts/doctor.test.mjs scripts/governance-python.test.mjs
       - name: Check shell helper syntax
-        run: bash -n scripts/work-item.sh scripts/doctor.sh packages/db/scripts/dump-schema-from-container.sh packages/db/scripts/pg-dump-from-container.sh
+        run: bash -n scripts/work-item.sh scripts/doctor.sh scripts/governance-python.sh packages/db/scripts/dump-schema-from-container.sh packages/db/scripts/pg-dump-from-container.sh
       - name: Validate pinned toolchain policy
         run: node scripts/check-toolchain-policy.mjs
       - name: Validate required PR checks against repository rules
@@ -87,14 +89,14 @@ jobs:
           CURRENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            python3 scripts/validate_adrs.py --base-ref HEAD^ --check-links --current-pr-number "$CURRENT_PR_NUMBER"
-            python3 skills/writing-adrs/scripts/allocate_adr_number.py \
+            scripts/governance-python.sh scripts/validate_adrs.py --base-ref HEAD^ --check-links --current-pr-number "$CURRENT_PR_NUMBER"
+            scripts/governance-python.sh skills/writing-adrs/scripts/allocate_adr_number.py \
               --target-ref HEAD^ \
               --base-branch "$GITHUB_BASE_REF" \
               --current-pr-number "$CURRENT_PR_NUMBER" \
               --check-merge-order
           else
-            python3 scripts/validate_adrs.py --base-ref HEAD^ --check-links
+            scripts/governance-python.sh scripts/validate_adrs.py --base-ref HEAD^ --check-links
           fi
-          python3 scripts/validate_architecture.py
-          python3 scripts/validate_problem_docs.py
+          scripts/governance-python.sh scripts/validate_architecture.py
+          scripts/governance-python.sh scripts/validate_problem_docs.py

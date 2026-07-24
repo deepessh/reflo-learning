@@ -15,8 +15,9 @@
     "doctor": "scripts/doctor.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "governance:check": "scripts/governance-python.sh --check",
     "infra:check": "node scripts/check-infra-policy.mjs",
-    "lint": "turbo run lint && pnpm boundaries && pnpm infra:check && pnpm local-stack:check && pnpm toolchain:check && pnpm workflows:check && pnpm format:check",
+    "lint": "pnpm governance:check && turbo run lint && pnpm boundaries && pnpm infra:check && pnpm local-stack:check && pnpm toolchain:check && pnpm workflows:check && pnpm format:check",
     "local-stack:check": "node scripts/check-local-stack.mjs",
     "smoke:local": "scripts/local-smoke.sh",
     "package": "pnpm build && pnpm package:web && pnpm package:api && pnpm package:jobs",
@@ -25,7 +26,7 @@
     "package:web": "node scripts/prepare-artifact.mjs web apps/web/out",
     "toolchain:check": "node scripts/check-toolchain-policy.mjs",
     "workflows:check": "node scripts/check-required-checks.mjs",
-    "test": "turbo run test && node --test scripts/*.test.mjs && python3 -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py"
+    "test": "pnpm governance:check && turbo run test && node --test scripts/*.test.mjs && scripts/governance-python.sh -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

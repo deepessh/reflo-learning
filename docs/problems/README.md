@@ -29,5 +29,5 @@ Issues.
 Run the repository check with:
 
 ```sh
-python3 scripts/validate_problem_docs.py
+scripts/governance-python.sh scripts/validate_problem_docs.py
 ```

@@ -24,7 +24,7 @@ Dependency declarations use one exact body line: `Depends on: #12, #13`. Omit th
 Agents are stateless between sessions. All durable memory lives in GitHub Issues or the code:
 
 - **Task state & handoffs** — the issue is the memory. End every session by commenting on your assigned issue: what you did, what's half-done, exact next step, gotchas. The next agent reads the issue body, the latest handoff and subsequent comments, and linked PRs before touching anything. Link PRs with `Closes #<n>`.
-- **Decisions** — accepted ADRs under `docs/adrs/` are the searchable architecture and process authority; GitHub issues labeled `decision` hold proposals, evidence, discussion, and authorization. Before any architectural or library choice, resolve relevant legacy IDs with `python3 scripts/validate_adrs.py --resolve "<id>"`, search accepted ADRs, then search open and closed decision issues (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or silently re-litigate an effective one.
+- **Decisions** — accepted ADRs under `docs/adrs/` are the searchable architecture and process authority; GitHub issues labeled `decision` hold proposals, evidence, discussion, and authorization. Before any architectural or library choice, resolve relevant legacy IDs with `scripts/governance-python.sh scripts/validate_adrs.py --resolve "<id>"`, search accepted ADRs, then search open and closed decision issues (`gh issue list --label decision --state all --search "<topic>"`). Never duplicate an open decision or silently re-litigate an effective one.
   1. Open a `decision` issue containing the context, independently reversible choice, options, recommendation, decision DRI, authorized decider, deadline, and implementation consequence. The issue is a proposal and has no implementation authority before an accepted ADR merges.
   2. Record the authorized verdict in an issue comment identifying the decider and approval basis. An agent may authorize its own choice only when it is outside §7, does not contradict the PRD, and the issue names the agent as authorized decider; all other choices wait for the named human.
   3. For an accepted verdict, open a PR adding one `Accepted` ADR linked to the exact verdict comment and record PR. Rejected proposals remain searchable in GitHub and do not produce ADR files. A verdict is not effective until its authorized ADR PR merges; an ADR without matching authorization is invalid.
@@ -110,11 +110,12 @@ Gov install:  python3 -m pip install --requirement scripts/requirements-governan
 Dev server:   corepack pnpm dev
 Tests:        corepack pnpm test
 Lint/format:  corepack pnpm lint / corepack pnpm format
-ADRs:         python3 scripts/validate_adrs.py
-Architecture: python3 scripts/validate_architecture.py
-Problems:     python3 scripts/validate_problem_docs.py
-Improvements: python3 scripts/agent_improvements.py validate
-Gov tests:    python3 -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
+Gov Python:   scripts/governance-python.sh --check
+ADRs:         scripts/governance-python.sh scripts/validate_adrs.py
+Architecture: scripts/governance-python.sh scripts/validate_architecture.py
+Problems:     scripts/governance-python.sh scripts/validate_problem_docs.py
+Improvements: scripts/governance-python.sh scripts/agent_improvements.py validate
+Gov tests:    scripts/governance-python.sh -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py
 Pick work:    scripts/work-item.sh pick
 Release work: scripts/work-item.sh release --handoff "<status and exact next step>"
 Build:        corepack pnpm build

@@ -31,6 +31,46 @@ record_warning() {
   REFLO_DOCTOR_WARNINGS=$((REFLO_DOCTOR_WARNINGS + 1))
 }
 
+report_node_activation() {
+  REFLO_DOCTOR_NODE_DIRECTORY=$1
+  REFLO_DOCTOR_PINNED_NODE="$REFLO_DOCTOR_NODE_DIRECTORY/node"
+  echo "node $REFLO_NODE_VERSION installed: $REFLO_DOCTOR_PINNED_NODE"
+  printf 'activate pinned node: export PATH="%s:$PATH"\n' "$REFLO_DOCTOR_NODE_DIRECTORY"
+}
+
+find_pinned_node() {
+  if [ -n "${REFLO_DOCTOR_NODE_DIRS:-}" ]; then
+    REFLO_DOCTOR_NODE_SEARCH_DIRS=$REFLO_DOCTOR_NODE_DIRS
+  else
+    REFLO_DOCTOR_NODE_SEARCH_DIRS=$REFLO_DOCTOR_FALLBACKS
+    if [ -n "${NVM_DIR:-}" ]; then
+      REFLO_DOCTOR_NODE_SEARCH_DIRS="$NVM_DIR/versions/node/v$REFLO_NODE_VERSION/bin:$REFLO_DOCTOR_NODE_SEARCH_DIRS"
+    fi
+    if [ -n "${VOLTA_HOME:-}" ]; then
+      REFLO_DOCTOR_NODE_SEARCH_DIRS="$VOLTA_HOME/bin:$REFLO_DOCTOR_NODE_SEARCH_DIRS"
+    fi
+  fi
+
+  REFLO_DOCTOR_NODE_OLD_IFS=$IFS
+  IFS=:
+  for REFLO_DOCTOR_NODE_DIRECTORY in $REFLO_DOCTOR_NODE_SEARCH_DIRS; do
+    REFLO_DOCTOR_NODE_CANDIDATE="$REFLO_DOCTOR_NODE_DIRECTORY/node"
+    if [ -x "$REFLO_DOCTOR_NODE_CANDIDATE" ]; then
+      REFLO_DOCTOR_NODE_CANDIDATE_VERSION=$(
+        "$REFLO_DOCTOR_NODE_CANDIDATE" --version 2>/dev/null || true
+      )
+      REFLO_DOCTOR_NODE_CANDIDATE_VERSION=${REFLO_DOCTOR_NODE_CANDIDATE_VERSION#v}
+      if [ "$REFLO_DOCTOR_NODE_CANDIDATE_VERSION" = "$REFLO_NODE_VERSION" ]; then
+        IFS=$REFLO_DOCTOR_NODE_OLD_IFS
+        report_node_activation "$REFLO_DOCTOR_NODE_DIRECTORY"
+        return 0
+      fi
+    fi
+  done
+  IFS=$REFLO_DOCTOR_NODE_OLD_IFS
+  return 1
+}
+
 resolve_command() {
   REFLO_DOCTOR_COMMAND=$1
   REFLO_DOCTOR_RESOLVED=$(command -v "$REFLO_DOCTOR_COMMAND" 2>/dev/null || true)
@@ -76,6 +116,7 @@ if check_required_command node; then
   REFLO_DOCTOR_ACTUAL_NODE=${REFLO_DOCTOR_ACTUAL_NODE#v}
   if [ "$REFLO_DOCTOR_ACTUAL_NODE" != "$REFLO_NODE_VERSION" ]; then
     record_error "node is $REFLO_DOCTOR_ACTUAL_NODE; expected exactly $REFLO_NODE_VERSION from .nvmrc"
+    find_pinned_node || true
   else
     echo "node version: $REFLO_DOCTOR_ACTUAL_NODE (exact)"
   fi

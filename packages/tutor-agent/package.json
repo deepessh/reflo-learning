@@ -1,5 +1,5 @@
 {
-  "name": "@reflo/api",
+  "name": "@reflo/tutor-agent",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,23 +8,28 @@
   "files": [
     "dist"
   ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch --clear-screen=false src/index.ts",
     "lint": "eslint .",
-    "start": "node dist/index.js",
     "test": "vitest run"
   },
   "dependencies": {
-    "@reflo/accounts": "workspace:*",
-    "@reflo/config": "workspace:*",
-    "@reflo/contracts": "workspace:*",
-    "@reflo/db": "workspace:*",
-    "@reflo/tutor-agent": "workspace:*"
+    "@reflo/asset-delivery": "workspace:*",
+    "@reflo/model-router": "workspace:*",
+    "@reflo/retrieval": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
-    "tsx": "4.23.1",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }

@@ -432,6 +432,12 @@ BEGIN
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.fsrs_transition_payload
   WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.delivery_submission
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.delivery_streak_day
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.delivery_streak
+  WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.assessment_replacement_item
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.assessment_replacement_bundle
@@ -451,6 +457,8 @@ BEGIN
   DELETE FROM public.attempt
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.delivery_item
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.quiz_delivery
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.review_schedule
   WHERE owner_scope_id = p_owner_scope_id;
@@ -1026,7 +1034,9 @@ CREATE TABLE public.channel_identity (
     verified_at timestamp with time zone,
     revoked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    identity_class text NOT NULL,
     CONSTRAINT channel_identity_check CHECK (((revoked_at IS NULL) OR (verified_at IS NULL) OR (revoked_at >= verified_at))),
+    CONSTRAINT channel_identity_identity_class_check CHECK ((identity_class = 'demo_staff'::text)),
     CONSTRAINT channel_identity_provider_check CHECK ((provider = ANY (ARRAY['telegram'::text, 'email'::text, 'whatsapp'::text])))
 );
 
@@ -1216,6 +1226,61 @@ CREATE TABLE public.delivery_override_cancellation (
 );
 
 ALTER TABLE ONLY public.delivery_override_cancellation FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: delivery_streak; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.delivery_streak (
+    owner_scope_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    current_streak integer NOT NULL,
+    longest_streak integer NOT NULL,
+    last_answered_on date NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT delivery_streak_check CHECK ((longest_streak >= current_streak)),
+    CONSTRAINT delivery_streak_current_streak_check CHECK ((current_streak > 0))
+);
+
+ALTER TABLE ONLY public.delivery_streak FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: delivery_streak_day; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.delivery_streak_day (
+    owner_scope_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    local_date date NOT NULL,
+    time_zone text NOT NULL,
+    delivery_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.delivery_streak_day FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: delivery_submission; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.delivery_submission (
+    owner_scope_id uuid NOT NULL,
+    provider text NOT NULL,
+    provider_submission_id text NOT NULL,
+    delivery_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    request_digest text NOT NULL,
+    submitted_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT delivery_submission_provider_check CHECK ((provider = ANY (ARRAY['telegram'::text, 'email'::text]))),
+    CONSTRAINT delivery_submission_provider_submission_id_check CHECK (((length(provider_submission_id) >= 1) AND (length(provider_submission_id) <= 240))),
+    CONSTRAINT delivery_submission_request_digest_check CHECK ((request_digest ~ '^[0-9a-f]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.delivery_submission FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1586,16 +1651,26 @@ CREATE TABLE public.quiz_delivery (
     channel_identity_id uuid NOT NULL,
     provider text NOT NULL,
     provider_message_id text,
-    idempotency_key text,
+    idempotency_key text NOT NULL,
     status text NOT NULL,
     attempt_count integer DEFAULT 0 NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     sanitized_error jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    request_digest text NOT NULL,
+    email_token_digest text,
+    email_token_expires_at timestamp with time zone,
+    email_token_redeemed_at timestamp with time zone,
+    claim_token uuid,
+    lease_expires_at timestamp with time zone,
     CONSTRAINT quiz_delivery_attempt_count_check CHECK ((attempt_count >= 0)),
+    CONSTRAINT quiz_delivery_claim_shape CHECK ((((claim_token IS NULL) AND (lease_expires_at IS NULL)) OR ((status = 'processing'::text) AND (claim_token IS NOT NULL) AND (lease_expires_at IS NOT NULL)))),
+    CONSTRAINT quiz_delivery_email_token_digest_check CHECK (((email_token_digest IS NULL) OR (email_token_digest ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT quiz_delivery_email_token_shape CHECK ((((provider = 'email'::text) AND ((email_token_digest IS NULL) OR ((email_token_expires_at = expires_at) AND ((email_token_redeemed_at IS NULL) OR (email_token_redeemed_at <= expires_at))))) OR ((provider <> 'email'::text) AND (email_token_digest IS NULL) AND (email_token_expires_at IS NULL) AND (email_token_redeemed_at IS NULL)))),
     CONSTRAINT quiz_delivery_provider_check CHECK ((provider = ANY (ARRAY['telegram'::text, 'email'::text, 'whatsapp'::text]))),
-    CONSTRAINT quiz_delivery_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'submitted'::text, 'delivered'::text, 'failed'::text, 'expired'::text, 'cancelled'::text])))
+    CONSTRAINT quiz_delivery_request_digest_shape CHECK ((request_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT quiz_delivery_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'submitted'::text, 'delivered'::text, 'failed'::text, 'expired'::text, 'cancelled'::text])))
 );
 
 ALTER TABLE ONLY public.quiz_delivery FORCE ROW LEVEL SECURITY;
@@ -2448,6 +2523,38 @@ ALTER TABLE ONLY public.delivery_override
 
 
 --
+-- Name: delivery_streak_day delivery_streak_day_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_streak_day
+    ADD CONSTRAINT delivery_streak_day_pkey PRIMARY KEY (owner_scope_id, user_id, local_date);
+
+
+--
+-- Name: delivery_streak delivery_streak_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_streak
+    ADD CONSTRAINT delivery_streak_pkey PRIMARY KEY (owner_scope_id, user_id);
+
+
+--
+-- Name: delivery_submission delivery_submission_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_submission
+    ADD CONSTRAINT delivery_submission_pkey PRIMARY KEY (owner_scope_id, provider, provider_submission_id);
+
+
+--
+-- Name: delivery_submission delivery_submission_provider_provider_submission_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_submission
+    ADD CONSTRAINT delivery_submission_provider_provider_submission_id_key UNIQUE (provider, provider_submission_id);
+
+
+--
 -- Name: attempt_concept_evidence evidence_unanswerable_reason_shape; Type: CHECK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2979,6 +3086,13 @@ CREATE INDEX attempt_concept_evidence_replay_idx ON public.attempt_concept_evide
 
 
 --
+-- Name: attempt_delivery_item_once_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX attempt_delivery_item_once_idx ON public.attempt USING btree (owner_scope_id, delivery_item_id) WHERE (delivery_item_id IS NOT NULL);
+
+
+--
 -- Name: attempt_provider_submission_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3074,6 +3188,13 @@ CREATE UNIQUE INDEX narration_script_active_chapter_idx ON public.narration_scri
 --
 
 CREATE INDEX outbox_message_unpublished_idx ON public.outbox_message USING btree (priority, created_at, message_id) WHERE (published_at IS NULL);
+
+
+--
+-- Name: quiz_delivery_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX quiz_delivery_expiry_idx ON public.quiz_delivery USING btree (expires_at, owner_scope_id) WHERE (status = ANY (ARRAY['pending'::text, 'processing'::text, 'submitted'::text]));
 
 
 --
@@ -3214,6 +3335,20 @@ CREATE TRIGGER delivery_override_cancellation_is_append_only BEFORE DELETE OR UP
 --
 
 CREATE TRIGGER delivery_override_is_append_only BEFORE DELETE OR UPDATE ON public.delivery_override FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: delivery_streak_day delivery_streak_day_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER delivery_streak_day_is_append_only BEFORE DELETE OR UPDATE ON public.delivery_streak_day FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: delivery_submission delivery_submission_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER delivery_submission_is_append_only BEFORE DELETE OR UPDATE ON public.delivery_submission FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
 
 
 --
@@ -3830,6 +3965,46 @@ ALTER TABLE ONLY public.delivery_override
 
 
 --
+-- Name: delivery_streak_day delivery_streak_day_owner_scope_id_delivery_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_streak_day
+    ADD CONSTRAINT delivery_streak_day_owner_scope_id_delivery_id_fkey FOREIGN KEY (owner_scope_id, delivery_id) REFERENCES public.quiz_delivery(owner_scope_id, id);
+
+
+--
+-- Name: delivery_streak_day delivery_streak_day_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_streak_day
+    ADD CONSTRAINT delivery_streak_day_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: delivery_streak delivery_streak_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_streak
+    ADD CONSTRAINT delivery_streak_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: delivery_submission delivery_submission_owner_scope_id_delivery_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_submission
+    ADD CONSTRAINT delivery_submission_owner_scope_id_delivery_id_fkey FOREIGN KEY (owner_scope_id, delivery_id) REFERENCES public.quiz_delivery(owner_scope_id, id);
+
+
+--
+-- Name: delivery_submission delivery_submission_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_submission
+    ADD CONSTRAINT delivery_submission_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
 -- Name: attempt_concept_evidence evidence_attempt_provenance_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4438,6 +4613,27 @@ CREATE POLICY authorized_learning_scope_reset ON public.delivery_override_cancel
 
 
 --
+-- Name: delivery_streak authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.delivery_streak FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: delivery_streak_day authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.delivery_streak_day FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: delivery_submission authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.delivery_submission FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
 -- Name: fsrs_card_payload authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -4484,6 +4680,13 @@ CREATE POLICY authorized_learning_scope_reset ON public.learning_event FOR DELET
 --
 
 CREATE POLICY authorized_learning_scope_reset ON public.learning_event_concept FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: quiz_delivery authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.quiz_delivery FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
 
 
 --
@@ -4572,6 +4775,24 @@ ALTER TABLE public.delivery_override ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.delivery_override_cancellation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: delivery_streak; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.delivery_streak ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: delivery_streak_day; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.delivery_streak_day ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: delivery_submission; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.delivery_submission ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: fsrs_card_payload; Type: ROW SECURITY; Schema: public; Owner: -
@@ -4910,6 +5131,27 @@ CREATE POLICY scoped_active_membership ON public.delivery_override_cancellation 
 
 
 --
+-- Name: delivery_streak scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.delivery_streak USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: delivery_streak_day scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.delivery_streak_day USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: delivery_submission scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.delivery_submission USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: fsrs_card_payload scoped_active_membership; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -5086,4 +5328,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260723000100'),
     ('20260723000200'),
     ('20260724000100'),
-    ('20260724000200');
+    ('20260724000200'),
+    ('20260724000300');

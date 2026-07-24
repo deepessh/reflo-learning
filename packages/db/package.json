@@ -29,6 +29,7 @@
     "@reflo/activation": "workspace:*",
     "@reflo/assessment": "workspace:*",
     "@reflo/audio": "workspace:*",
+    "@reflo/delivery": "workspace:*",
     "@reflo/evaluation": "workspace:*",
     "@reflo/ingestion": "workspace:*",
     "@reflo/knowledge-model": "workspace:*",

@@ -143,6 +143,7 @@ function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
     );
     const approvedCredentialAdapterRoots = [
       path.join(packagesRoot, "accounts", "src", "adapters"),
+      path.join(packagesRoot, "delivery", "src", "adapters"),
       path.join(packagesRoot, "ingestion", "src", "adapters"),
     ];
     const isInsideApprovedCredentialAdapter =
@@ -170,27 +171,26 @@ function inspectFile(file, sourceApp, appsRoot, packagesRoot, violations) {
       (candidate) =>
         specifier === candidate || specifier.startsWith(`${candidate}/`),
     );
-    const transactionalEmailAdapterRoot = path.join(
-      packagesRoot,
-      "accounts",
-      "src",
-      "adapters",
-    );
-    const relativeToTransactionalEmailAdapters = path.relative(
-      transactionalEmailAdapterRoot,
-      file,
-    );
+    const transactionalEmailAdapterRoots = [
+      path.join(packagesRoot, "accounts", "src", "adapters"),
+      path.join(packagesRoot, "delivery", "src", "adapters"),
+    ];
     const isInsideTransactionalEmailAdapters =
-      relativeToTransactionalEmailAdapters !== "" &&
-      !relativeToTransactionalEmailAdapters.startsWith("..") &&
-      !path.isAbsolute(relativeToTransactionalEmailAdapters);
+      transactionalEmailAdapterRoots.some((adapterRoot) => {
+        const relative = path.relative(adapterRoot, file);
+        return (
+          relative !== "" &&
+          !relative.startsWith("..") &&
+          !path.isAbsolute(relative)
+        );
+      });
 
     if (
       transactionalEmailProviderSdk !== undefined &&
       !isInsideTransactionalEmailAdapters
     ) {
       violations.push(
-        `${file}: transactional email provider SDK ${specifier} is only allowed in packages/accounts/src/adapters`,
+        `${file}: transactional email provider SDK ${specifier} is only allowed in approved email adapter modules`,
       );
       continue;
     }

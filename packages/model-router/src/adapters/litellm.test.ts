@@ -122,10 +122,11 @@ describe("LiteLLM development adapters", () => {
         input: textFixtures()[2]!.input,
         task: "assessment.grade-short-answer.v1" as const,
         value: {
-          evidence: [
+          judgments: [
             {
               conceptId: "unauthorized-concept",
               confidence: 0.99,
+              judgmentKind: "scored",
               rubricBand: "correct",
               score: 1,
             },
@@ -361,17 +362,26 @@ function textFixtures(): readonly {
       capability: "grading",
       input: {
         answer: "An isolated network",
-        conceptIds: ["vpc"],
         question: "What is a VPC?",
-        rubric: "Defines network isolation",
+        rubrics: [
+          {
+            conceptId: "vpc",
+            materialContradictions: [],
+            requiredCriteria: ["Defines network isolation"],
+            rubricId: "vpc-rubric",
+            rubricVersion: "1",
+            sourceSpanIds: ["span-1"],
+          },
+        ],
         sourceSpans,
       },
       task: "assessment.grade-short-answer.v1",
       value: {
-        evidence: [
+        judgments: [
           {
             conceptId: "vpc",
             confidence: 0.99,
+            judgmentKind: "scored",
             rubricBand: "correct",
             score: 1,
           },

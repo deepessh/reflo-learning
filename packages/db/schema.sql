@@ -254,17 +254,25 @@ BEGIN
     RAISE EXCEPTION 'attempt.created_at is immutable'
       USING ERRCODE = '55000';
   END IF;
-  IF EXISTS (
-    SELECT 1
-    FROM attempt_concept_evidence
-    WHERE owner_scope_id = OLD.owner_scope_id
-      AND attempt_id = OLD.id
+  IF (
+    EXISTS (
+      SELECT 1
+      FROM attempt_concept_evidence
+      WHERE owner_scope_id = OLD.owner_scope_id
+        AND attempt_id = OLD.id
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM assessment_finalization
+      WHERE owner_scope_id = OLD.owner_scope_id
+        AND attempt_id = OLD.id
+    )
   ) AND (
     NEW.user_id IS DISTINCT FROM OLD.user_id
     OR NEW.quiz_item_id IS DISTINCT FROM OLD.quiz_item_id
     OR NEW.outcome IS DISTINCT FROM OLD.outcome
   ) THEN
-    RAISE EXCEPTION 'evidenced attempt provenance is immutable'
+    RAISE EXCEPTION 'finalized attempt provenance is immutable'
       USING ERRCODE = '55000';
   END IF;
   RETURN NEW;
@@ -304,6 +312,20 @@ $$;
 
 
 --
+-- Name: reflo_reject_configuration_mutation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_reject_configuration_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION '% is immutable configuration', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END
+$$;
+
+
+--
 -- Name: reflo_reset_learning_scope(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -321,6 +343,12 @@ BEGIN
   DELETE FROM public.fsrs_replay_manifest
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.fsrs_transition_payload
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.assessment_replacement_item
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.assessment_replacement_bundle
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.assessment_finalization
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.attempt_concept_evidence
   WHERE owner_scope_id = p_owner_scope_id;
@@ -444,6 +472,84 @@ CREATE TABLE public.app_user (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT app_user_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text, 'deletion_pending'::text])))
 );
+
+
+--
+-- Name: assessment_finalization; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assessment_finalization (
+    owner_scope_id uuid NOT NULL,
+    idempotency_key text NOT NULL,
+    attempt_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    attempt_outcome text NOT NULL,
+    finalization_kind text NOT NULL,
+    grading_policy_version text NOT NULL,
+    rating_mapping_version text NOT NULL,
+    confidence_threshold numeric(6,5) NOT NULL,
+    calibration_evidence_id text NOT NULL,
+    policy_binding jsonb NOT NULL,
+    policy_binding_digest text NOT NULL,
+    learner_message text NOT NULL,
+    request_digest text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT assessment_finalization_attempt_outcome_check CHECK ((attempt_outcome = ANY (ARRAY['graded'::text, 'abstained'::text]))),
+    CONSTRAINT assessment_finalization_calibration_evidence_id_check CHECK (((length(calibration_evidence_id) >= 1) AND (length(calibration_evidence_id) <= 240))),
+    CONSTRAINT assessment_finalization_confidence_threshold_check CHECK (((confidence_threshold >= (0)::numeric) AND (confidence_threshold <= (1)::numeric))),
+    CONSTRAINT assessment_finalization_finalization_kind_check CHECK ((finalization_kind = ANY (ARRAY['short_answer'::text, 'keyed_mc_replacement'::text]))),
+    CONSTRAINT assessment_finalization_grading_policy_version_check CHECK ((grading_policy_version = 'grading-policy-v1'::text)),
+    CONSTRAINT assessment_finalization_idempotency_key_check CHECK (((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 240))),
+    CONSTRAINT assessment_finalization_learner_message_check CHECK (((length(learner_message) >= 1) AND (length(learner_message) <= 500))),
+    CONSTRAINT assessment_finalization_policy_binding_check CHECK ((jsonb_typeof(policy_binding) = 'object'::text)),
+    CONSTRAINT assessment_finalization_policy_binding_digest_check CHECK ((policy_binding_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_finalization_rating_mapping_version_check CHECK ((rating_mapping_version = 'rating-mapping-v1'::text)),
+    CONSTRAINT assessment_finalization_request_digest_check CHECK ((request_digest ~ '^[0-9a-f]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.assessment_finalization FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: assessment_replacement_bundle; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assessment_replacement_bundle (
+    owner_scope_id uuid NOT NULL,
+    id uuid NOT NULL,
+    original_attempt_id uuid NOT NULL,
+    grading_policy_version text NOT NULL,
+    bundle_version text NOT NULL,
+    concept_set_digest text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT assessment_replacement_bundle_bundle_version_check CHECK ((bundle_version = 'mc-replacement-bundle-v1'::text)),
+    CONSTRAINT assessment_replacement_bundle_concept_set_digest_check CHECK ((concept_set_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_replacement_bundle_grading_policy_version_check CHECK ((grading_policy_version = 'grading-policy-v1'::text))
+);
+
+ALTER TABLE ONLY public.assessment_replacement_bundle FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: assessment_replacement_item; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assessment_replacement_item (
+    owner_scope_id uuid NOT NULL,
+    id uuid NOT NULL,
+    bundle_id uuid NOT NULL,
+    concept_id uuid NOT NULL,
+    quiz_item_id uuid NOT NULL,
+    rubric_id text NOT NULL,
+    rubric_version text NOT NULL,
+    normalized_prompt_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT assessment_replacement_item_normalized_prompt_hash_check CHECK ((normalized_prompt_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_replacement_item_rubric_id_check CHECK (((length(rubric_id) >= 1) AND (length(rubric_id) <= 240))),
+    CONSTRAINT assessment_replacement_item_rubric_version_check CHECK (((length(rubric_version) >= 1) AND (length(rubric_version) <= 120)))
+);
+
+ALTER TABLE ONLY public.assessment_replacement_item FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -586,9 +692,13 @@ CREATE TABLE public.attempt (
     grading_confidence numeric(6,5),
     grader_provenance jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    grading_policy_version text,
+    rating_mapping_version text,
+    replacement_for_attempt_id uuid,
     CONSTRAINT attempt_check CHECK (((session_id IS NOT NULL) OR (delivery_item_id IS NOT NULL))),
     CONSTRAINT attempt_check1 CHECK (((provider IS NULL) = (provider_submission_id IS NULL))),
     CONSTRAINT attempt_grading_confidence_check CHECK (((grading_confidence IS NULL) OR ((grading_confidence >= (0)::numeric) AND (grading_confidence <= (1)::numeric)))),
+    CONSTRAINT attempt_grading_policy_shape CHECK ((((grading_policy_version IS NULL) AND (rating_mapping_version IS NULL) AND (replacement_for_attempt_id IS NULL)) OR ((grading_policy_version = 'grading-policy-v1'::text) AND (rating_mapping_version = 'rating-mapping-v1'::text) AND (overall_grade IS NULL) AND (grading_confidence IS NULL) AND (replacement_for_attempt_id IS DISTINCT FROM id)))),
     CONSTRAINT attempt_outcome_check CHECK ((outcome = ANY (ARRAY['graded'::text, 'abstained'::text, 'superseded'::text]))),
     CONSTRAINT attempt_overall_grade_check CHECK (((overall_grade IS NULL) OR ((overall_grade >= (0)::numeric) AND (overall_grade <= (1)::numeric)))),
     CONSTRAINT attempt_provider_check CHECK ((provider = ANY (ARRAY['telegram'::text, 'email'::text, 'whatsapp'::text])))
@@ -624,6 +734,7 @@ CREATE TABLE public.attempt_concept_evidence (
     attempt_created_at timestamp with time zone NOT NULL,
     attempt_user_id uuid NOT NULL,
     attempt_outcome text NOT NULL,
+    unanswerable_reason text,
     CONSTRAINT attempt_concept_evidence_confidence_check CHECK (((grader_confidence >= (0)::numeric) AND (grader_confidence <= (1)::numeric))),
     CONSTRAINT attempt_concept_evidence_score_check CHECK (((score >= (0)::numeric) AND (score <= (1)::numeric))),
     CONSTRAINT evidence_attempt_outcome_closed CHECK ((attempt_outcome = ANY (ARRAY['graded'::text, 'abstained'::text, 'superseded'::text]))),
@@ -636,7 +747,8 @@ CREATE TABLE public.attempt_concept_evidence (
     CONSTRAINT evidence_ineligibility_reason_closed CHECK (((ineligibility_reason IS NULL) OR (ineligibility_reason = ANY (ARRAY['attempt_abstained'::text, 'below_threshold'::text, 'legacy_unversioned'::text, 'policy_ineligible'::text, 'semantic_unanswerable'::text, 'superseded'::text])))),
     CONSTRAINT evidence_judgment_kind_closed CHECK ((judgment_kind = ANY (ARRAY['scored'::text, 'unanswerable'::text]))),
     CONSTRAINT evidence_judgment_shape CHECK ((((judgment_kind = 'scored'::text) AND (score IS NOT NULL) AND (rubric_band IS NOT NULL)) OR ((judgment_kind = 'unanswerable'::text) AND (score IS NULL) AND (rubric_band IS NULL) AND (grader_confidence IS NULL) AND (eligible_for_mastery = false) AND (fsrs_rating IS NULL)))),
-    CONSTRAINT evidence_rubric_band_closed CHECK (((rubric_band IS NULL) OR (rubric_band = ANY (ARRAY['incorrect'::text, 'partially_correct'::text, 'correct'::text]))))
+    CONSTRAINT evidence_rubric_band_closed CHECK (((rubric_band IS NULL) OR (rubric_band = ANY (ARRAY['incorrect'::text, 'partially_correct'::text, 'correct'::text])))),
+    CONSTRAINT evidence_unanswerable_reason_closed CHECK (((unanswerable_reason IS NULL) OR (unanswerable_reason = ANY (ARRAY['source_insufficient'::text, 'source_conflict'::text, 'rubric_insufficient'::text, 'rubric_conflict'::text]))))
 );
 
 ALTER TABLE ONLY public.attempt_concept_evidence FORCE ROW LEVEL SECURITY;
@@ -1051,6 +1163,27 @@ CREATE TABLE public.fsrs_transition_payload (
 );
 
 ALTER TABLE ONLY public.fsrs_transition_payload FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: grading_policy_binding; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.grading_policy_binding (
+    grading_policy_version text NOT NULL,
+    rating_mapping_version text NOT NULL,
+    confidence_threshold numeric(6,5) NOT NULL,
+    calibration_evidence_id text NOT NULL,
+    expected_model_provenance jsonb NOT NULL,
+    binding_digest text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT grading_policy_binding_binding_digest_check CHECK ((binding_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT grading_policy_binding_calibration_evidence_id_check CHECK (((length(calibration_evidence_id) >= 1) AND (length(calibration_evidence_id) <= 240))),
+    CONSTRAINT grading_policy_binding_confidence_threshold_check CHECK (((confidence_threshold >= (0)::numeric) AND (confidence_threshold <= (1)::numeric))),
+    CONSTRAINT grading_policy_binding_expected_model_provenance_check CHECK ((jsonb_typeof(expected_model_provenance) = 'object'::text)),
+    CONSTRAINT grading_policy_binding_grading_policy_version_check CHECK ((grading_policy_version = 'grading-policy-v1'::text)),
+    CONSTRAINT grading_policy_binding_rating_mapping_version_check CHECK ((rating_mapping_version = 'rating-mapping-v1'::text))
+);
 
 
 --
@@ -1670,6 +1803,62 @@ ALTER TABLE ONLY public.app_user
 
 
 --
+-- Name: assessment_finalization assessment_finalization_owner_scope_id_attempt_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_finalization
+    ADD CONSTRAINT assessment_finalization_owner_scope_id_attempt_id_key UNIQUE (owner_scope_id, attempt_id);
+
+
+--
+-- Name: assessment_finalization assessment_finalization_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_finalization
+    ADD CONSTRAINT assessment_finalization_pkey PRIMARY KEY (owner_scope_id, idempotency_key);
+
+
+--
+-- Name: assessment_replacement_bundle assessment_replacement_bundle_owner_scope_id_original_attem_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_bundle
+    ADD CONSTRAINT assessment_replacement_bundle_owner_scope_id_original_attem_key UNIQUE (owner_scope_id, original_attempt_id, grading_policy_version);
+
+
+--
+-- Name: assessment_replacement_bundle assessment_replacement_bundle_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_bundle
+    ADD CONSTRAINT assessment_replacement_bundle_pkey PRIMARY KEY (owner_scope_id, id);
+
+
+--
+-- Name: assessment_replacement_item assessment_replacement_item_owner_scope_id_bundle_id_concep_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_item
+    ADD CONSTRAINT assessment_replacement_item_owner_scope_id_bundle_id_concep_key UNIQUE (owner_scope_id, bundle_id, concept_id);
+
+
+--
+-- Name: assessment_replacement_item assessment_replacement_item_owner_scope_id_bundle_id_normal_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_item
+    ADD CONSTRAINT assessment_replacement_item_owner_scope_id_bundle_id_normal_key UNIQUE (owner_scope_id, bundle_id, normalized_prompt_hash);
+
+
+--
+-- Name: assessment_replacement_item assessment_replacement_item_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_item
+    ADD CONSTRAINT assessment_replacement_item_pkey PRIMARY KEY (owner_scope_id, id);
+
+
+--
 -- Name: asset asset_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1755,6 +1944,14 @@ ALTER TABLE ONLY public.attempt_concept_evidence
 
 ALTER TABLE ONLY public.attempt
     ADD CONSTRAINT attempt_evidence_provenance_key UNIQUE (owner_scope_id, id, user_id, created_at, outcome);
+
+
+--
+-- Name: attempt attempt_finalization_provenance_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt
+    ADD CONSTRAINT attempt_finalization_provenance_key UNIQUE (owner_scope_id, id, user_id, outcome);
 
 
 --
@@ -2062,6 +2259,14 @@ ALTER TABLE ONLY public.delivery_override
 
 
 --
+-- Name: attempt_concept_evidence evidence_unanswerable_reason_shape; Type: CHECK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE public.attempt_concept_evidence
+    ADD CONSTRAINT evidence_unanswerable_reason_shape CHECK ((((judgment_kind = 'unanswerable'::text) AND (unanswerable_reason IS NOT NULL)) OR ((judgment_kind = 'scored'::text) AND (unanswerable_reason IS NULL)))) NOT VALID;
+
+
+--
 -- Name: fsrs_card_payload fsrs_card_payload_owner_scope_id_card_digest_fsrs_profile_i_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2131,6 +2336,22 @@ ALTER TABLE ONLY public.fsrs_transition_payload
 
 ALTER TABLE ONLY public.fsrs_transition_payload
     ADD CONSTRAINT fsrs_transition_payload_pkey PRIMARY KEY (owner_scope_id, transition_digest);
+
+
+--
+-- Name: grading_policy_binding grading_policy_binding_grading_policy_version_binding_diges_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_policy_binding
+    ADD CONSTRAINT grading_policy_binding_grading_policy_version_binding_diges_key UNIQUE (grading_policy_version, binding_digest);
+
+
+--
+-- Name: grading_policy_binding grading_policy_binding_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.grading_policy_binding
+    ADD CONSTRAINT grading_policy_binding_pkey PRIMARY KEY (grading_policy_version);
 
 
 --
@@ -2737,6 +2958,27 @@ CREATE TRIGGER activation_generation_operation_terminal_is_final BEFORE UPDATE O
 
 
 --
+-- Name: assessment_finalization assessment_finalization_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER assessment_finalization_is_append_only BEFORE DELETE OR UPDATE ON public.assessment_finalization FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: assessment_replacement_bundle assessment_replacement_bundle_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER assessment_replacement_bundle_is_append_only BEFORE DELETE OR UPDATE ON public.assessment_replacement_bundle FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: assessment_replacement_item assessment_replacement_item_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER assessment_replacement_item_is_append_only BEFORE DELETE OR UPDATE ON public.assessment_replacement_item FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
 -- Name: async_operation async_operation_terminal_is_final; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2797,6 +3039,13 @@ CREATE TRIGGER fsrs_replay_run_is_append_only BEFORE DELETE OR UPDATE ON public.
 --
 
 CREATE TRIGGER fsrs_transition_payload_is_append_only BEFORE DELETE OR UPDATE ON public.fsrs_transition_payload FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: grading_policy_binding grading_policy_binding_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER grading_policy_binding_is_immutable BEFORE DELETE OR UPDATE ON public.grading_policy_binding FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_configuration_mutation();
 
 
 --
@@ -2863,6 +3112,54 @@ ALTER TABLE ONLY public.activation_generation_operation
 
 ALTER TABLE ONLY public.activation_generation_operation
     ADD CONSTRAINT activation_generation_operati_owner_scope_id_course_id_cur_fkey FOREIGN KEY (owner_scope_id, course_id, curriculum_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, course_id, id);
+
+
+--
+-- Name: assessment_finalization assessment_finalization_grading_policy_version_policy_bind_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_finalization
+    ADD CONSTRAINT assessment_finalization_grading_policy_version_policy_bind_fkey FOREIGN KEY (grading_policy_version, policy_binding_digest) REFERENCES public.grading_policy_binding(grading_policy_version, binding_digest);
+
+
+--
+-- Name: assessment_finalization assessment_finalization_owner_scope_id_attempt_id_user_id__fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_finalization
+    ADD CONSTRAINT assessment_finalization_owner_scope_id_attempt_id_user_id__fkey FOREIGN KEY (owner_scope_id, attempt_id, user_id, attempt_outcome) REFERENCES public.attempt(owner_scope_id, id, user_id, outcome);
+
+
+--
+-- Name: assessment_finalization assessment_finalization_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_finalization
+    ADD CONSTRAINT assessment_finalization_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: assessment_replacement_bundle assessment_replacement_bundle_owner_scope_id_original_atte_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_bundle
+    ADD CONSTRAINT assessment_replacement_bundle_owner_scope_id_original_atte_fkey FOREIGN KEY (owner_scope_id, original_attempt_id) REFERENCES public.attempt(owner_scope_id, id);
+
+
+--
+-- Name: assessment_replacement_item assessment_replacement_item_owner_scope_id_bundle_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_item
+    ADD CONSTRAINT assessment_replacement_item_owner_scope_id_bundle_id_fkey FOREIGN KEY (owner_scope_id, bundle_id) REFERENCES public.assessment_replacement_bundle(owner_scope_id, id);
+
+
+--
+-- Name: assessment_replacement_item assessment_replacement_item_owner_scope_id_quiz_item_id_co_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_item
+    ADD CONSTRAINT assessment_replacement_item_owner_scope_id_quiz_item_id_co_fkey FOREIGN KEY (owner_scope_id, quiz_item_id, concept_id) REFERENCES public.quiz_item_concept(owner_scope_id, quiz_item_id, concept_id);
 
 
 --
@@ -2991,6 +3288,14 @@ ALTER TABLE ONLY public.attempt
 
 ALTER TABLE ONLY public.attempt
     ADD CONSTRAINT attempt_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: attempt attempt_replacement_scope_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attempt
+    ADD CONSTRAINT attempt_replacement_scope_fk FOREIGN KEY (owner_scope_id, replacement_for_attempt_id) REFERENCES public.attempt(owner_scope_id, id);
 
 
 --
@@ -3695,6 +4000,24 @@ CREATE POLICY activation_generation_operation_active_membership ON public.activa
 
 
 --
+-- Name: assessment_finalization; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.assessment_finalization ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: assessment_replacement_bundle; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.assessment_replacement_bundle ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: assessment_replacement_item; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.assessment_replacement_item ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: asset; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -4125,6 +4448,27 @@ CREATE POLICY scope_membership_active_membership ON public.scope_membership USIN
 
 
 --
+-- Name: assessment_finalization scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.assessment_finalization USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: assessment_replacement_bundle scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.assessment_replacement_bundle USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: assessment_replacement_item scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.assessment_replacement_item USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: asset scoped_active_membership; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -4404,4 +4748,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260721000400'),
     ('20260721000500'),
     ('20260723000100'),
-    ('20260723000200');
+    ('20260723000200'),
+    ('20260724000100');

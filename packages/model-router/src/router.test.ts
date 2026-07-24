@@ -55,7 +55,7 @@ describe("typed model router", () => {
       effectiveModel: "qwen-plus",
       promptId: "curriculum-structure",
       requestedSelector: "qwen.structured",
-      routePolicyVersion: "route-policy-v2",
+      routePolicyVersion: "route-policy-v3",
       validationOutcome: "passed",
     });
     expect(result.provenance.promptDigest).toMatch(/^[a-f0-9]{64}$/);
@@ -86,10 +86,11 @@ describe("typed model router", () => {
         {
           type: "result",
           value: {
-            evidence: [
+            judgments: [
               {
                 conceptId: "concept-1",
                 confidence: 0.98,
+                judgmentKind: "scored",
                 rubricBand: "correct",
                 score: 1,
               },
@@ -109,9 +110,17 @@ describe("typed model router", () => {
       "assessment.grade-short-answer.v1",
       {
         answer: "My private learner answer",
-        conceptIds: ["concept-1"],
         question: "My answer and phone are private",
-        rubric: "Private rubric",
+        rubrics: [
+          {
+            conceptId: "concept-1",
+            materialContradictions: [],
+            requiredCriteria: ["Defines the concept"],
+            rubricId: "private-rubric",
+            rubricVersion: "1",
+            sourceSpanIds: ["span-private"],
+          },
+        ],
         sourceSpans: [
           {
             id: "span-private",
@@ -263,10 +272,11 @@ describe("typed model router", () => {
         {
           type: "result",
           value: {
-            evidence: [
+            judgments: [
               {
                 conceptId: "concept-not-authorized",
                 confidence: 0.99,
+                judgmentKind: "scored",
                 rubricBand: "correct",
                 score: 1,
               },
@@ -284,9 +294,17 @@ describe("typed model router", () => {
         "assessment.grade-short-answer.v1",
         {
           answer: "Answer",
-          conceptIds: ["concept-1"],
           question: "Question",
-          rubric: "Rubric",
+          rubrics: [
+            {
+              conceptId: "concept-1",
+              materialContradictions: [],
+              requiredCriteria: ["Criterion"],
+              rubricId: "rubric-1",
+              rubricVersion: "1",
+              sourceSpanIds: ["span-1"],
+            },
+          ],
           sourceSpans: [{ id: "span-1", text: "Source" }],
         },
         { deadlineMs: 1_000 },
@@ -606,7 +624,7 @@ describe("trace allowlist", () => {
           durationMs: 1,
           finishedAt: "2026-07-19T00:00:00.001Z",
           outcome: "success",
-          routePolicyVersion: "route-policy-v2",
+          routePolicyVersion: "route-policy-v3",
           startedAt: "2026-07-19T00:00:00.000Z",
           task: "curriculum.structure.v1",
           [field]: "secret",

@@ -24,6 +24,7 @@ export interface PromptDefinition {
 }
 
 export interface PromptBundle extends PromptDefinition {
+  readonly definitionDigest: string;
   readonly digest: string;
   readonly learnerAnswer?: string;
   readonly sourceMaterial: readonly AuthorizedSourceSpan[];
@@ -167,6 +168,7 @@ export function buildPromptBundle<Task extends PromptedTaskId>(
   const definition = PROMPT_REGISTRY_V1[task];
   const sourceMaterial = getSourceMaterial(input);
   const learnerAnswer = getLearnerAnswer(input);
+  const definitionDigest = digestValue(definition);
   const digest = digestValue({
     ...definition,
     learnerAnswer,
@@ -175,6 +177,7 @@ export function buildPromptBundle<Task extends PromptedTaskId>(
 
   return deepFreeze({
     ...definition,
+    definitionDigest,
     digest,
     ...(learnerAnswer === undefined ? {} : { learnerAnswer }),
     sourceMaterial,

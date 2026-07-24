@@ -21,8 +21,9 @@ export interface FrozenGradingPolicy {
     ModelCallProvenance,
     | "effectiveModel"
     | "effectiveModelVersion"
+    | "generationParametersVersion"
     | "inputSchemaVersion"
-    | "promptDigest"
+    | "promptDefinitionDigest"
     | "promptId"
     | "promptVersion"
     | "resultSchemaVersion"
@@ -81,11 +82,9 @@ export interface GradeShortAnswerCommand {
   readonly answer: string;
   readonly authorization: ScopeAuthorizationContext;
   readonly deadlineMs: number;
-  readonly fallbackCandidates: readonly KeyedMultipleChoiceQuestion[];
   readonly idempotencyKey: string;
   readonly policy: FrozenGradingPolicy;
-  readonly question: ShortAnswerQuestion;
-  readonly seenPromptHashes: ReadonlySet<string>;
+  readonly questionId: string;
   readonly sessionId: string;
 }
 
@@ -147,7 +146,18 @@ export type AssessmentEvidenceCandidate =
       readonly score: "0.00000" | "1.00000";
     };
 
+export type LearnerMultipleChoiceQuestion = Omit<
+  KeyedMultipleChoiceQuestion,
+  "keyedAnswer"
+>;
+
 export interface ReplacementItem {
+  readonly conceptId: string;
+  readonly id: string;
+  readonly question: LearnerMultipleChoiceQuestion;
+}
+
+export interface ReplacementItemSnapshot {
   readonly conceptId: string;
   readonly id: string;
   readonly question: KeyedMultipleChoiceQuestion;
@@ -161,11 +171,38 @@ export interface ReplacementBundle {
   readonly version: typeof REPLACEMENT_CONTRACT_VERSION;
 }
 
+export interface ReplacementBundleSnapshot extends Omit<
+  ReplacementBundle,
+  "items"
+> {
+  readonly items: readonly ReplacementItemSnapshot[];
+}
+
+export interface AuthorizedShortAnswerSnapshot {
+  readonly fallbackCandidates: readonly KeyedMultipleChoiceQuestion[];
+  readonly question: ShortAnswerQuestion;
+}
+
+export type ShortAnswerClaim =
+  | {
+      readonly claimToken: string;
+      readonly kind: "claimed";
+      readonly snapshot: AuthorizedShortAnswerSnapshot;
+    }
+  | {
+      readonly kind: "pending";
+    }
+  | {
+      readonly finalization: AssessmentFinalizationView;
+      readonly kind: "finalized";
+    };
+
 export interface ShortAnswerFinalization {
   readonly answer: string;
   readonly attemptId: string;
   readonly evidence: readonly AssessmentEvidenceCandidate[];
-  readonly fallback: ReplacementBundle | null;
+  readonly claimToken: string;
+  readonly fallback: ReplacementBundleSnapshot | null;
   readonly idempotencyKey: string;
   readonly learnerMessage: string;
   readonly modelProvenance: ModelCallProvenance | null;
@@ -190,6 +227,12 @@ export interface ReplacementFinalization {
   readonly requestDigest: string;
   readonly sessionId: string;
   readonly userId: string;
+}
+
+export interface ReplacementAnswerResolution {
+  readonly bundle: ReplacementBundle;
+  readonly correct: boolean;
+  readonly item: ReplacementItem;
 }
 
 export interface AssessmentFinalizationView {

@@ -25,6 +25,7 @@ const ids = {
   scope: "00000000-0000-4000-8000-000000000101",
   course: "00000000-0000-4000-8000-000000000201",
   session: "00000000-0000-4000-8000-000000000301",
+  session2: "00000000-0000-4000-8000-000000000302",
   conceptA: "00000000-0000-4000-8000-000000000401",
   conceptB: "00000000-0000-4000-8000-000000000402",
   spanA: "00000000-0000-4000-8000-000000000501",
@@ -217,7 +218,7 @@ describe("versioned short-answer grading", () => {
     expect(fixture.scripted.invocations).toHaveLength(1);
   });
 
-  it("immutably binds a grading-policy version to one calibrated threshold and provenance", async () => {
+  it("uses one static policy identity to grade distinct answers", async () => {
     const fixture = gradingFixture([
       {
         judgments: [
@@ -225,49 +226,120 @@ describe("versioned short-answer grading", () => {
           scored(ids.conceptB, "correct", 0.99),
         ],
       },
+      {
+        judgments: [
+          scored(ids.conceptA, "partially_correct", 0.99),
+          scored(ids.conceptB, "correct", 0.99),
+        ],
+      },
     ]);
-    const command = gradingCommand(fixture.policy, "attempt/policy-binding");
-    await fixture.service.gradeShortAnswer(command);
-    const stored = fixture.repository.finalizations.get(
-      command.idempotencyKey,
-    )!;
-
-    await expect(
-      fixture.repository.finalizeShortAnswer(authorization, {
-        ...stored,
-        attemptId: "attempt/policy-binding-conflict",
-        idempotencyKey: "assessment/policy-binding-conflict/v1",
-        policy: {
-          ...stored.policy,
-          confidenceThreshold: "0.90000",
-        },
-        requestDigest: "f".repeat(64),
-      }),
-    ).rejects.toMatchObject<Partial<AssessmentError>>({
-      code: "invalid_configuration",
+    fixture.repository.seedAuthorizedSession({
+      authorization,
+      fallbackCandidates: fallbackQuestions(),
+      questions: [shortAnswerQuestion()],
+      sessionId: ids.session2,
     });
+    await fixture.service.gradeShortAnswer(
+      gradingCommand(fixture.policy, "attempt/policy-binding-a"),
+    );
+    const second = await fixture.service.gradeShortAnswer({
+      ...gradingCommand(fixture.policy, "attempt/policy-binding-b"),
+      answer: "A different answer that is still graded under the same policy.",
+      sessionId: ids.session2,
+    });
+
+    expect(second.outcome).toBe("graded");
+    expect(fixture.scripted.invocations).toHaveLength(2);
+    expect(fixture.repository.policyBindings.size).toBe(1);
   });
 
-  it("rejects incomplete rubric grounding before invoking the model", async () => {
+  it("rejects an unauthorized question before invoking the model", async () => {
     const fixture = gradingFixture([]);
     const command = gradingCommand(fixture.policy, "attempt/bad-rubric");
 
     await expect(
       fixture.service.gradeShortAnswer({
         ...command,
-        question: {
-          ...command.question,
-          rubrics: [
-            {
-              ...command.question.rubrics[0]!,
-              sourceSpanIds: ["unauthorized-span"],
-            },
-            command.question.rubrics[1]!,
-          ],
-        },
+        questionId: "unauthorized-question",
       }),
     ).rejects.toMatchObject<Partial<AssessmentError>>({
-      code: "invalid_input",
+      code: "authorization_denied",
+    });
+    expect(fixture.scripted.invocations).toHaveLength(0);
+  });
+
+  it("coalesces concurrent duplicate submissions before model invocation", async () => {
+    const question = shortAnswerQuestion();
+    const repository = new InMemoryAssessmentRepository();
+    repository.seedAuthorizedSession({
+      authorization,
+      fallbackCandidates: fallbackQuestions(),
+      questions: [question],
+      sessionId: ids.session,
+    });
+    const policy = gradingFixture([]).policy;
+    let releaseModel!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseModel = resolve;
+    });
+    let invocations = 0;
+    const service = new AssessmentService({
+      models: {
+        async execute(_task, input) {
+          invocations += 1;
+          await gate;
+          const prompt = buildPromptBundle(
+            "assessment.grade-short-answer.v1",
+            input,
+          );
+          return {
+            provenance: {
+              adapterVersion: "concurrency-test-adapter-v1",
+              evidenceClassification: "authoritative",
+              ...policy.expectedModelProvenance,
+              promptDigest: prompt.digest,
+              requestedSelector: "qwen.grading",
+              task: "assessment.grade-short-answer.v1",
+              validationOutcome: "passed",
+            },
+            value: {
+              judgments: [
+                scored(ids.conceptA, "correct", 0.99),
+                scored(ids.conceptB, "correct", 0.99),
+              ],
+            },
+          };
+        },
+      },
+      repository,
+    });
+    const command = gradingCommand(policy, "attempt/concurrent");
+    const first = service.gradeShortAnswer(command);
+    await Promise.resolve();
+    const duplicate = service.gradeShortAnswer(command);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(invocations).toBe(1);
+    releaseModel();
+    const [created, replayed] = await Promise.all([first, duplicate]);
+    expect(created.status).toBe("created");
+    expect(replayed.status).toBe("replayed");
+    expect(invocations).toBe(1);
+  });
+
+  it("uses authoritative session history when selecting fallbacks", async () => {
+    const fixture = gradingFixture([]);
+    fixture.repository.presentedHashes.set(
+      ids.session,
+      new Set([fallbackQuestions()[0]!.normalizedPromptHash]),
+    );
+
+    await expect(
+      fixture.service.gradeShortAnswer(
+        gradingCommand(fixture.policy, "attempt/repeated-fallback"),
+      ),
+    ).rejects.toMatchObject<Partial<AssessmentError>>({
+      code: "fallback_unavailable",
     });
     expect(fixture.scripted.invocations).toHaveLength(0);
   });
@@ -286,9 +358,10 @@ describe("versioned short-answer grading", () => {
     );
     const bundle = original.fallback!;
     const item = bundle.items[0]!;
+    expect("keyedAnswer" in item.question).toBe(false);
 
     const replacement = await fixture.service.gradeReplacement({
-      answer: item.question.keyedAnswer,
+      answer: "A logically isolated network",
       authorization,
       bundleId: bundle.id,
       idempotencyKey: "replacement/concept-a",
@@ -297,7 +370,7 @@ describe("versioned short-answer grading", () => {
       sessionId: ids.session,
     });
     const replay = await fixture.service.gradeReplacement({
-      answer: item.question.keyedAnswer,
+      answer: "A logically isolated network",
       authorization,
       bundleId: bundle.id,
       idempotencyKey: "replacement/concept-a",
@@ -341,8 +414,9 @@ function gradingFixture(results: readonly unknown[]) {
     expectedModelProvenance: {
       effectiveModel: "qwen-plus",
       effectiveModelVersion: "fixture-version-1",
+      generationParametersVersion: "grading-generation-parameters-v2",
       inputSchemaVersion: "short-answer-grading-input-v2",
-      promptDigest: prompt.digest,
+      promptDefinitionDigest: prompt.definitionDigest,
       promptId: "assessment-grade-short-answer",
       promptVersion: "2",
       resultSchemaVersion: "short-answer-judgment-result-v2",
@@ -359,6 +433,12 @@ function gradingFixture(results: readonly unknown[]) {
   });
   const traces = new InMemoryTraceSink();
   const repository = new InMemoryAssessmentRepository();
+  repository.seedAuthorizedSession({
+    authorization,
+    fallbackCandidates: fallbackQuestions(),
+    questions: [question],
+    sessionId: ids.session,
+  });
   const service = new AssessmentService({
     models: createModelRouter({
       adapters: scripted.adapters,
@@ -377,11 +457,9 @@ function gradingCommand(
     answer: "A VPC is isolated and subnets divide its address space.",
     authorization,
     deadlineMs: 1_000,
-    fallbackCandidates: fallbackQuestions(),
     idempotencyKey,
     policy,
-    question: shortAnswerQuestion(),
-    seenPromptHashes: new Set(),
+    questionId: shortAnswerQuestion().id,
     sessionId: ids.session,
   };
 }

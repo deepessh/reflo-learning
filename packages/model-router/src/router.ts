@@ -38,6 +38,7 @@ export interface ModelCallProvenance {
   readonly effectiveModelVersion: string;
   readonly generationParametersVersion?: string;
   readonly inputSchemaVersion: string;
+  readonly promptDefinitionDigest?: string;
   readonly promptDigest?: string;
   readonly promptId?: string;
   readonly promptVersion?: string;
@@ -316,6 +317,7 @@ export function createModelRouter(options: ModelRouterOptions) {
                 : {
                     generationParametersVersion:
                       prompt.generationParametersVersion,
+                    promptDefinitionDigest: prompt.definitionDigest,
                     promptDigest: prompt.digest,
                     promptId: prompt.id,
                     promptVersion: prompt.version,

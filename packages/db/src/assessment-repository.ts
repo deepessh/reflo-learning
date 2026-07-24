@@ -1,12 +1,17 @@
+import { randomUUID } from "node:crypto";
+
 import {
   AssessmentError,
   type AssessmentEvidenceCandidate,
   type AssessmentFinalizationView,
   type AssessmentRepositoryPort,
+  type AuthorizedShortAnswerSnapshot,
   type KeyedMultipleChoiceQuestion,
+  type LearnerMultipleChoiceQuestion,
   type ReplacementBundle,
+  type ReplacementAnswerResolution,
   type ReplacementFinalization,
-  type ReplacementItem,
+  type ShortAnswerQuestion,
   type ShortAnswerFinalization,
 } from "@reflo/assessment";
 import {
@@ -52,7 +57,6 @@ interface ReplacementItemRow extends Record<string, unknown> {
   course_id: string;
   difficulty: 1 | 2 | 3 | 4 | 5;
   id: string;
-  keyed_answer: string;
   normalized_prompt_hash: string;
   prompt: string;
   quiz_item_id: string;
@@ -60,6 +64,29 @@ interface ReplacementItemRow extends Record<string, unknown> {
   rubric_id: string;
   rubric_version: string;
   source_spans: readonly { readonly id: string; readonly text: string }[];
+}
+
+interface AuthorizedFallbackRow extends ReplacementItemRow {
+  keyed_answer: string;
+}
+
+interface AuthorizedQuestionRow extends Record<string, unknown> {
+  concept_ids: readonly string[];
+  course_id: string;
+  difficulty: 1 | 2 | 3 | 4 | 5;
+  id: string;
+  normalized_prompt_hash: string;
+  prompt: string;
+  rubric: unknown;
+  source_spans: readonly { readonly id: string; readonly text: string }[];
+}
+
+interface GradingOperationRow extends Record<string, unknown> {
+  authorized_snapshot: AuthorizedShortAnswerSnapshot;
+  claim_token: string | null;
+  lease_active: boolean;
+  request_digest: string;
+  status: "finalized" | "processing";
 }
 
 export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
@@ -74,6 +101,123 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
 
   close(): Promise<void> {
     return this.#pool.end();
+  }
+
+  async claimShortAnswer(
+    authorization: Parameters<AssessmentRepositoryPort["claimShortAnswer"]>[0],
+    request: Parameters<AssessmentRepositoryPort["claimShortAnswer"]>[1],
+  ): ReturnType<AssessmentRepositoryPort["claimShortAnswer"]> {
+    if (
+      !Number.isSafeInteger(request.leaseMs) ||
+      request.leaseMs < 1 ||
+      request.leaseMs > 120_000
+    ) {
+      throw new AssessmentError("invalid_input");
+    }
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      await ensurePolicyBinding(client, request.policy);
+      const session = await client.query<{ id: string }>(
+        `SELECT id
+         FROM study_session
+         WHERE owner_scope_id = $1
+           AND id = $2
+           AND user_id = $3
+           AND status = 'active'
+         FOR UPDATE`,
+        [authorization.ownerScopeId, request.sessionId, authorization.actorId],
+      );
+      if (session.rows[0] === undefined) {
+        throw new AssessmentError("authorization_denied");
+      }
+
+      const current = await loadGradingOperation(
+        client,
+        authorization.ownerScopeId,
+        authorization.actorId,
+        request.idempotencyKey,
+      );
+      if (current !== null) {
+        if (current.request_digest !== request.requestDigest) {
+          throw new AssessmentError("conflicting_duplicate");
+        }
+        if (current.status === "finalized") {
+          const finalization = await loadFinalizationView(
+            client,
+            authorization.ownerScopeId,
+            authorization.actorId,
+            request.idempotencyKey,
+            "replayed",
+          );
+          if (finalization === null) {
+            throw new AssessmentError("invalid_result");
+          }
+          return { finalization, kind: "finalized" };
+        }
+        if (current.claim_token !== null && current.lease_active) {
+          return { kind: "pending" };
+        }
+        const claimToken = randomUUID();
+        await client.query(
+          `UPDATE assessment_grading_operation
+           SET claim_token = $4,
+               lease_expires_at = now() + ($5::integer * interval '1 millisecond')
+           WHERE owner_scope_id = $1
+             AND idempotency_key = $2
+             AND user_id = $3
+             AND status = 'processing'`,
+          [
+            authorization.ownerScopeId,
+            request.idempotencyKey,
+            authorization.actorId,
+            claimToken,
+            request.leaseMs,
+          ],
+        );
+        return {
+          claimToken,
+          kind: "claimed",
+          snapshot: current.authorized_snapshot,
+        };
+      }
+
+      const snapshot = await loadAuthorizedSnapshot(
+        client,
+        authorization,
+        request.sessionId,
+        request.questionId,
+      );
+      const claimToken = randomUUID();
+      await client.query(
+        `INSERT INTO assessment_grading_operation
+           (owner_scope_id, idempotency_key, user_id, session_id, question_id,
+            request_digest, grading_policy_version, policy_binding_digest,
+            authorized_snapshot, claim_token, lease_expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10,
+                 now() + ($11::integer * interval '1 millisecond'))`,
+        [
+          authorization.ownerScopeId,
+          request.idempotencyKey,
+          authorization.actorId,
+          request.sessionId,
+          request.questionId,
+          request.requestDigest,
+          request.policy.gradingPolicyVersion,
+          policyBindingDigest(request.policy),
+          JSON.stringify(snapshot),
+          claimToken,
+          request.leaseMs,
+        ],
+      );
+      await reserveSessionQuestions(
+        client,
+        authorization.ownerScopeId,
+        request.sessionId,
+        request.idempotencyKey,
+        snapshot,
+      );
+      return { claimToken, kind: "claimed", snapshot };
+    });
   }
 
   async loadFinalization(
@@ -109,6 +253,84 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
     });
   }
 
+  async releaseShortAnswerClaim(
+    authorization: Parameters<
+      AssessmentRepositoryPort["releaseShortAnswerClaim"]
+    >[0],
+    idempotencyKey: string,
+    claimToken: string,
+  ): Promise<void> {
+    await this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      await client.query(
+        `UPDATE assessment_grading_operation
+         SET claim_token = NULL, lease_expires_at = NULL
+         WHERE owner_scope_id = $1
+           AND idempotency_key = $2
+           AND user_id = $3
+           AND claim_token = $4
+           AND status = 'processing'`,
+        [
+          authorization.ownerScopeId,
+          idempotencyKey,
+          authorization.actorId,
+          claimToken,
+        ],
+      );
+    });
+  }
+
+  async resolveReplacementAnswer(
+    authorization: Parameters<
+      AssessmentRepositoryPort["resolveReplacementAnswer"]
+    >[0],
+    request: Parameters<
+      AssessmentRepositoryPort["resolveReplacementAnswer"]
+    >[1],
+  ): Promise<ReplacementAnswerResolution | null> {
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      const resolved = await client.query<{ keyed_answer: string }>(
+        `SELECT item.keyed_answer #>> '{}' AS keyed_answer
+         FROM assessment_replacement_item AS item
+         JOIN assessment_replacement_bundle AS bundle
+           ON bundle.owner_scope_id = item.owner_scope_id
+          AND bundle.id = item.bundle_id
+         JOIN attempt AS original
+           ON original.owner_scope_id = bundle.owner_scope_id
+          AND original.id = bundle.original_attempt_id
+         WHERE item.owner_scope_id = $1
+           AND item.bundle_id = $2
+           AND item.id = $3
+           AND original.user_id = $4
+           AND original.outcome = 'abstained'`,
+        [
+          authorization.ownerScopeId,
+          request.bundleId,
+          request.itemId,
+          authorization.actorId,
+        ],
+      );
+      const keyedAnswer = resolved.rows[0]?.keyed_answer;
+      if (keyedAnswer === undefined) return null;
+      const bundle = await loadReplacementBundle(
+        client,
+        authorization.ownerScopeId,
+        authorization.actorId,
+        request.bundleId,
+      );
+      const item = bundle?.items.find(
+        (candidate) => candidate.id === request.itemId,
+      );
+      if (bundle === null || item === undefined) return null;
+      return {
+        bundle,
+        correct: request.answer === keyedAnswer,
+        item,
+      };
+    });
+  }
+
   async finalizeShortAnswer(
     authorization: Parameters<
       AssessmentRepositoryPort["finalizeShortAnswer"]
@@ -122,14 +344,7 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
       const replay = await loadAndVerifyReplay(client, finalization, digest);
       if (replay !== null) return replay;
       await ensurePolicyBinding(client, finalization.policy);
-      await assertQuestionSession(
-        client,
-        finalization.ownerScopeId,
-        finalization.userId,
-        finalization.sessionId,
-        finalization.questionId,
-        "short_answer",
-      );
+      await assertGradingClaim(client, finalization);
       const inserted = await client.query<{ created_at_order: string }>(
         `INSERT INTO attempt
            (id, owner_scope_id, user_id, session_id, quiz_item_id, answer,
@@ -178,6 +393,7 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
         );
       }
       await insertFinalization(client, finalization, digest, "short_answer");
+      await completeGradingOperation(client, finalization);
       return requiredReplay(
         await loadFinalizationView(
           client,
@@ -206,8 +422,10 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
       const lineage = await client.query<{
         original_attempt_id: string;
         quiz_item_id: string;
+        session_id: string;
       }>(
-        `SELECT bundle.original_attempt_id, item.quiz_item_id
+        `SELECT bundle.original_attempt_id, item.quiz_item_id,
+                original.session_id
          FROM assessment_replacement_bundle AS bundle
          JOIN assessment_replacement_item AS item
            ON item.owner_scope_id = bundle.owner_scope_id
@@ -231,14 +449,9 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
       if (source === undefined) {
         throw new AssessmentError("authorization_denied");
       }
-      await assertQuestionSession(
-        client,
-        finalization.ownerScopeId,
-        finalization.userId,
-        finalization.sessionId,
-        source.quiz_item_id,
-        "multiple_choice",
-      );
+      if (source.session_id !== finalization.sessionId) {
+        throw new AssessmentError("authorization_denied");
+      }
       const inserted = await client.query<{ created_at_order: string }>(
         `INSERT INTO attempt
            (id, owner_scope_id, user_id, session_id, quiz_item_id, answer,
@@ -324,6 +537,359 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
   }
 }
 
+async function loadGradingOperation(
+  client: PoolClient,
+  ownerScopeId: string,
+  userId: string,
+  idempotencyKey: string,
+): Promise<GradingOperationRow | null> {
+  const result = await client.query<GradingOperationRow>(
+    `SELECT authorized_snapshot, claim_token, request_digest, status,
+            lease_expires_at > now() AS lease_active
+     FROM assessment_grading_operation
+     WHERE owner_scope_id = $1
+       AND idempotency_key = $2
+       AND user_id = $3`,
+    [ownerScopeId, idempotencyKey, userId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function loadAuthorizedSnapshot(
+  client: PoolClient,
+  authorization: {
+    readonly actorId: string;
+    readonly ownerScopeId: string;
+  },
+  sessionId: string,
+  questionId: string,
+): Promise<AuthorizedShortAnswerSnapshot> {
+  const questionResult = await client.query<AuthorizedQuestionRow>(
+    `SELECT question.id, question.course_id, question.difficulty,
+            question.prompt, question.normalized_prompt_hash, question.rubric,
+            ARRAY(
+              SELECT link.concept_id::text
+              FROM quiz_item_concept AS link
+              WHERE link.owner_scope_id = question.owner_scope_id
+                AND link.quiz_item_id = question.id
+              ORDER BY link.concept_id
+            ) AS concept_ids,
+            COALESCE((
+              SELECT jsonb_agg(
+                jsonb_build_object('id', span.id, 'text', span.canonical_text)
+                ORDER BY span.id
+              )
+              FROM quiz_item_source_span AS source_link
+              JOIN source_span AS span
+                ON span.owner_scope_id = source_link.owner_scope_id
+               AND span.id = source_link.source_span_id
+              WHERE source_link.owner_scope_id = question.owner_scope_id
+                AND source_link.quiz_item_id = question.id
+            ), '[]'::jsonb) AS source_spans
+     FROM quiz_item AS question
+     JOIN study_session AS session
+       ON session.owner_scope_id = question.owner_scope_id
+      AND session.course_id = question.course_id
+     WHERE question.owner_scope_id = $1
+       AND question.id = $2
+       AND question.item_type = 'short_answer'
+       AND session.id = $3
+       AND session.user_id = $4
+       AND session.status = 'active'`,
+    [authorization.ownerScopeId, questionId, sessionId, authorization.actorId],
+  );
+  const row = questionResult.rows[0];
+  if (row === undefined) {
+    throw new AssessmentError("authorization_denied");
+  }
+  const question = mapAuthorizedQuestion(row);
+  const seenResult = await client.query<{ normalized_prompt_hash: string }>(
+    `SELECT normalized_prompt_hash
+     FROM assessment_session_question
+     WHERE owner_scope_id = $1 AND session_id = $2
+     UNION
+     SELECT question.normalized_prompt_hash
+     FROM attempt
+     JOIN quiz_item AS question
+       ON question.owner_scope_id = attempt.owner_scope_id
+      AND question.id = attempt.quiz_item_id
+     WHERE attempt.owner_scope_id = $1
+       AND attempt.session_id = $2
+       AND question.normalized_prompt_hash IS NOT NULL`,
+    [authorization.ownerScopeId, sessionId],
+  );
+  const seen = new Set(
+    seenResult.rows.map((entry) => entry.normalized_prompt_hash),
+  );
+  if (seen.has(question.normalizedPromptHash)) {
+    throw new AssessmentError("question_unavailable");
+  }
+  seen.add(question.normalizedPromptHash);
+
+  const fallbackResult = await client.query<AuthorizedFallbackRow>(
+    `SELECT replacement.id AS quiz_item_id,
+            replacement.course_id,
+            replacement.difficulty,
+            replacement.prompt,
+            replacement.keyed_answer #>> '{}' AS keyed_answer,
+            replacement.normalized_prompt_hash,
+            replacement.response_options,
+            link.concept_id,
+            ''::text AS rubric_id,
+            ''::text AS rubric_version,
+            COALESCE((
+              SELECT jsonb_agg(
+                jsonb_build_object('id', span.id, 'text', span.canonical_text)
+                ORDER BY span.id
+              )
+              FROM quiz_item_source_span AS source_link
+              JOIN source_span AS span
+                ON span.owner_scope_id = source_link.owner_scope_id
+               AND span.id = source_link.source_span_id
+              WHERE source_link.owner_scope_id = replacement.owner_scope_id
+                AND source_link.quiz_item_id = replacement.id
+            ), '[]'::jsonb) AS source_spans
+     FROM quiz_item AS replacement
+     JOIN quiz_item_concept AS link
+       ON link.owner_scope_id = replacement.owner_scope_id
+      AND link.quiz_item_id = replacement.id
+     WHERE replacement.owner_scope_id = $1
+       AND replacement.course_id = $2
+       AND replacement.item_type = 'multiple_choice'
+       AND replacement.normalized_prompt_hash IS NOT NULL
+       AND (
+         SELECT count(*)
+         FROM quiz_item_concept AS all_links
+         WHERE all_links.owner_scope_id = replacement.owner_scope_id
+           AND all_links.quiz_item_id = replacement.id
+       ) = 1
+     ORDER BY replacement.id`,
+    [authorization.ownerScopeId, question.courseId],
+  );
+  const fallbackCandidates = question.rubrics.map((rubric) => {
+    const candidate = fallbackResult.rows.find(
+      (entry) =>
+        entry.concept_id === rubric.conceptId &&
+        !seen.has(entry.normalized_prompt_hash) &&
+        entry.source_spans.length > 0 &&
+        entry.source_spans.every((span) =>
+          rubric.sourceSpanIds.includes(span.id),
+        ) &&
+        entry.response_options.includes(entry.keyed_answer),
+    );
+    if (candidate === undefined) {
+      throw new AssessmentError("fallback_unavailable");
+    }
+    seen.add(candidate.normalized_prompt_hash);
+    return {
+      conceptIds: [rubric.conceptId],
+      courseId: candidate.course_id,
+      difficulty: candidate.difficulty,
+      id: candidate.quiz_item_id,
+      itemType: "multiple_choice" as const,
+      keyedAnswer: candidate.keyed_answer,
+      normalizedPromptHash: candidate.normalized_prompt_hash,
+      prompt: candidate.prompt,
+      responseOptions: candidate.response_options,
+      rubricId: rubric.rubricId,
+      rubricVersion: rubric.rubricVersion,
+      sourceSpans: candidate.source_spans,
+    } satisfies KeyedMultipleChoiceQuestion;
+  });
+  return { fallbackCandidates, question };
+}
+
+function mapAuthorizedQuestion(
+  row: AuthorizedQuestionRow,
+): ShortAnswerQuestion {
+  if (
+    !/^[0-9a-f]{64}$/.test(row.normalized_prompt_hash) ||
+    !Array.isArray(row.rubric) ||
+    !Array.isArray(row.concept_ids) ||
+    !Array.isArray(row.source_spans)
+  ) {
+    throw new AssessmentError("invalid_input");
+  }
+  const rubrics = row.rubric.map((value) => {
+    if (
+      !isRecord(value) ||
+      typeof value.conceptId !== "string" ||
+      typeof value.rubricId !== "string" ||
+      typeof value.rubricVersion !== "string" ||
+      !isStringArray(value.requiredCriteria) ||
+      value.requiredCriteria.length === 0 ||
+      !isStringArray(value.materialContradictions) ||
+      !isStringArray(value.sourceSpanIds) ||
+      value.sourceSpanIds.length === 0
+    ) {
+      throw new AssessmentError("invalid_input");
+    }
+    return {
+      conceptId: value.conceptId,
+      materialContradictions: value.materialContradictions,
+      requiredCriteria: value.requiredCriteria,
+      rubricId: value.rubricId,
+      rubricVersion: value.rubricVersion,
+      sourceSpanIds: value.sourceSpanIds,
+    };
+  });
+  const conceptIds = [...row.concept_ids].sort(compareAscii);
+  const sourceIds = new Set(row.source_spans.map((span) => span.id));
+  if (
+    rubrics.length !== conceptIds.length ||
+    new Set(rubrics.map((rubric) => rubric.conceptId)).size !==
+      conceptIds.length ||
+    rubrics.some(
+      (rubric) =>
+        !conceptIds.includes(rubric.conceptId) ||
+        rubric.requiredCriteria.some((criterion) => criterion.length === 0) ||
+        rubric.materialContradictions.some(
+          (contradiction) => contradiction.length === 0,
+        ) ||
+        rubric.sourceSpanIds.some((spanId) => !sourceIds.has(spanId)),
+    )
+  ) {
+    throw new AssessmentError("invalid_input");
+  }
+  return {
+    conceptIds,
+    courseId: row.course_id,
+    difficulty: row.difficulty,
+    id: row.id,
+    itemType: "short_answer",
+    normalizedPromptHash: row.normalized_prompt_hash,
+    prompt: row.prompt,
+    rubrics,
+    sourceSpans: row.source_spans,
+  };
+}
+
+async function reserveSessionQuestions(
+  client: PoolClient,
+  ownerScopeId: string,
+  sessionId: string,
+  operationIdempotencyKey: string,
+  snapshot: AuthorizedShortAnswerSnapshot,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO assessment_session_question
+       (owner_scope_id, session_id, normalized_prompt_hash, quiz_item_id,
+        operation_idempotency_key, presentation_kind, presented_at)
+     VALUES ($1, $2, $3, $4, $5, 'original', now())`,
+    [
+      ownerScopeId,
+      sessionId,
+      snapshot.question.normalizedPromptHash,
+      snapshot.question.id,
+      operationIdempotencyKey,
+    ],
+  );
+  for (const fallback of snapshot.fallbackCandidates) {
+    await client.query(
+      `INSERT INTO assessment_session_question
+         (owner_scope_id, session_id, normalized_prompt_hash, quiz_item_id,
+          operation_idempotency_key, presentation_kind, presented_at)
+       VALUES ($1, $2, $3, $4, $5, 'fallback', NULL)`,
+      [
+        ownerScopeId,
+        sessionId,
+        fallback.normalizedPromptHash,
+        fallback.id,
+        operationIdempotencyKey,
+      ],
+    );
+  }
+}
+
+async function assertGradingClaim(
+  client: PoolClient,
+  finalization: ShortAnswerFinalization,
+): Promise<void> {
+  const result = await client.query<{ valid: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM assessment_grading_operation
+       WHERE owner_scope_id = $1
+         AND idempotency_key = $2
+         AND user_id = $3
+         AND session_id = $4
+         AND question_id = $5
+         AND request_digest = $6
+         AND claim_token = $7
+         AND status = 'processing'
+     ) AS valid`,
+    [
+      finalization.ownerScopeId,
+      finalization.idempotencyKey,
+      finalization.userId,
+      finalization.sessionId,
+      finalization.questionId,
+      finalization.requestDigest,
+      finalization.claimToken,
+    ],
+  );
+  if (
+    result.rows[0]?.valid !== true ||
+    (finalization.outcome === "abstained") !== (finalization.fallback !== null)
+  ) {
+    throw new AssessmentError("conflicting_duplicate");
+  }
+}
+
+async function completeGradingOperation(
+  client: PoolClient,
+  finalization: ShortAnswerFinalization,
+): Promise<void> {
+  if (finalization.outcome === "abstained") {
+    await client.query(
+      `UPDATE assessment_session_question
+       SET presented_at = now()
+       WHERE owner_scope_id = $1
+         AND operation_idempotency_key = $2
+         AND presentation_kind = 'fallback'
+         AND presented_at IS NULL`,
+      [finalization.ownerScopeId, finalization.idempotencyKey],
+    );
+  } else {
+    await client.query(
+      `DELETE FROM assessment_session_question
+       WHERE owner_scope_id = $1
+         AND operation_idempotency_key = $2
+         AND presentation_kind = 'fallback'
+         AND presented_at IS NULL`,
+      [finalization.ownerScopeId, finalization.idempotencyKey],
+    );
+  }
+  const completed = await client.query<{ idempotency_key: string }>(
+    `UPDATE assessment_grading_operation
+     SET status = 'finalized', claim_token = NULL, lease_expires_at = NULL,
+         finalized_at = now()
+     WHERE owner_scope_id = $1
+       AND idempotency_key = $2
+       AND claim_token = $3
+       AND status = 'processing'
+     RETURNING idempotency_key`,
+    [
+      finalization.ownerScopeId,
+      finalization.idempotencyKey,
+      finalization.claimToken,
+    ],
+  );
+  if (completed.rows[0] === undefined) {
+    throw new AssessmentError("conflicting_duplicate");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  );
+}
+
 async function insertEvidence(
   client: PoolClient,
   finalization: ShortAnswerFinalization | ReplacementFinalization,
@@ -377,7 +943,7 @@ async function insertEvidence(
 async function insertReplacementBundle(
   client: PoolClient,
   finalization: ShortAnswerFinalization,
-  bundle: ReplacementBundle,
+  bundle: NonNullable<ShortAnswerFinalization["fallback"]>,
 ): Promise<void> {
   if (
     bundle.originalAttemptId !== finalization.attemptId ||
@@ -403,12 +969,16 @@ async function insertReplacementBundle(
     ],
   );
   for (const item of bundle.items) {
-    await assertReplacementQuestion(client, finalization, item);
+    await assertSnapshotReplacement(client, finalization, item);
+    const snapshotDigest = sha256(canonicalJson(item.question));
     await client.query(
       `INSERT INTO assessment_replacement_item
          (owner_scope_id, id, bundle_id, concept_id, quiz_item_id, rubric_id,
-          rubric_version, normalized_prompt_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          rubric_version, normalized_prompt_hash, course_id, difficulty,
+          prompt, response_options, keyed_answer, source_spans,
+          snapshot_digest)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb,
+               $13::jsonb, $14::jsonb, $15)`,
       [
         finalization.ownerScopeId,
         item.id,
@@ -418,55 +988,40 @@ async function insertReplacementBundle(
         item.question.rubricId,
         item.question.rubricVersion,
         item.question.normalizedPromptHash,
+        item.question.courseId,
+        item.question.difficulty,
+        item.question.prompt,
+        JSON.stringify(item.question.responseOptions),
+        JSON.stringify(item.question.keyedAnswer),
+        JSON.stringify(item.question.sourceSpans),
+        snapshotDigest,
       ],
     );
   }
 }
 
-async function assertReplacementQuestion(
+async function assertSnapshotReplacement(
   client: PoolClient,
   finalization: ShortAnswerFinalization,
-  item: ReplacementItem,
+  item: NonNullable<ShortAnswerFinalization["fallback"]>["items"][number],
 ): Promise<void> {
   const result = await client.query<{ present: boolean }>(
     `SELECT EXISTS (
        SELECT 1
-       FROM quiz_item AS replacement
-       JOIN quiz_item_concept AS link
-         ON link.owner_scope_id = replacement.owner_scope_id
-        AND link.quiz_item_id = replacement.id
-       JOIN quiz_item AS original
-         ON original.owner_scope_id = replacement.owner_scope_id
-        AND original.id = $4
-       WHERE replacement.owner_scope_id = $1
-         AND replacement.id = $2
-         AND link.concept_id = $3
-         AND replacement.course_id = original.course_id
-         AND replacement.item_type = 'multiple_choice'
-         AND replacement.normalized_prompt_hash = $5
-         AND replacement.normalized_prompt_hash
-             IS DISTINCT FROM original.normalized_prompt_hash
-         AND jsonb_typeof(replacement.response_options) = 'array'
-         AND replacement.keyed_answer IS NOT NULL
-         AND (
-           SELECT count(*)
-           FROM quiz_item_concept AS all_links
-           WHERE all_links.owner_scope_id = replacement.owner_scope_id
-             AND all_links.quiz_item_id = replacement.id
-         ) = 1
-         AND EXISTS (
-           SELECT 1
-           FROM quiz_item_source_span AS source_link
-           WHERE source_link.owner_scope_id = replacement.owner_scope_id
-             AND source_link.quiz_item_id = replacement.id
-         )
+       FROM assessment_grading_operation AS operation,
+            jsonb_array_elements(
+              operation.authorized_snapshot -> 'fallbackCandidates'
+            ) AS candidate
+       WHERE operation.owner_scope_id = $1
+         AND operation.idempotency_key = $2
+         AND operation.claim_token = $3
+         AND candidate = $4::jsonb
      ) AS present`,
     [
       finalization.ownerScopeId,
-      item.question.id,
-      item.conceptId,
-      finalization.questionId,
-      item.question.normalizedPromptHash,
+      finalization.idempotencyKey,
+      finalization.claimToken,
+      JSON.stringify(item.question),
     ],
   );
   if (result.rows[0]?.present !== true) {
@@ -670,25 +1225,9 @@ async function loadReplacementBundle(
   const items = await client.query<ReplacementItemRow>(
     `SELECT item.id, item.concept_id, item.quiz_item_id, item.rubric_id,
             item.rubric_version, item.normalized_prompt_hash,
-            quiz.course_id, quiz.difficulty, quiz.prompt,
-            quiz.keyed_answer #>> '{}' AS keyed_answer,
-            quiz.response_options AS response_options,
-            (
-              SELECT jsonb_agg(
-                jsonb_build_object('id', span.id, 'text', span.canonical_text)
-                ORDER BY span.id
-              )
-              FROM quiz_item_source_span AS link
-              JOIN source_span AS span
-                ON span.owner_scope_id = link.owner_scope_id
-               AND span.id = link.source_span_id
-              WHERE link.owner_scope_id = quiz.owner_scope_id
-                AND link.quiz_item_id = quiz.id
-            ) AS source_spans
+            item.course_id, item.difficulty, item.prompt,
+            item.response_options, item.source_spans
      FROM assessment_replacement_item AS item
-     JOIN quiz_item AS quiz
-       ON quiz.owner_scope_id = item.owner_scope_id
-      AND quiz.id = item.quiz_item_id
      WHERE item.owner_scope_id = $1 AND item.bundle_id = $2
      ORDER BY item.concept_id`,
     [ownerScopeId, bundleId],
@@ -704,14 +1243,13 @@ async function loadReplacementBundle(
         difficulty: item.difficulty,
         id: item.quiz_item_id,
         itemType: "multiple_choice",
-        keyedAnswer: item.keyed_answer,
         normalizedPromptHash: item.normalized_prompt_hash,
         prompt: item.prompt,
         responseOptions: item.response_options,
         rubricId: item.rubric_id,
         rubricVersion: item.rubric_version,
         sourceSpans: item.source_spans,
-      } satisfies KeyedMultipleChoiceQuestion,
+      } satisfies LearnerMultipleChoiceQuestion,
     })),
     originalAttemptId: row.original_attempt_id,
     policyVersion: row.grading_policy_version,
@@ -739,35 +1277,6 @@ function mapEvidence(row: EvidenceRow): AssessmentEvidenceCandidate {
       ? { ...common, reason: row.unanswerable_reason }
       : common
   ) as AssessmentEvidenceCandidate;
-}
-
-async function assertQuestionSession(
-  client: PoolClient,
-  ownerScopeId: string,
-  userId: string,
-  sessionId: string,
-  questionId: string,
-  itemType: "multiple_choice" | "short_answer",
-): Promise<void> {
-  const result = await client.query<{ present: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM study_session AS session
-       JOIN quiz_item AS question
-         ON question.owner_scope_id = session.owner_scope_id
-        AND question.course_id = session.course_id
-       WHERE session.owner_scope_id = $1
-         AND session.id = $2
-         AND session.user_id = $3
-         AND session.status = 'active'
-         AND question.id = $4
-         AND question.item_type = $5
-     ) AS present`,
-    [ownerScopeId, sessionId, userId, questionId, itemType],
-  );
-  if (result.rows[0]?.present !== true) {
-    throw new AssessmentError("authorization_denied");
-  }
 }
 
 async function setScopeContext(

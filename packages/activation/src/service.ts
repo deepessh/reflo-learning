@@ -311,11 +311,29 @@ function materializeQuizItems(
     if (normalizedPrompt.length === 0) {
       throw new ActivationGenerationError("invalid_result");
     }
+    const { rubric: rubricCriterion, ...common } = item;
     return {
-      ...item,
+      ...common,
       id: stableUuid({ bankId, itemOrder, normalizedPrompt }),
       itemOrder,
       normalizedPromptHash: sha256(normalizedPrompt),
+      ...(item.itemType !== "short_answer" || rubricCriterion === undefined
+        ? {}
+        : {
+            rubric: item.conceptIds.map((conceptId) => ({
+              conceptId,
+              materialContradictions: [],
+              requiredCriteria: [rubricCriterion],
+              rubricId: stableUuid({
+                bankId,
+                conceptId,
+                itemOrder,
+                rubricVersion: "short-answer-rubric-v1",
+              }),
+              rubricVersion: "short-answer-rubric-v1",
+              sourceSpanIds: item.sourceSpanIds,
+            })),
+          }),
     };
   });
 }

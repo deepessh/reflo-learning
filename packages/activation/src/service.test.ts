@@ -181,6 +181,22 @@ describe("activation generation", () => {
       expect(bank.items.every((item) => item.sourceSpanIds.length > 0)).toBe(
         true,
       );
+      for (const item of bank.items.filter(
+        (candidate) => candidate.itemType === "short_answer",
+      )) {
+        expect(item.rubric).toHaveLength(item.conceptIds.length);
+        expect(item.rubric?.map((rubric) => rubric.conceptId)).toEqual(
+          item.conceptIds,
+        );
+        expect(
+          item.rubric?.every(
+            (rubric) =>
+              rubric.rubricVersion === "short-answer-rubric-v1" &&
+              rubric.requiredCriteria.length > 0 &&
+              rubric.sourceSpanIds.length > 0,
+          ),
+        ).toBe(true);
+      }
     }
   });
 

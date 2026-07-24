@@ -14,12 +14,13 @@ import {
   type AdaptiveSelectionInput,
   type AssessmentEvidenceCandidate,
   type AssessmentFinalizationView,
+  type AuthorizedShortAnswerSnapshot,
   type FrozenGradingPolicy,
   type GradeReplacementCommand,
   type GradeShortAnswerCommand,
   type KeyedMultipleChoiceQuestion,
-  type ReplacementBundle,
-  type ReplacementItem,
+  type ReplacementBundleSnapshot,
+  type ReplacementItemSnapshot,
   type SelectableAssessmentQuestion,
   type ShortAnswerQuestion,
 } from "./contracts.js";
@@ -48,41 +49,59 @@ export class AssessmentService {
   ): Promise<AssessmentFinalizationView> {
     validateCommand(command);
     const requestDigest = shortAnswerRequestDigest(command);
-    const replay = await this.dependencies.repository.loadFinalization(
+    const deadlineAt = Date.now() + command.deadlineMs;
+    const claim = await acquireShortAnswerClaim(
+      this.dependencies.repository,
       command.authorization,
-      command.idempotencyKey,
+      {
+        idempotencyKey: command.idempotencyKey,
+        leaseMs: command.deadlineMs,
+        policy: command.policy,
+        questionId: command.questionId,
+        requestDigest,
+        sessionId: command.sessionId,
+      },
+      deadlineAt,
     );
-    if (replay !== null) {
-      if (replay.requestDigest !== requestDigest) {
-        throw new AssessmentError("conflicting_duplicate");
-      }
-      return { ...replay, status: "replayed" };
+    if (claim.kind === "finalized") {
+      return { ...claim.finalization, status: "replayed" };
     }
+    const question = claim.snapshot.question;
+    validateSnapshot(claim.snapshot);
 
     const attemptId = stableUuid({
       idempotencyKey: command.idempotencyKey,
-      questionId: command.question.id,
+      questionId: question.id,
       sessionId: command.sessionId,
       version: GRADING_POLICY_VERSION,
     });
-    const fallback = buildReplacementBundle(command, attemptId);
+    const fallback = buildReplacementBundle(
+      claim.snapshot,
+      command.policy,
+      attemptId,
+    );
     let routed;
     try {
       routed = await this.dependencies.models.execute(
         "assessment.grade-short-answer.v1",
         {
           answer: command.answer,
-          question: command.question.prompt,
-          rubrics: command.question.rubrics,
-          sourceSpans: command.question.sourceSpans,
+          question: question.prompt,
+          rubrics: question.rubrics,
+          sourceSpans: question.sourceSpans,
         },
-        { deadlineMs: command.deadlineMs },
+        { deadlineMs: Math.max(1, deadlineAt - Date.now()) },
       );
     } catch (error) {
       if (
         !(error instanceof ModelRouterError) ||
         error.code !== "invalid_result"
       ) {
+        await this.dependencies.repository.releaseShortAnswerClaim(
+          command.authorization,
+          command.idempotencyKey,
+          claim.claimToken,
+        );
         throw error;
       }
       return this.dependencies.repository.finalizeShortAnswer(
@@ -90,6 +109,7 @@ export class AssessmentService {
         {
           answer: command.answer,
           attemptId,
+          claimToken: claim.claimToken,
           evidence: [],
           fallback,
           idempotencyKey: command.idempotencyKey,
@@ -99,7 +119,7 @@ export class AssessmentService {
           outcome: "abstained",
           ownerScopeId: command.authorization.ownerScopeId,
           policy: command.policy,
-          questionId: command.question.id,
+          questionId: question.id,
           requestDigest,
           sessionId: command.sessionId,
           userId: command.authorization.actorId,
@@ -107,50 +127,60 @@ export class AssessmentService {
       );
     }
 
-    assertExpectedProvenance(command.policy, routed.provenance);
-    const evidence = normalizeJudgments(
-      command.question,
-      routed.value.judgments,
-      command.policy,
-      routed.provenance,
-    );
-    const abstained = evidence.some(
-      (candidate) => !candidate.eligibleForMastery,
-    );
-    const finalizedEvidence: readonly LlmEvidenceCandidate[] = abstained
-      ? evidence.map((candidate) =>
-          candidate.judgmentKind === "scored" && candidate.eligibleForMastery
-            ? {
-                ...candidate,
-                eligibleForMastery: false as const,
-                fsrsRating: null,
-                ineligibilityReason: "attempt_abstained" as const,
-              }
-            : candidate,
-        )
-      : evidence;
+    try {
+      assertExpectedProvenance(command.policy, routed.provenance);
+      const evidence = normalizeJudgments(
+        question,
+        routed.value.judgments,
+        command.policy,
+        routed.provenance,
+      );
+      const abstained = evidence.some(
+        (candidate) => !candidate.eligibleForMastery,
+      );
+      const finalizedEvidence: readonly LlmEvidenceCandidate[] = abstained
+        ? evidence.map((candidate) =>
+            candidate.judgmentKind === "scored" && candidate.eligibleForMastery
+              ? {
+                  ...candidate,
+                  eligibleForMastery: false as const,
+                  fsrsRating: null,
+                  ineligibilityReason: "attempt_abstained" as const,
+                }
+              : candidate,
+          )
+        : evidence;
 
-    return this.dependencies.repository.finalizeShortAnswer(
-      command.authorization,
-      {
-        answer: command.answer,
-        attemptId,
-        evidence: finalizedEvidence,
-        fallback: abstained ? fallback : null,
-        idempotencyKey: command.idempotencyKey,
-        learnerMessage: abstained
-          ? "We could not grade that response reliably. Try the source-backed multiple-choice replacements."
-          : "Your response was graded against each concept rubric.",
-        modelProvenance: routed.provenance,
-        outcome: abstained ? "abstained" : "graded",
-        ownerScopeId: command.authorization.ownerScopeId,
-        policy: command.policy,
-        questionId: command.question.id,
-        requestDigest,
-        sessionId: command.sessionId,
-        userId: command.authorization.actorId,
-      },
-    );
+      return await this.dependencies.repository.finalizeShortAnswer(
+        command.authorization,
+        {
+          answer: command.answer,
+          attemptId,
+          claimToken: claim.claimToken,
+          evidence: finalizedEvidence,
+          fallback: abstained ? fallback : null,
+          idempotencyKey: command.idempotencyKey,
+          learnerMessage: abstained
+            ? "We could not grade that response reliably. Try the source-backed multiple-choice replacements."
+            : "Your response was graded against each concept rubric.",
+          modelProvenance: routed.provenance,
+          outcome: abstained ? "abstained" : "graded",
+          ownerScopeId: command.authorization.ownerScopeId,
+          policy: command.policy,
+          questionId: question.id,
+          requestDigest,
+          sessionId: command.sessionId,
+          userId: command.authorization.actorId,
+        },
+      );
+    } catch (error) {
+      await this.dependencies.repository.releaseShortAnswerClaim(
+        command.authorization,
+        command.idempotencyKey,
+        claim.claimToken,
+      );
+      throw error;
+    }
   }
 
   async gradeReplacement(
@@ -170,17 +200,19 @@ export class AssessmentService {
       }
       return { ...replay, status: "replayed" };
     }
-    const bundle = await this.dependencies.repository.loadReplacementBundle(
-      command.authorization,
-      command.bundleId,
-    );
-    const item = bundle?.items.find(
-      (candidate) => candidate.id === command.itemId,
-    );
-    if (bundle === null || item === undefined) {
+    const resolution =
+      await this.dependencies.repository.resolveReplacementAnswer(
+        command.authorization,
+        {
+          answer: command.answer,
+          bundleId: command.bundleId,
+          itemId: command.itemId,
+        },
+      );
+    if (resolution === null) {
       throw new AssessmentError("authorization_denied");
     }
-    const correct = command.answer === item.question.keyedAnswer;
+    const { bundle, correct, item } = resolution;
     const attemptId = stableUuid({
       bundleId: bundle.id,
       idempotencyKey: command.idempotencyKey,
@@ -364,50 +396,39 @@ function normalizeJudgments(
 }
 
 function buildReplacementBundle(
-  command: GradeShortAnswerCommand,
+  snapshot: AuthorizedShortAnswerSnapshot,
+  policy: FrozenGradingPolicy,
   attemptId: string,
-): ReplacementBundle {
-  const used = new Set(command.seenPromptHashes);
-  used.add(command.question.normalizedPromptHash);
-  const items: ReplacementItem[] = command.question.rubrics.map((rubric) => {
-    const candidate = [...command.fallbackCandidates]
-      .sort((left, right) => compareAscii(left.id, right.id))
-      .find(
-        (question) =>
-          question.conceptIds[0] === rubric.conceptId &&
-          question.courseId === command.question.courseId &&
-          question.rubricId === rubric.rubricId &&
-          question.rubricVersion === rubric.rubricVersion &&
-          question.sourceSpans.every((span) =>
-            rubric.sourceSpanIds.includes(span.id),
-          ) &&
-          !used.has(question.normalizedPromptHash) &&
-          validReplacement(question),
+): ReplacementBundleSnapshot {
+  const items: ReplacementItemSnapshot[] = snapshot.question.rubrics.map(
+    (rubric) => {
+      const candidate = snapshot.fallbackCandidates.find(
+        (question) => question.conceptIds[0] === rubric.conceptId,
       );
-    if (candidate === undefined) {
-      throw new AssessmentError(
-        "fallback_unavailable",
-        `no valid source-backed fallback for concept ${rubric.conceptId}`,
-      );
-    }
-    used.add(candidate.normalizedPromptHash);
-    return {
-      conceptId: rubric.conceptId,
-      id: stableUuid({
+      if (candidate === undefined) {
+        throw new AssessmentError(
+          "fallback_unavailable",
+          `no valid source-backed fallback for concept ${rubric.conceptId}`,
+        );
+      }
+      return {
         conceptId: rubric.conceptId,
-        originalAttemptId: attemptId,
-        policyVersion: command.policy.gradingPolicyVersion,
-      }),
-      question: candidate,
-    };
-  });
+        id: stableUuid({
+          conceptId: rubric.conceptId,
+          originalAttemptId: attemptId,
+          policyVersion: policy.gradingPolicyVersion,
+        }),
+        question: candidate,
+      };
+    },
+  );
   return {
     id: stableUuid({
-      conceptIds: command.question.rubrics
+      conceptIds: snapshot.question.rubrics
         .map((rubric) => rubric.conceptId)
         .sort(compareAscii),
       originalAttemptId: attemptId,
-      policyVersion: command.policy.gradingPolicyVersion,
+      policyVersion: policy.gradingPolicyVersion,
     }),
     items,
     originalAttemptId: attemptId,
@@ -420,22 +441,31 @@ function validateCommand(command: GradeShortAnswerCommand): void {
   validatePolicy(command.policy);
   validateIdentity(command.idempotencyKey);
   validateIdentity(command.sessionId);
+  validateIdentity(command.questionId);
   if (
     command.answer.length === 0 ||
-    command.question.itemType !== "short_answer" ||
-    command.question.rubrics.length === 0 ||
-    command.question.conceptIds.length !== command.question.rubrics.length ||
     !Number.isFinite(command.deadlineMs) ||
     command.deadlineMs <= 0
   ) {
     throw new AssessmentError("invalid_input");
   }
-  const conceptIds = new Set(command.question.conceptIds);
-  const spanIds = new Set(command.question.sourceSpans.map((span) => span.id));
+}
+
+function validateSnapshot(snapshot: AuthorizedShortAnswerSnapshot): void {
+  const { question } = snapshot;
   if (
-    conceptIds.size !== command.question.conceptIds.length ||
-    spanIds.size !== command.question.sourceSpans.length ||
-    command.question.rubrics.some(
+    question.itemType !== "short_answer" ||
+    question.rubrics.length === 0 ||
+    question.conceptIds.length !== question.rubrics.length
+  ) {
+    throw new AssessmentError("invalid_input");
+  }
+  const conceptIds = new Set(question.conceptIds);
+  const spanIds = new Set(question.sourceSpans.map((span) => span.id));
+  if (
+    conceptIds.size !== question.conceptIds.length ||
+    spanIds.size !== question.sourceSpans.length ||
+    question.rubrics.some(
       (rubric) =>
         !conceptIds.has(rubric.conceptId) ||
         rubric.rubricId.length === 0 ||
@@ -448,20 +478,31 @@ function validateCommand(command: GradeShortAnswerCommand): void {
         rubric.sourceSpanIds.length === 0 ||
         rubric.sourceSpanIds.some((spanId) => !spanIds.has(spanId)),
     ) ||
-    new Set(command.question.rubrics.map((rubric) => rubric.conceptId)).size !==
-      command.question.rubrics.length
+    new Set(question.rubrics.map((rubric) => rubric.conceptId)).size !==
+      question.rubrics.length ||
+    snapshot.fallbackCandidates.length !== question.rubrics.length ||
+    snapshot.fallbackCandidates.some(
+      (candidate) =>
+        !validReplacement(candidate) ||
+        candidate.courseId !== question.courseId ||
+        !question.rubrics.some(
+          (rubric) =>
+            rubric.conceptId === candidate.conceptIds[0] &&
+            rubric.rubricId === candidate.rubricId &&
+            rubric.rubricVersion === candidate.rubricVersion &&
+            candidate.sourceSpans.every((span) =>
+              rubric.sourceSpanIds.includes(span.id),
+            ),
+        ),
+    ) ||
+    new Set(
+      snapshot.fallbackCandidates.map(
+        (candidate) => candidate.normalizedPromptHash,
+      ),
+    ).size !== snapshot.fallbackCandidates.length
   ) {
     throw new AssessmentError("invalid_input");
   }
-  buildReplacementBundle(
-    command,
-    stableUuid({
-      idempotencyKey: command.idempotencyKey,
-      questionId: command.question.id,
-      sessionId: command.sessionId,
-      version: GRADING_POLICY_VERSION,
-    }),
-  );
 }
 
 function validatePolicy(policy: FrozenGradingPolicy): void {
@@ -477,7 +518,11 @@ function validatePolicy(policy: FrozenGradingPolicy): void {
     policy.expectedModelProvenance.promptVersion !== "2" ||
     policy.expectedModelProvenance.resultSchemaVersion !==
       "short-answer-judgment-result-v2" ||
-    !/^[0-9a-f]{64}$/.test(policy.expectedModelProvenance.promptDigest ?? "") ||
+    policy.expectedModelProvenance.generationParametersVersion !==
+      "grading-generation-parameters-v2" ||
+    !/^[0-9a-f]{64}$/.test(
+      policy.expectedModelProvenance.promptDefinitionDigest ?? "",
+    ) ||
     policy.expectedModelProvenance.effectiveModel.length === 0 ||
     policy.expectedModelProvenance.effectiveModelVersion.length === 0
   ) {
@@ -566,15 +611,27 @@ function shortAnswerRequestDigest(command: GradeShortAnswerCommand): string {
   return sha256(
     canonicalJson({
       answer: command.answer,
-      fallbackCandidates: command.fallbackCandidates,
       ownerScopeId: command.authorization.ownerScopeId,
       policy: command.policy,
-      question: command.question,
-      seenPromptHashes: [...command.seenPromptHashes].sort(compareAscii),
+      questionId: command.questionId,
       sessionId: command.sessionId,
       userId: command.authorization.actorId,
     }),
   );
+}
+
+async function acquireShortAnswerClaim(
+  repository: AssessmentRepositoryPort,
+  authorization: GradeShortAnswerCommand["authorization"],
+  request: Parameters<AssessmentRepositoryPort["claimShortAnswer"]>[1],
+  deadlineAt: number,
+) {
+  while (Date.now() < deadlineAt) {
+    const claim = await repository.claimShortAnswer(authorization, request);
+    if (claim.kind !== "pending") return claim;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new AssessmentError("grading_in_progress");
 }
 
 function replacementRequestDigest(command: GradeReplacementCommand): string {

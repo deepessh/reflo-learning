@@ -71,7 +71,55 @@ test(
       await seedAssessmentFixture(client);
       repository = new PostgresAssessmentRepository(databaseUrl.toString());
 
-      const original = shortAnswerFinalization();
+      const claimRequest = {
+        idempotencyKey: "assessment-db/original/v1",
+        leaseMs: 5_000,
+        policy: policy(),
+        questionId: ids.shortAnswer,
+        requestDigest: "d".repeat(64),
+        sessionId: ids.session,
+      };
+      const [claim, duplicateClaim] = await Promise.all([
+        repository.claimShortAnswer(authorization, claimRequest),
+        repository.claimShortAnswer(authorization, claimRequest),
+      ]);
+      const claimed =
+        claim.kind === "claimed"
+          ? claim
+          : duplicateClaim.kind === "claimed"
+            ? duplicateClaim
+            : null;
+      assert.notEqual(claimed, null);
+      assert.deepEqual([claim.kind, duplicateClaim.kind].sort(), [
+        "claimed",
+        "pending",
+      ]);
+      await client.query("BEGIN");
+      await client.query(
+        `SELECT set_config('reflo.actor_id', $1, true),
+                set_config('reflo.owner_scope_id', $2, true)`,
+        [ids.user, ids.scope],
+      );
+      const presentedRows = await client.query(
+        `SELECT count(*)::integer AS count
+         FROM assessment_session_question
+         WHERE owner_scope_id = $1
+           AND session_id = $2
+           AND presentation_kind = 'original'`,
+        [ids.scope, ids.session],
+      );
+      assert.equal(presentedRows.rows[0].count, 1);
+      await assert.rejects(
+        client.query(
+          `DELETE FROM assessment_session_question
+           WHERE owner_scope_id = $1
+             AND session_id = $2
+             AND presentation_kind = 'original'`,
+          [ids.scope, ids.session],
+        ),
+      );
+      await client.query("ROLLBACK");
+      const original = shortAnswerFinalization(claimed);
       const first = await repository.finalizeShortAnswer(
         authorization,
         original,
@@ -84,8 +132,17 @@ test(
       assert.equal(first.status, "created");
       assert.equal(first.outcome, "abstained");
       assert.equal(first.fallback.items.length, 2);
+      assert.equal("keyedAnswer" in first.fallback.items[0].question, false);
       assert.equal(replay.status, "replayed");
       assert.equal(replay.attemptId, first.attemptId);
+      await assert.rejects(
+        repository.claimShortAnswer(authorization, {
+          ...claimRequest,
+          idempotencyKey: "assessment-db/repeated-question/v1",
+          requestDigest: "9".repeat(64),
+        }),
+        (error) => error?.code === "question_unavailable",
+      );
       assert.equal(
         first.evidence.every((entry) => !entry.eligibleForMastery),
         true,
@@ -101,15 +158,16 @@ test(
         },
       ]);
       await assert.rejects(
-        repository.finalizeShortAnswer(authorization, {
-          ...original,
-          attemptId: "10000000-0000-4000-8000-000000000099",
+        repository.claimShortAnswer(authorization, {
           idempotencyKey: "assessment-db/policy-conflict/v1",
+          leaseMs: 5_000,
           policy: {
             ...original.policy,
             confidenceThreshold: "0.90000",
           },
+          questionId: ids.shortAnswer,
           requestDigest: "f".repeat(64),
+          sessionId: ids.session,
         }),
         (error) => error?.code === "invalid_configuration",
       );
@@ -135,6 +193,37 @@ test(
           overall_grade: null,
         },
       ]);
+      await assert.rejects(
+        client.query(
+          `UPDATE attempt
+           SET answer = '{"text":"rewritten"}'::jsonb
+           WHERE owner_scope_id = $1 AND id = $2`,
+          [ids.scope, ids.attempt],
+        ),
+      );
+
+      await client.query(
+        `UPDATE quiz_item
+         SET prompt = 'Mutated live fallback',
+             keyed_answer = to_jsonb('Wrong live key'::text),
+             response_options = '["Wrong live key","Other"]'::jsonb
+         WHERE owner_scope_id = $1 AND id = $2`,
+        [ids.scope, ids.fallbackA],
+      );
+      const immutableBundle = await repository.loadReplacementBundle(
+        authorization,
+        ids.bundle,
+      );
+      assert.equal(immutableBundle.items[0].question.prompt, "Fallback A");
+      const immutableResolution = await repository.resolveReplacementAnswer(
+        authorization,
+        {
+          answer: "VPC isolation",
+          bundleId: ids.bundle,
+          itemId: ids.itemA,
+        },
+      );
+      assert.equal(immutableResolution.correct, true);
 
       const replacement = replacementFinalization();
       const replacementFirst = await repository.finalizeReplacement(
@@ -198,6 +287,10 @@ test(
             WHERE owner_scope_id = $1) AS bundle_count,
            (SELECT count(*)::integer FROM assessment_replacement_item
             WHERE owner_scope_id = $1) AS item_count,
+           (SELECT count(*)::integer FROM assessment_session_question
+            WHERE owner_scope_id = $1) AS session_question_count,
+           (SELECT count(*)::integer FROM assessment_grading_operation
+            WHERE owner_scope_id = $1) AS operation_count,
            (SELECT count(*)::integer FROM attempt
             WHERE owner_scope_id = $1) AS attempt_count`,
         [ids.scope],
@@ -208,6 +301,8 @@ test(
           bundle_count: 0,
           finalization_count: 0,
           item_count: 0,
+          operation_count: 0,
+          session_question_count: 0,
         },
       ]);
     } finally {
@@ -221,10 +316,11 @@ test(
   },
 );
 
-function shortAnswerFinalization() {
+function shortAnswerFinalization(claim) {
   return {
     answer: "Synthetic low-confidence answer",
     attemptId: ids.attempt,
+    claimToken: claim.claimToken,
     evidence: [
       llmEvidence(ids.conceptA, "correct", "attempt_abstained", "0.97000"),
       llmEvidence(ids.conceptB, "incorrect", "below_threshold", "0.20000"),
@@ -234,19 +330,15 @@ function shortAnswerFinalization() {
       items: [
         replacementItem(
           ids.itemA,
-          ids.conceptA,
-          ids.fallbackA,
-          "a".repeat(64),
-          "VPC isolation",
-          "Not isolated",
+          claim.snapshot.fallbackCandidates.find(
+            (candidate) => candidate.conceptIds[0] === ids.conceptA,
+          ),
         ),
         replacementItem(
           ids.itemB,
-          ids.conceptB,
-          ids.fallbackB,
-          "b".repeat(64),
-          "Partitions an address space",
-          "Creates an account",
+          claim.snapshot.fallbackCandidates.find(
+            (candidate) => candidate.conceptIds[0] === ids.conceptB,
+          ),
         ),
       ],
       originalAttemptId: ids.attempt,
@@ -320,8 +412,9 @@ function policy() {
     expectedModelProvenance: {
       effectiveModel: "qwen-plus",
       effectiveModelVersion: "fixture-v1",
+      generationParametersVersion: "grading-generation-parameters-v2",
       inputSchemaVersion: "short-answer-grading-input-v2",
-      promptDigest: "c".repeat(64),
+      promptDefinitionDigest: "c".repeat(64),
       promptId: "assessment-grade-short-answer",
       promptVersion: "2",
       resultSchemaVersion: "short-answer-judgment-result-v2",
@@ -332,36 +425,11 @@ function policy() {
   };
 }
 
-function replacementItem(
-  id,
-  conceptId,
-  questionId,
-  normalizedPromptHash,
-  keyedAnswer,
-  distractor,
-) {
+function replacementItem(id, question) {
   return {
-    conceptId,
+    conceptId: question.conceptIds[0],
     id,
-    question: {
-      conceptIds: [conceptId],
-      courseId: ids.course,
-      difficulty: 2,
-      id: questionId,
-      itemType: "multiple_choice",
-      keyedAnswer,
-      normalizedPromptHash,
-      prompt: `Replacement for ${conceptId}`,
-      responseOptions: [keyedAnswer, distractor],
-      rubricId: conceptId === ids.conceptA ? "rubric-a" : "rubric-b",
-      rubricVersion: "1",
-      sourceSpans: [
-        {
-          id: conceptId === ids.conceptA ? ids.spanA : ids.spanB,
-          text: "Synthetic source",
-        },
-      ],
-    },
+    question,
   };
 }
 
@@ -423,7 +491,7 @@ async function seedAssessmentFixture(client) {
         response_options)
      VALUES
        ($1, $2, $3, 'short_answer', 3, 'Explain both concepts',
-        'null'::jsonb, '{"version":"1"}'::jsonb, 'fixture-v1', $4, NULL),
+        'null'::jsonb, $9::jsonb, 'fixture-v1', $4, NULL),
        ($5, $2, $3, 'multiple_choice', 2, 'Fallback A',
         to_jsonb('VPC isolation'::text), NULL, 'fixture-v1', $6,
         '["VPC isolation","Not isolated"]'::jsonb),
@@ -439,6 +507,24 @@ async function seedAssessmentFixture(client) {
       "a".repeat(64),
       ids.fallbackB,
       "b".repeat(64),
+      JSON.stringify([
+        {
+          conceptId: ids.conceptA,
+          materialContradictions: ["A VPC is public by default."],
+          requiredCriteria: ["States that a VPC provides isolation."],
+          rubricId: "rubric-a",
+          rubricVersion: "1",
+          sourceSpanIds: [ids.spanA],
+        },
+        {
+          conceptId: ids.conceptB,
+          materialContradictions: ["Subnets are separate accounts."],
+          requiredCriteria: ["States that subnets partition an address space."],
+          rubricId: "rubric-b",
+          rubricVersion: "1",
+          sourceSpanIds: [ids.spanB],
+        },
+      ]),
     ],
   );
   await client.query(

@@ -267,12 +267,100 @@ BEGIN
       WHERE owner_scope_id = OLD.owner_scope_id
         AND attempt_id = OLD.id
     )
-  ) AND (
-    NEW.user_id IS DISTINCT FROM OLD.user_id
-    OR NEW.quiz_item_id IS DISTINCT FROM OLD.quiz_item_id
-    OR NEW.outcome IS DISTINCT FROM OLD.outcome
-  ) THEN
-    RAISE EXCEPTION 'finalized attempt provenance is immutable'
+  ) AND NEW IS DISTINCT FROM OLD THEN
+    RAISE EXCEPTION 'finalized attempt is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+
+--
+-- Name: reflo_protect_grading_operation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_protect_grading_operation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF public.reflo_learning_scope_delete_is_authorized(OLD.owner_scope_id) THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'assessment grading operation is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  IF (
+    NEW.owner_scope_id,
+    NEW.idempotency_key,
+    NEW.user_id,
+    NEW.session_id,
+    NEW.question_id,
+    NEW.request_digest,
+    NEW.grading_policy_version,
+    NEW.policy_binding_digest,
+    NEW.authorized_snapshot,
+    NEW.created_at
+  ) IS DISTINCT FROM (
+    OLD.owner_scope_id,
+    OLD.idempotency_key,
+    OLD.user_id,
+    OLD.session_id,
+    OLD.question_id,
+    OLD.request_digest,
+    OLD.grading_policy_version,
+    OLD.policy_binding_digest,
+    OLD.authorized_snapshot,
+    OLD.created_at
+  ) OR OLD.status = 'finalized' THEN
+    RAISE EXCEPTION 'assessment grading operation identity is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+
+--
+-- Name: reflo_protect_session_question(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_protect_session_question() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.presented_at IS NOT NULL
+       AND public.reflo_learning_scope_delete_is_authorized(OLD.owner_scope_id)
+         IS NOT TRUE
+    THEN
+      RAISE EXCEPTION 'presented assessment question is immutable'
+        USING ERRCODE = '55000';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF OLD.presented_at IS NOT NULL
+     OR NEW.presented_at IS NULL
+     OR (
+       NEW.owner_scope_id,
+       NEW.session_id,
+       NEW.normalized_prompt_hash,
+       NEW.quiz_item_id,
+       NEW.operation_idempotency_key,
+       NEW.presentation_kind,
+       NEW.created_at
+     ) IS DISTINCT FROM (
+       OLD.owner_scope_id,
+       OLD.session_id,
+       OLD.normalized_prompt_hash,
+       OLD.quiz_item_id,
+       OLD.operation_idempotency_key,
+       OLD.presentation_kind,
+       OLD.created_at
+     )
+  THEN
+    RAISE EXCEPTION 'assessment session question identity is immutable'
       USING ERRCODE = '55000';
   END IF;
   RETURN NEW;
@@ -349,6 +437,10 @@ BEGIN
   DELETE FROM public.assessment_replacement_bundle
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.assessment_finalization
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.assessment_session_question
+  WHERE owner_scope_id = p_owner_scope_id;
+  DELETE FROM public.assessment_grading_operation
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.attempt_concept_evidence
   WHERE owner_scope_id = p_owner_scope_id;
@@ -511,6 +603,38 @@ ALTER TABLE ONLY public.assessment_finalization FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: assessment_grading_operation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assessment_grading_operation (
+    owner_scope_id uuid NOT NULL,
+    idempotency_key text NOT NULL,
+    user_id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    question_id uuid NOT NULL,
+    request_digest text NOT NULL,
+    grading_policy_version text NOT NULL,
+    policy_binding_digest text NOT NULL,
+    authorized_snapshot jsonb NOT NULL,
+    status text DEFAULT 'processing'::text NOT NULL,
+    claim_token uuid,
+    lease_expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    finalized_at timestamp with time zone,
+    CONSTRAINT assessment_grading_operation_authorized_snapshot_check CHECK ((jsonb_typeof(authorized_snapshot) = 'object'::text)),
+    CONSTRAINT assessment_grading_operation_check CHECK ((((status = 'processing'::text) AND (finalized_at IS NULL)) OR ((status = 'finalized'::text) AND (claim_token IS NULL) AND (lease_expires_at IS NULL) AND (finalized_at IS NOT NULL)))),
+    CONSTRAINT assessment_grading_operation_check1 CHECK ((((claim_token IS NULL) = (lease_expires_at IS NULL)) OR (status = 'finalized'::text))),
+    CONSTRAINT assessment_grading_operation_grading_policy_version_check CHECK ((grading_policy_version = 'grading-policy-v1'::text)),
+    CONSTRAINT assessment_grading_operation_idempotency_key_check CHECK (((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 240))),
+    CONSTRAINT assessment_grading_operation_policy_binding_digest_check CHECK ((policy_binding_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_grading_operation_request_digest_check CHECK ((request_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_grading_operation_status_check CHECK ((status = ANY (ARRAY['processing'::text, 'finalized'::text])))
+);
+
+ALTER TABLE ONLY public.assessment_grading_operation FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: assessment_replacement_bundle; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -543,13 +667,47 @@ CREATE TABLE public.assessment_replacement_item (
     rubric_id text NOT NULL,
     rubric_version text NOT NULL,
     normalized_prompt_hash text NOT NULL,
+    course_id uuid NOT NULL,
+    difficulty smallint NOT NULL,
+    prompt text NOT NULL,
+    response_options jsonb NOT NULL,
+    keyed_answer jsonb NOT NULL,
+    source_spans jsonb NOT NULL,
+    snapshot_digest text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT assessment_replacement_item_difficulty_check CHECK (((difficulty >= 1) AND (difficulty <= 5))),
+    CONSTRAINT assessment_replacement_item_keyed_answer_check CHECK ((jsonb_typeof(keyed_answer) = 'string'::text)),
     CONSTRAINT assessment_replacement_item_normalized_prompt_hash_check CHECK ((normalized_prompt_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_replacement_item_prompt_check CHECK (((length(prompt) >= 1) AND (length(prompt) <= 10000))),
+    CONSTRAINT assessment_replacement_item_response_options_check CHECK (((jsonb_typeof(response_options) = 'array'::text) AND (jsonb_array_length(response_options) >= 2))),
     CONSTRAINT assessment_replacement_item_rubric_id_check CHECK (((length(rubric_id) >= 1) AND (length(rubric_id) <= 240))),
-    CONSTRAINT assessment_replacement_item_rubric_version_check CHECK (((length(rubric_version) >= 1) AND (length(rubric_version) <= 120)))
+    CONSTRAINT assessment_replacement_item_rubric_version_check CHECK (((length(rubric_version) >= 1) AND (length(rubric_version) <= 120))),
+    CONSTRAINT assessment_replacement_item_snapshot_digest_check CHECK ((snapshot_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_replacement_item_source_spans_check CHECK (((jsonb_typeof(source_spans) = 'array'::text) AND (jsonb_array_length(source_spans) >= 1)))
 );
 
 ALTER TABLE ONLY public.assessment_replacement_item FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: assessment_session_question; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assessment_session_question (
+    owner_scope_id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    normalized_prompt_hash text NOT NULL,
+    quiz_item_id uuid NOT NULL,
+    operation_idempotency_key text NOT NULL,
+    presentation_kind text NOT NULL,
+    presented_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT assessment_session_question_check CHECK ((((presentation_kind = 'original'::text) AND (presented_at IS NOT NULL)) OR (presentation_kind = 'fallback'::text))),
+    CONSTRAINT assessment_session_question_normalized_prompt_hash_check CHECK ((normalized_prompt_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assessment_session_question_presentation_kind_check CHECK ((presentation_kind = ANY (ARRAY['original'::text, 'fallback'::text])))
+);
+
+ALTER TABLE ONLY public.assessment_session_question FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1819,6 +1977,14 @@ ALTER TABLE ONLY public.assessment_finalization
 
 
 --
+-- Name: assessment_grading_operation assessment_grading_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_grading_operation
+    ADD CONSTRAINT assessment_grading_operation_pkey PRIMARY KEY (owner_scope_id, idempotency_key);
+
+
+--
 -- Name: assessment_replacement_bundle assessment_replacement_bundle_owner_scope_id_original_attem_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1856,6 +2022,14 @@ ALTER TABLE ONLY public.assessment_replacement_item
 
 ALTER TABLE ONLY public.assessment_replacement_item
     ADD CONSTRAINT assessment_replacement_item_pkey PRIMARY KEY (owner_scope_id, id);
+
+
+--
+-- Name: assessment_session_question assessment_session_question_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_session_question
+    ADD CONSTRAINT assessment_session_question_pkey PRIMARY KEY (owner_scope_id, session_id, normalized_prompt_hash);
 
 
 --
@@ -2965,6 +3139,13 @@ CREATE TRIGGER assessment_finalization_is_append_only BEFORE DELETE OR UPDATE ON
 
 
 --
+-- Name: assessment_grading_operation assessment_grading_operation_identity_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER assessment_grading_operation_identity_is_immutable BEFORE DELETE OR UPDATE ON public.assessment_grading_operation FOR EACH ROW EXECUTE FUNCTION public.reflo_protect_grading_operation();
+
+
+--
 -- Name: assessment_replacement_bundle assessment_replacement_bundle_is_append_only; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2976,6 +3157,13 @@ CREATE TRIGGER assessment_replacement_bundle_is_append_only BEFORE DELETE OR UPD
 --
 
 CREATE TRIGGER assessment_replacement_item_is_append_only BEFORE DELETE OR UPDATE ON public.assessment_replacement_item FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
+
+
+--
+-- Name: assessment_session_question assessment_session_question_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER assessment_session_question_is_immutable BEFORE DELETE OR UPDATE ON public.assessment_session_question FOR EACH ROW EXECUTE FUNCTION public.reflo_protect_session_question();
 
 
 --
@@ -3139,6 +3327,38 @@ ALTER TABLE ONLY public.assessment_finalization
 
 
 --
+-- Name: assessment_grading_operation assessment_grading_operation_grading_policy_version_policy_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_grading_operation
+    ADD CONSTRAINT assessment_grading_operation_grading_policy_version_policy_fkey FOREIGN KEY (grading_policy_version, policy_binding_digest) REFERENCES public.grading_policy_binding(grading_policy_version, binding_digest);
+
+
+--
+-- Name: assessment_grading_operation assessment_grading_operation_owner_scope_id_question_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_grading_operation
+    ADD CONSTRAINT assessment_grading_operation_owner_scope_id_question_id_fkey FOREIGN KEY (owner_scope_id, question_id) REFERENCES public.quiz_item(owner_scope_id, id);
+
+
+--
+-- Name: assessment_grading_operation assessment_grading_operation_owner_scope_id_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_grading_operation
+    ADD CONSTRAINT assessment_grading_operation_owner_scope_id_session_id_fkey FOREIGN KEY (owner_scope_id, session_id) REFERENCES public.study_session(owner_scope_id, id);
+
+
+--
+-- Name: assessment_grading_operation assessment_grading_operation_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_grading_operation
+    ADD CONSTRAINT assessment_grading_operation_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
 -- Name: assessment_replacement_bundle assessment_replacement_bundle_owner_scope_id_original_atte_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3155,11 +3375,43 @@ ALTER TABLE ONLY public.assessment_replacement_item
 
 
 --
+-- Name: assessment_replacement_item assessment_replacement_item_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_replacement_item
+    ADD CONSTRAINT assessment_replacement_item_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
 -- Name: assessment_replacement_item assessment_replacement_item_owner_scope_id_quiz_item_id_co_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.assessment_replacement_item
     ADD CONSTRAINT assessment_replacement_item_owner_scope_id_quiz_item_id_co_fkey FOREIGN KEY (owner_scope_id, quiz_item_id, concept_id) REFERENCES public.quiz_item_concept(owner_scope_id, quiz_item_id, concept_id);
+
+
+--
+-- Name: assessment_session_question assessment_session_question_owner_scope_id_operation_idemp_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_session_question
+    ADD CONSTRAINT assessment_session_question_owner_scope_id_operation_idemp_fkey FOREIGN KEY (owner_scope_id, operation_idempotency_key) REFERENCES public.assessment_grading_operation(owner_scope_id, idempotency_key);
+
+
+--
+-- Name: assessment_session_question assessment_session_question_owner_scope_id_quiz_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_session_question
+    ADD CONSTRAINT assessment_session_question_owner_scope_id_quiz_item_id_fkey FOREIGN KEY (owner_scope_id, quiz_item_id) REFERENCES public.quiz_item(owner_scope_id, id);
+
+
+--
+-- Name: assessment_session_question assessment_session_question_owner_scope_id_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assessment_session_question
+    ADD CONSTRAINT assessment_session_question_owner_scope_id_session_id_fkey FOREIGN KEY (owner_scope_id, session_id) REFERENCES public.study_session(owner_scope_id, id);
 
 
 --
@@ -4006,6 +4258,12 @@ CREATE POLICY activation_generation_operation_active_membership ON public.activa
 ALTER TABLE public.assessment_finalization ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: assessment_grading_operation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.assessment_grading_operation ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: assessment_replacement_bundle; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -4016,6 +4274,12 @@ ALTER TABLE public.assessment_replacement_bundle ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.assessment_replacement_item ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: assessment_session_question; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.assessment_session_question ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: asset; Type: ROW SECURITY; Schema: public; Owner: -
@@ -4078,6 +4342,41 @@ ALTER TABLE public.audio_generation_operation ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY audio_generation_operation_active_membership ON public.audio_generation_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: assessment_finalization authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.assessment_finalization FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: assessment_grading_operation authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.assessment_grading_operation FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: assessment_replacement_bundle authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.assessment_replacement_bundle FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: assessment_replacement_item authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.assessment_replacement_item FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: assessment_session_question authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.assessment_session_question FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
 
 
 --
@@ -4455,6 +4754,13 @@ CREATE POLICY scoped_active_membership ON public.assessment_finalization USING (
 
 
 --
+-- Name: assessment_grading_operation scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.assessment_grading_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: assessment_replacement_bundle scoped_active_membership; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -4466,6 +4772,13 @@ CREATE POLICY scoped_active_membership ON public.assessment_replacement_bundle U
 --
 
 CREATE POLICY scoped_active_membership ON public.assessment_replacement_item USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: assessment_session_question scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.assessment_session_question USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
 
 
 --

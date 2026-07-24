@@ -2,6 +2,7 @@ export type AssessmentErrorCode =
   | "authorization_denied"
   | "conflicting_duplicate"
   | "fallback_unavailable"
+  | "grading_in_progress"
   | "invalid_configuration"
   | "invalid_input"
   | "invalid_result"

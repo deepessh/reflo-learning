@@ -1,4 +1,15 @@
-import type { LibraryCourse, SessionHistoryItem } from "@reflo/accounts";
+import type {
+  CourseConceptProgress,
+  LibraryCourse,
+  SessionHistoryItem,
+} from "@reflo/accounts";
+
+export interface ConceptProgressPresentation {
+  readonly confidencePercent: number;
+  readonly label: string;
+  readonly masteryPercent: number | null;
+  readonly tone: "developing" | "strong" | "unassessed" | "weak";
+}
 
 export function courseProgress(course: LibraryCourse): {
   readonly label: string;
@@ -40,6 +51,52 @@ export function sessionDuration(session: SessionHistoryItem): string {
     new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime();
   const minutes = Math.max(1, Math.round(milliseconds / 60_000));
   return `${minutes} min`;
+}
+
+export function conceptProgressPresentation(
+  concept: CourseConceptProgress,
+): ConceptProgressPresentation {
+  if (concept.assessmentStatus === "unassessed" || concept.mastery === null) {
+    return {
+      confidencePercent: 0,
+      label: "Unassessed",
+      masteryPercent: null,
+      tone: "unassessed",
+    };
+  }
+  const masteryPercent = fixedPercent(concept.mastery);
+  const confidencePercent = fixedPercent(concept.confidence);
+  if (masteryPercent < 40) {
+    return {
+      confidencePercent,
+      label: "Needs review",
+      masteryPercent,
+      tone: "weak",
+    };
+  }
+  if (masteryPercent < 75) {
+    return {
+      confidencePercent,
+      label: "Developing",
+      masteryPercent,
+      tone: "developing",
+    };
+  }
+  return {
+    confidencePercent,
+    label: "Strong evidence",
+    masteryPercent,
+    tone: "strong",
+  };
+}
+
+export function fixedPercent(value: string): number {
+  return Math.round(Number(value) * 100);
+}
+
+export function masteryDeltaLabel(value: string): string {
+  const percent = Math.round(Number(value) * 100);
+  return `${percent >= 0 ? "+" : ""}${percent} pts`;
 }
 
 function ingestionLabel(status: LibraryCourse["sourceStatus"]): string {

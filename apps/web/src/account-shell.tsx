@@ -1,13 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import Image from "next/image";
 import Link from "next/link";
 
-import type { LibraryCourse, SessionHistoryItem } from "@reflo/accounts";
+import type {
+  CourseProgress,
+  LibraryCourse,
+  SessionHistoryItem,
+} from "@reflo/accounts";
 
 import { courseProgress, sessionDuration } from "./account-view";
+import { KnowledgeMap } from "./knowledge-map";
 
 interface AccountShellProps {
   readonly apiOrigin: string;
@@ -16,6 +27,7 @@ interface AccountShellProps {
 }
 
 type Screen = "loading" | "signed-out" | "email-sent" | "dashboard" | "error";
+type ProgressScreen = "idle" | "loading" | "ready" | "error";
 
 export function AccountShell({
   apiOrigin,
@@ -26,6 +38,46 @@ export function AccountShell({
   const [email, setEmail] = useState("");
   const [courses, setCourses] = useState<readonly LibraryCourse[]>([]);
   const [sessions, setSessions] = useState<readonly SessionHistoryItem[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<CourseProgress | null>(null);
+  const [progressScreen, setProgressScreen] = useState<ProgressScreen>("idle");
+  const progressRequestId = useRef(0);
+
+  const loadProgress = useCallback(
+    async (courseId: string) => {
+      const requestId = ++progressRequestId.current;
+      setProgressScreen("loading");
+      setProgress(null);
+      try {
+        const response = await fetch(
+          `${apiOrigin}/v1/courses/${encodeURIComponent(courseId)}/progress`,
+          { credentials: "include" },
+        );
+        if (requestId !== progressRequestId.current) {
+          return;
+        }
+        if (response.status === 401) {
+          setScreen("signed-out");
+          setProgressScreen("idle");
+          return;
+        }
+        if (!response.ok) {
+          throw new Error("course_progress_unavailable");
+        }
+        const body = (await response.json()) as { progress: CourseProgress };
+        if (requestId !== progressRequestId.current) {
+          return;
+        }
+        setProgress(body.progress);
+        setProgressScreen("ready");
+      } catch {
+        if (requestId === progressRequestId.current) {
+          setProgressScreen("error");
+        }
+      }
+    },
+    [apiOrigin],
+  );
 
   const loadAccount = useCallback(async () => {
     try {
@@ -48,11 +100,20 @@ export function AccountShell({
       };
       setCourses(library.courses);
       setSessions(history.sessions);
+      const initialCourse = library.courses[0];
+      setSelectedCourseId(initialCourse?.courseId ?? null);
+      if (initialCourse === undefined) {
+        progressRequestId.current += 1;
+        setProgress(null);
+        setProgressScreen("idle");
+      } else {
+        void loadProgress(initialCourse.courseId);
+      }
       setScreen("dashboard");
     } catch {
       setScreen("error");
     }
-  }, [apiOrigin]);
+  }, [apiOrigin, loadProgress]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadAccount(), 0);
@@ -89,7 +150,22 @@ export function AccountShell({
         <ErrorState onRetry={() => void loadAccount()} />
       ) : null}
       {screen === "dashboard" ? (
-        <Dashboard courses={courses} sessions={sessions} />
+        <Dashboard
+          courses={courses}
+          onRetryProgress={() => {
+            if (selectedCourseId !== null) {
+              void loadProgress(selectedCourseId);
+            }
+          }}
+          onSelectCourse={(courseId) => {
+            setSelectedCourseId(courseId);
+            void loadProgress(courseId);
+          }}
+          progress={progress}
+          progressScreen={progressScreen}
+          selectedCourseId={selectedCourseId}
+          sessions={sessions}
+        />
       ) : null}
     </section>
   );
@@ -157,9 +233,19 @@ function EmailSent({ email }: { readonly email: string }) {
 
 function Dashboard({
   courses,
+  onRetryProgress,
+  onSelectCourse,
+  progress,
+  progressScreen,
+  selectedCourseId,
   sessions,
 }: {
   readonly courses: readonly LibraryCourse[];
+  readonly onRetryProgress: () => void;
+  readonly onSelectCourse: (courseId: string) => void;
+  readonly progress: CourseProgress | null;
+  readonly progressScreen: ProgressScreen;
+  readonly selectedCourseId: string | null;
   readonly sessions: readonly SessionHistoryItem[];
 }) {
   return (
@@ -190,7 +276,15 @@ function Dashboard({
               {courses.map((course) => {
                 const progress = courseProgress(course);
                 return (
-                  <article className="course-card" key={course.courseId}>
+                  <button
+                    aria-pressed={selectedCourseId === course.courseId}
+                    className={`course-card ${
+                      selectedCourseId === course.courseId ? "is-selected" : ""
+                    }`}
+                    key={course.courseId}
+                    onClick={() => onSelectCourse(course.courseId)}
+                    type="button"
+                  >
                     <div className={`course-art tone-${progress.tone}`}>
                       <span>{course.title.slice(0, 2).toUpperCase()}</span>
                     </div>
@@ -208,7 +302,7 @@ function Dashboard({
                         <span style={{ width: `${progress.percent}%` }} />
                       </div>
                     </div>
-                  </article>
+                  </button>
                 );
               })}
             </div>
@@ -243,6 +337,30 @@ function Dashboard({
           )}
         </section>
       </div>
+
+      {selectedCourseId !== null && progressScreen === "loading" ? (
+        <section className="panel progress-state">
+          <span className="loading-ring" />
+          <div>
+            <strong>Replaying your concept progress…</strong>
+            <p>Loading persisted mastery and review state.</p>
+          </div>
+        </section>
+      ) : null}
+      {selectedCourseId !== null && progressScreen === "error" ? (
+        <section className="panel progress-state">
+          <div>
+            <strong>Knowledge Map is temporarily unavailable.</strong>
+            <p>Your stored evidence is unchanged.</p>
+          </div>
+          <button onClick={onRetryProgress} type="button">
+            Try again
+          </button>
+        </section>
+      ) : null}
+      {progressScreen === "ready" && progress !== null ? (
+        <KnowledgeMap onRefresh={onRetryProgress} progress={progress} />
+      ) : null}
     </div>
   );
 }

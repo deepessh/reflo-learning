@@ -3,7 +3,8 @@
 This package owns the provider-neutral `auth-v1` account lifecycle used by the
 API. It implements ten-minute, keyed-digest magic links; 256-bit opaque server
 sessions; exact HTTPS callback origins; host-only cookie and CSRF contracts;
-recent-authentication enforcement; and the library/session-history ports.
+recent-authentication enforcement; and the owner-scoped library,
+session-history, and course-progress read ports.
 
 Composition roots must provide:
 

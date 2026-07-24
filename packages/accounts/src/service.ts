@@ -7,6 +7,7 @@ import {
 
 import type {
   AuthenticatedAccount,
+  CourseProgress,
   LibraryCourse,
   RedeemedSession,
   SessionHistoryItem,
@@ -210,6 +211,16 @@ export class AccountService {
     return this.#options.repository.listLibrary(account);
   }
 
+  getCourseProgress(
+    account: AuthenticatedAccount,
+    courseId: string,
+  ): Promise<CourseProgress | null> {
+    if (!isUuid(courseId)) {
+      throw new AccountInputError("invalid_course_id");
+    }
+    return this.#options.repository.getCourseProgress(account, courseId);
+  }
+
   listSessionHistory(
     account: AuthenticatedAccount,
   ): Promise<readonly SessionHistoryItem[]> {
@@ -320,6 +331,12 @@ function encryptEmail(email: string, key: Uint8Array): string {
 
 function isOpaqueSecret(value: string): boolean {
   return /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 function safeEqual(left: string, right: string): boolean {

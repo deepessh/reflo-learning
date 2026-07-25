@@ -1,0 +1,93 @@
+{
+  "contractVersion": "reflo-local-workers-v1",
+  "stateVersion": "reflo-local-workers-state-v1",
+  "profile": "development-only",
+  "supportedPodmanVersions": ["5.8.3", "6.0.1"],
+  "ingestion": {
+    "imageReference": "reflo-ingestion-worker:local",
+    "platform": "linux/amd64",
+    "containerfile": "packages/ingestion/worker/Containerfile",
+    "context": "packages/ingestion/worker",
+    "componentManifest": "packages/ingestion/worker/manifest.json",
+    "fixture": "packages/dev-smoke/fixtures/reflo-retention-basics.pdf",
+    "profile": "isolated-ingestion-v1"
+  },
+  "clamav": {
+    "version": "1.4.5",
+    "updaterImage": "docker.io/clamav/clamav@sha256:48eaad9644475c2d466ce6d4ba2da892dbd4dcd47713201d31b665364655cc3c",
+    "updaterImageDigest": "sha256:48eaad9644475c2d466ce6d4ba2da892dbd4dcd47713201d31b665364655cc3c",
+    "maxAgeHours": 24,
+    "databases": [
+      ["main.cvd"],
+      ["daily.cld", "daily.cvd"],
+      ["bytecode.cld", "bytecode.cvd"]
+    ]
+  },
+  "tessdata": {
+    "revision": "87416418657359cb625c412a48b6e1d6d41c29bd",
+    "filename": "eng.traineddata",
+    "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata"
+  },
+  "piper": {
+    "version": "1.4.2",
+    "pythonMajorMinor": "3.13",
+    "voiceArtifactVersion": "piper-voice-en-us-ljspeech-high-v1",
+    "voice": {
+      "profileId": "en-US/reflo-narrator-v1",
+      "voiceId": "en_US-ljspeech-high",
+      "repository": "rhasspy/piper-voices",
+      "revision": "5b44ec7bab7c5822cfec48fbd5aa99db71a823d6",
+      "modelPath": "en/en_US/ljspeech/high/en_US-ljspeech-high.onnx",
+      "modelSha256": "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a",
+      "configPath": "en/en_US/ljspeech/high/en_US-ljspeech-high.onnx.json",
+      "configSha256": "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14"
+    },
+    "dependencies": [
+      "coloredlogs==15.0.1",
+      "flatbuffers==25.12.19",
+      "humanfriendly==10.0",
+      "mpmath==1.3.0",
+      "numpy==2.5.1",
+      "packaging==26.2",
+      "pathvalidate==3.3.1",
+      "pip==25.3",
+      "protobuf==7.35.1",
+      "sympy==1.14.0"
+    ],
+    "runtimes": [
+      {
+        "platform": "darwin/x64",
+        "piperWheel": "piper_tts-1.4.2-cp39-abi3-macosx_10_9_x86_64.whl",
+        "piperWheelSha256": "d996f9139c44a0bedb6a9ed45805c429a827c56ef9213933859349801fa7f4e1",
+        "onnxRuntimeVersion": "1.23.2",
+        "onnxRuntimeWheel": "onnxruntime-1.23.2-cp313-cp313-macosx_13_0_x86_64.whl",
+        "onnxRuntimeWheelSha256": "162f4ca894ec3de1a6fd53589e511e06ecdc3ff646849b62a9da7489dee9ce95"
+      },
+      {
+        "platform": "darwin/arm64",
+        "piperWheel": "piper_tts-1.4.2-cp39-abi3-macosx_11_0_arm64.whl",
+        "piperWheelSha256": "138e6adf26a8e796f53866770ea30b666b65432a5e94857c2d9a8c473a8a1f90",
+        "onnxRuntimeVersion": "1.23.2",
+        "onnxRuntimeWheel": "onnxruntime-1.23.2-cp313-cp313-macosx_13_0_arm64.whl",
+        "onnxRuntimeWheelSha256": "2ff531ad8496281b4297f32b83b01cdd719617e2351ffe0dba5684fb283afa1f"
+      },
+      {
+        "platform": "linux/x64",
+        "piperWheel": "piper_tts-1.4.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl",
+        "piperWheelSha256": "b17184a664bd9431ce95c138f4bfb3025e1280cf26075a703dbfdcab989b8ee3",
+        "onnxRuntimeVersion": "1.27.0",
+        "onnxRuntimeWheel": "onnxruntime-1.27.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "onnxRuntimeWheelSha256": "6872443f236a554921cda6f318c900e2d0c226792cf3534d00e5057c6926e5d2"
+      },
+      {
+        "platform": "linux/arm64",
+        "piperWheel": "piper_tts-1.4.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.manylinux_2_28_aarch64.whl",
+        "piperWheelSha256": "6736329f1ef58c39272215849dffdacae601201480b08a0c892938fa4d7c8c67",
+        "onnxRuntimeVersion": "1.27.0",
+        "onnxRuntimeWheel": "onnxruntime-1.27.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+        "onnxRuntimeWheelSha256": "48b3d87eb560ff6a772240506f3c78d6d27c63cafedd5c775672e1194f968cfd"
+      }
+    ]
+  }
+}

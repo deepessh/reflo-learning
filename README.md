@@ -262,17 +262,41 @@ artifact counts change.
 
 Prepare these local-only prerequisites first:
 
-- development-compatible Podman 5.8.3 or production-pinned 6.0.1, the locally
-  built pinned ingestion image, its inspected digest, the verified ClamAV
-  snapshot directory, and pinned English tessdata;
+- development-compatible rootless Podman 5.8.3 or production-pinned 6.0.1;
 - a reachable development LiteLLM gateway with JSON-capable text and exactly
   1,024-dimensional embedding aliases;
-- an absolute Python environment containing `piper-tts==1.4.2` plus the
-  digest-pinned LJSpeech voice model and config from the checked-in Piper
-  manifest.
+- Python 3.13 for the checksum-pinned development Piper environment.
 
-Export the `REFLO_LOCAL_*` and `REFLO_LITELLM_*` values documented in
-`.env.example`, then run one command:
+One repository-owned command builds or reuses the existing ingestion
+`Containerfile`, records its inspected digest, refreshes upstream-verified
+ClamAV databases through a separate digest-pinned connected updater, prepares
+the checksum-pinned English tessdata and Piper/LJSpeech artifacts outside the
+workers, and writes a non-secret mode-0600 profile:
+
+```sh
+corepack pnpm local-workers:prepare
+```
+
+An existing portable worker archive may be loaded instead by setting both
+`REFLO_LOCAL_INGESTION_ARCHIVE` and
+`REFLO_LOCAL_INGESTION_ARCHIVE_SHA256`; mutable or unchecked archives fail
+closed. Repeated preparation reuses unchanged image, Piper, tessdata, and
+still-fresh ClamAV identities.
+
+Readiness never treats a missing optional profile as available. It reports each
+component as `AVAILABLE`, `SKIPPED`, `STALE`, `UNSUPPORTED`, or `INVALID` with a
+bounded corrective action. The focused smoke executes the committed
+rights-cleared fixture through the networkless ingestion worker and produces a
+playable development WAV; rerunning it reuses deterministic paths.
+
+```sh
+corepack pnpm local-workers:status
+corepack pnpm local-workers:smoke
+```
+
+Configure only the `REFLO_LITELLM_*` values documented in `.env.example`; the
+connected smoke automatically sources the generated non-secret worker profile.
+Then run:
 
 ```sh
 corepack pnpm smoke:local
@@ -294,5 +318,14 @@ experience. Authoritative performance, audio, adversarial, privacy, security,
 provider, quota, and release-gate evaluation runs only in the applicable
 Alibaba target environment under the repository evaluation contract; this
 command cannot satisfy any of them.
+
+Rebuild by rerunning `local-workers:prepare`. Cleanup removes only the named
+`reflo-ingestion-worker:local` image and `.reflo/local-workers/` generated
+profile; it preserves the Podman VM, shared updater image, application
+artifacts, local databases, and credentials:
+
+```sh
+corepack pnpm local-workers:cleanup
+```
 
 `pnpm package` stages independently deployable outputs under `.artifacts/`. The web artifact is static; API and jobs artifacts include their production workspace dependencies.

@@ -15,6 +15,14 @@ const valid = {
   composeSource: readFileSync(path.join(root, "compose.yaml"), "utf8"),
   gitignoreSource: readFileSync(path.join(root, ".gitignore"), "utf8"),
   scriptSource: readFileSync(path.join(root, "scripts/local-stack.sh"), "utf8"),
+  workerContractSource: readFileSync(
+    path.join(root, "scripts/local-workers-manifest.json"),
+    "utf8",
+  ),
+  workerScriptSource: readFileSync(
+    path.join(root, "scripts/local-workers.mjs"),
+    "utf8",
+  ),
 };
 
 describe("local supporting-service stack policy", () => {
@@ -71,8 +79,14 @@ describe("local supporting-service stack policy", () => {
   });
 
   it("requires the explicit development-compatible Podman allowlist", () => {
-    const scriptSource = valid.scriptSource.replace("5.8.3 | 6.0.1", "6.0.1");
-    const errors = collectLocalStackViolations({ ...valid, scriptSource });
+    const workerContractSource = valid.workerContractSource.replace(
+      '"supportedPodmanVersions": ["5.8.3", "6.0.1"]',
+      '"supportedPodmanVersions": ["6.0.1"]',
+    );
+    const errors = collectLocalStackViolations({
+      ...valid,
+      workerContractSource,
+    });
 
     assert.ok(
       errors.includes("missing development-compatible Podman allowlist"),

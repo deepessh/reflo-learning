@@ -13,6 +13,8 @@ export function collectLocalStackViolations({
   composeSource,
   gitignoreSource,
   scriptSource,
+  workerContractSource,
+  workerScriptSource,
 }) {
   const errors = [];
   const servicesSource = section(composeSource, "services", "volumes");
@@ -142,20 +144,46 @@ export function collectLocalStackViolations({
   requireText(
     errors,
     scriptSource,
-    "SKIPPED ingestion-worker",
-    "actionable ingestion-worker state",
+    'node "$REFLO_LOCAL_ROOT/scripts/local-workers.mjs" status',
+    "optional-worker readiness command",
+  );
+  let workerContract;
+  try {
+    workerContract = JSON.parse(workerContractSource);
+  } catch {
+    errors.push("local worker contract must be valid JSON");
+  }
+  if (
+    JSON.stringify(workerContract?.supportedPodmanVersions) !==
+    JSON.stringify(["5.8.3", "6.0.1"])
+  ) {
+    errors.push("missing development-compatible Podman allowlist");
+  }
+  for (const state of [
+    "AVAILABLE",
+    "SKIPPED",
+    "STALE",
+    "UNSUPPORTED",
+    "INVALID",
+  ]) {
+    requireText(
+      errors,
+      workerScriptSource,
+      `"${state}"`,
+      `${state} optional-worker state`,
+    );
+  }
+  requireText(
+    errors,
+    workerScriptSource,
+    'path.basename(generatedRoot) !== "local-workers"',
+    "scoped optional-worker cleanup guard",
   );
   requireText(
     errors,
-    scriptSource,
-    "5.8.3 | 6.0.1",
-    "development-compatible Podman allowlist",
-  );
-  requireText(
-    errors,
-    scriptSource,
-    "SKIPPED piper-worker",
-    "actionable Piper-worker state",
+    workerScriptSource,
+    "REFLO_LOCAL_INGESTION_ARCHIVE_SHA256",
+    "checksum-pinned ingestion archive input",
   );
   if (
     /docker\s+(?:system|volume)\s+prune|docker\s+rm\s+-f/.test(scriptSource)
@@ -183,6 +211,14 @@ export function validateRepositoryLocalStack(repositoryRoot = root) {
     ),
     scriptSource: readFileSync(
       path.join(repositoryRoot, "scripts/local-stack.sh"),
+      "utf8",
+    ),
+    workerContractSource: readFileSync(
+      path.join(repositoryRoot, "scripts/local-workers-manifest.json"),
+      "utf8",
+    ),
+    workerScriptSource: readFileSync(
+      path.join(repositoryRoot, "scripts/local-workers.mjs"),
       "utf8",
     ),
   });

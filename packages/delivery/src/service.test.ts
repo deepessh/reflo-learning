@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DemoDeliveryDestination, ReservedDelivery } from "./contracts.js";
 import type { DeliveryError } from "./errors.js";
@@ -52,6 +52,8 @@ describe("demo-only ambient delivery", () => {
   let service: DemoDeliveryService;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-24T09:30:00.000Z"));
     repository = new InMemoryDemoDeliveryRepository();
     email = new FakeDemoMessagePort("email");
     telegram = new FakeDemoMessagePort("telegram");
@@ -64,6 +66,10 @@ describe("demo-only ambient delivery", () => {
       messagePorts: [email, telegram],
       repository,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("batches a due item once and reuses the logical delivery on retry", async () => {

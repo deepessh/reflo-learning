@@ -23,9 +23,9 @@ export function collectLocalStackViolations({
   if (!/^name: reflo-local$/m.test(composeSource)) {
     errors.push("compose.yaml must fix the project name to reflo-local");
   }
-  if (serviceNames.join(",") !== "rds,vector") {
+  if (serviceNames.join(",") !== "rds,vector,app-setup,api,jobs,web") {
     errors.push(
-      `compose.yaml must contain only the implemented rds and vector services; found ${serviceNames.join(",") || "none"}`,
+      `compose.yaml must contain only the implemented dependencies and application profile; found ${serviceNames.join(",") || "none"}`,
     );
   }
 

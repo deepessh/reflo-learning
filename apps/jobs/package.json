@@ -18,6 +18,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/dev.ts",
     "lint": "eslint .",
+    "start": "node dist/container.js",
     "test": "vitest run"
   },
   "dependencies": {

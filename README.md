@@ -80,6 +80,50 @@ scripts/local-stack.sh teardown   # remove containers/network, preserve data
 scripts/local-stack.sh reset      # also remove only reflo-local named data volumes
 ```
 
+## Connected application containers
+
+The explicit Compose `apps` profile builds and runs the independently packaged
+web, API, and jobs applications with the repository-pinned Node.js 24.18.0 and
+pnpm 10.34.5 toolchain. One bounded setup job waits for both databases, applies
+the repository-owned RDS migrations and development schemas, and exits before
+the application services start. API, jobs, and web expose bounded health checks
+and bind host ports only on loopback.
+
+```sh
+# Build the three images, prepare both schemas, and wait for all health checks.
+scripts/local-apps.sh up
+
+# Inspect the fixed profile or show at most 200 recent log lines per app.
+scripts/local-apps.sh status
+scripts/local-apps.sh logs
+
+# Remove only application-profile containers; preserve databases and volumes.
+scripts/local-apps.sh down
+
+# Remove only the complete fixed reflo-local project's resources and volumes.
+scripts/local-apps.sh reset
+```
+
+Defaults expose web at `http://127.0.0.1:53000`, API at
+`http://127.0.0.1:53001`, and jobs readiness at
+`http://127.0.0.1:53002`. Override those ports before the first generated
+configuration by setting the `REFLO_LOCAL_*_PORT` values documented in
+`.env.example`.
+
+The helper creates `.reflo/local-stack/runtime.env` with mode 0600. Connected
+model, staff-authentication, delivery, and tracing settings belong only in that
+ignored file. For a model gateway running on the Docker host, use a
+container-visible URL such as `http://host.docker.internal:4000` on Docker
+Desktop. Database and vector URLs always use the internal `rds` and `vector`
+service names. Images receive no `.env` files, provider credentials, generated
+private assets, or database contents; connected artifacts use the named
+`reflo-local_app-artifacts` development volume.
+
+This profile is a connected development execution path. It is not an Alibaba
+emulator, production deployment artifact, offline product surface, or release
+attestation, and its defaults leave external model, authentication, delivery,
+and tracing adapters disabled.
+
 The ingestion worker remains outside Docker Compose because D-GH-8 pins
 rootless Podman 6.0.1 for the production ECS parser pool and requires a signed
 ClamAV snapshot plus job-scoped networkless mounts. The connected development

@@ -53,7 +53,9 @@ describe("local supporting-service stack policy", () => {
 
     assert.ok(
       errors.some((error) =>
-        error.includes("only the implemented rds and vector services"),
+        error.includes(
+          "only the implemented dependencies and application profile",
+        ),
       ),
     );
     assert.ok(

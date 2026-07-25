@@ -82,7 +82,10 @@ describe("connected study projection", () => {
 
     expect(view).toMatchObject({
       lesson: {
+        baselineMastery: "0.20000",
         content,
+        generationVersion: "reteach-generation-v1",
+        priorStrategyTag: "micro-lesson-v1",
         semanticSimilarity: "0.42000",
         strategyTag: "analogy-v1",
       },
@@ -111,7 +114,14 @@ function sessionFixture(): TutorSessionSnapshot {
           score: "0.00000",
         },
         latestLessonExposureAt: "2026-07-24T12:00:00.000Z",
-        lesson: null,
+        lesson: {
+          assetId: "initial-lesson",
+          contentHash: "a".repeat(64),
+          modality: "text",
+          objectKey: "owners/scope/courses/course/assets/initial.md",
+          servedAt: "2026-07-24T12:00:00.000Z",
+          strategyTag: "micro-lesson-v1",
+        },
         loopResult: null,
         mastery: "0.16667",
         nextRetestQuestion: {

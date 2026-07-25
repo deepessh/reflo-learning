@@ -95,8 +95,12 @@ export function fixedPercent(value: string): number {
 }
 
 export function masteryDeltaLabel(value: string): string {
-  const percent = Math.round(Number(value) * 100);
-  return `${percent >= 0 ? "+" : ""}${percent} pts`;
+  const percent = exactPercent(value);
+  return `${percent.startsWith("-") ? "" : "+"}${percent} pts`;
+}
+
+export function exactPercentLabel(value: string): string {
+  return `${exactPercent(value)}%`;
 }
 
 function ingestionLabel(status: LibraryCourse["sourceStatus"]): string {
@@ -115,4 +119,14 @@ function ingestionLabel(status: LibraryCourse["sourceStatus"]): string {
     case "failed":
       return "Needs attention";
   }
+}
+
+function exactPercent(value: string): string {
+  const match = /^(-?)([01])\.(\d{5})$/.exec(value);
+  if (match === null) {
+    throw new Error("Exact mastery value is invalid");
+  }
+  const quanta = BigInt(match[2]!) * 100_000n + BigInt(match[3]!);
+  const sign = match[1] === "-" && quanta !== 0n ? "-" : "";
+  return `${sign}${quanta / 1_000n}.${String(quanta % 1_000n).padStart(3, "0")}`;
 }

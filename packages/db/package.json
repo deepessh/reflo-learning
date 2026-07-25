@@ -21,6 +21,9 @@
     "build": "node scripts/check-migrations.mjs && tsc -p tsconfig.build.json",
     "db:dump": "scripts/dump-schema-from-container.sh",
     "db:migrate": "node scripts/strict-migrate.mjs",
+    "flow-b:database": "node scripts/create-connected-flow-b-database.mjs",
+    "flow-b:development-profile": "node scripts/apply-connected-flow-b-development-profile.mjs",
+    "flow-b:prepare": "node scripts/prepare-connected-flow-b.mjs",
     "lint": "eslint scripts src test",
     "test": "pnpm build && node --test test/*.test.mjs"
   },

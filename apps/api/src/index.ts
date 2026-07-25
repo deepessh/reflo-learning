@@ -1,4 +1,4 @@
-import { readServerEnvironment } from "@reflo/config";
+import { readServerEnvironment, type Deployment } from "@reflo/config";
 
 import { createAccountRuntime } from "./account-composition.js";
 import { createConnectedDemoRuntime } from "./connected-composition.js";
@@ -24,11 +24,13 @@ const connectedRuntime = createConnectedDemoRuntime(
   process.env,
   environment.deployment,
 );
+const now = demoClock(process.env, environment.deployment);
 const server = createApiServer(environment, {
   accounts: accountRuntime.accounts,
   assessment: connectedRuntime.assessment,
   delivery: deliveryRuntime.delivery,
   localAuthInbox: accountRuntime.localInbox,
+  now,
   preflight: connectedRuntime.preflight,
   seed: connectedRuntime.seed,
   sessions: connectedRuntime.sessions,
@@ -62,3 +64,21 @@ function shutdown(signal: NodeJS.Signals) {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+function demoClock(
+  input: NodeJS.ProcessEnv,
+  deployment: Deployment,
+): (() => Date) | undefined {
+  const fixed = input.REFLO_DEMO_FIXED_NOW?.trim();
+  if (fixed === undefined || fixed === "") {
+    return undefined;
+  }
+  if (
+    deployment !== "dev" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(fixed) ||
+    new Date(fixed).toISOString() !== fixed
+  ) {
+    throw new Error("REFLO_DEMO_FIXED_NOW is invalid");
+  }
+  return () => new Date(fixed);
+}

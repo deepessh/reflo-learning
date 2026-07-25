@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   conceptProgressPresentation,
   courseProgress,
+  exactPercentLabel,
   masteryDeltaLabel,
   sessionDuration,
 } from "./account-view";
@@ -92,6 +93,7 @@ describe("account shell presentation", () => {
       masteryPercent: 29,
       tone: "weak",
     });
-    expect(masteryDeltaLabel("0.11904")).toBe("+12 pts");
+    expect(exactPercentLabel("0.28571")).toBe("28.571%");
+    expect(masteryDeltaLabel("0.11904")).toBe("+11.904 pts");
   });
 });

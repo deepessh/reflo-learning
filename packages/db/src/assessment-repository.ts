@@ -1164,9 +1164,16 @@ async function loadFinalizationView(
   status: "created" | "replayed",
 ): Promise<AssessmentFinalizationView | null> {
   const finalization = await client.query<FinalizationRow>(
-    `SELECT attempt_id, attempt_outcome, learner_message, request_digest
-     FROM assessment_finalization
-     WHERE owner_scope_id = $1 AND idempotency_key = $2 AND user_id = $3`,
+    `SELECT finalization.attempt_id, finalization.attempt_outcome,
+            finalization.learner_message, attempt.replacement_for_attempt_id,
+            finalization.request_digest
+     FROM assessment_finalization AS finalization
+     JOIN attempt
+       ON attempt.owner_scope_id = finalization.owner_scope_id
+      AND attempt.id = finalization.attempt_id
+     WHERE finalization.owner_scope_id = $1
+       AND finalization.idempotency_key = $2
+       AND finalization.user_id = $3`,
     [ownerScopeId, idempotencyKey, userId],
   );
   const row = finalization.rows[0];

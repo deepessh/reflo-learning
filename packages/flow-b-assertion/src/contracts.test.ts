@@ -75,6 +75,27 @@ describe("Flow B browser assertion contracts", () => {
     expect(() =>
       assertFlowBRunRecord({ ...record, durationMs: record.durationMs + 1 }),
     ).toThrow();
+    expect(() =>
+      finalizeFlowBRunRecord({
+        ...runFixture(),
+        evidence: {
+          ...runFixture().evidence,
+          masteryDelta: "0.10713",
+        },
+      }),
+    ).toThrow("flow_b_assertion_invariant_failed");
+    expect(() =>
+      finalizeFlowBRunRecord({
+        ...runFixture(),
+        trace: {
+          ...runFixture().trace,
+          observedFieldSet: [
+            ...runFixture().trace.observedFieldSet,
+            "learnerId" as never,
+          ],
+        },
+      }),
+    ).toThrow("flow_b_assertion_invariant_failed");
   });
 });
 
@@ -128,7 +149,7 @@ function runFixture() {
       initialAttemptDigest: `sha256:${"1".repeat(64)}`,
       initialEligibleAttemptCount: 2,
       initialFailureBand: "incorrect" as const,
-      initialMastery: "0.16667",
+      initialMastery: "0.14286",
       lessonBaselineMastery: "0.14286",
       lessonExposureMastery: "0.14286",
       masteryDelta: "0.10714",
@@ -159,7 +180,8 @@ function runFixture() {
     startedAt: "2026-07-25T01:00:00.000Z",
     targetOriginDigest: `sha256:${"5".repeat(64)}`,
     trace: {
-      capturedFieldSet: [
+      allowlistValidated: true as const,
+      coreFieldCoverage: [
         "attemptCount",
         "durationMs",
         "modelTask",
@@ -170,6 +192,20 @@ function runFixture() {
         "validationStatus",
       ] as const,
       eventCount: 4,
+      observedFieldSet: [
+        "attemptCount",
+        "durationMs",
+        "modelTask",
+        "operation",
+        "outcome",
+        "routePolicyVersion",
+        "stage",
+        "validationStatus",
+        "component",
+        "demoRunId",
+        "eventId",
+        "schemaVersion",
+      ] as const,
       schemaVersion: "demo-operational-trace-v1" as const,
     },
     ui: {

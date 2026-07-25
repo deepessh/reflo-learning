@@ -55,6 +55,7 @@ const runtime = {
   REFLO_AUTH_SESSION_DIGEST_KEY: key("auth-session"),
   REFLO_AUTH_TOKEN_DIGEST_KEY: key("auth-token"),
   REFLO_CONNECTED_DEMO_ARTIFACT_ROOT: artifactRoot,
+  REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE: "staff-controlled-rights-cleared-v1",
   REFLO_CONNECTED_DEMO_MODE: "staff-only-demo-v1",
   REFLO_DEMO_DELIVERY_MODE: "staff-only-demo-v1",
   REFLO_DEMO_DESTINATION_LOOKUP_KEY: key("delivery-destination"),

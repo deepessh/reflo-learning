@@ -50,6 +50,12 @@ describe("connected demo composition", () => {
     expect(runtime.tutorAgent).toBeDefined();
     expect(runtime.sessions).toBeDefined();
     await expect(runtime.preflight!.check(false)).resolves.toMatchObject({
+      boundary: {
+        contractVersion: "connected-demo-boundary-v1",
+        destinationClass: "staff-controlled-test",
+        learnerClass: "staff-controlled",
+        sourceClass: "human-approved-rights-cleared",
+      },
       dependencies: [
         { code: "unavailable", name: "delivery" },
         { code: "available", name: "model" },
@@ -68,6 +74,8 @@ describe("connected demo composition", () => {
       expect(() =>
         createConnectedDemoRuntime(
           {
+            REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE:
+              "staff-controlled-rights-cleared-v1",
             REFLO_CONNECTED_DEMO_MODE: "staff-only-demo-v1",
             REFLO_ENV: deployment,
             REFLO_MODEL_ADAPTER: "litellm-dev",
@@ -77,12 +85,26 @@ describe("connected demo composition", () => {
       ).toThrow("development-only");
     }
   });
+
+  it("fails closed without an explicit staff and source boundary profile", async () => {
+    const artifactRoot = await mkdtemp(
+      path.join(os.tmpdir(), "reflo-connected-api-"),
+    );
+    directories.push(artifactRoot);
+    const environment = developmentEnvironment(artifactRoot);
+    delete environment.REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE;
+
+    expect(() => createConnectedDemoRuntime(environment, "dev")).toThrow(
+      "must attest the staff-controlled rights-cleared demo boundary",
+    );
+  });
 });
 
 function developmentEnvironment(artifactRoot: string): NodeJS.ProcessEnv {
   return {
     DATABASE_URL: "postgresql://127.0.0.1:1/reflo",
     REFLO_CONNECTED_DEMO_ARTIFACT_ROOT: artifactRoot,
+    REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE: "staff-controlled-rights-cleared-v1",
     REFLO_CONNECTED_DEMO_MODE: "staff-only-demo-v1",
     REFLO_DEMO_GRADING_CALIBRATION_EVIDENCE_ID:
       "synthetic-demo-calibration-fixture-v1",

@@ -1,7 +1,10 @@
 import {
+  FLOW_B_ALLOWED_TRACE_FIELDS,
   FLOW_B_ASSERTION_VERSION,
+  FLOW_B_CORE_TRACE_FIELDS,
   FLOW_B_DEPENDENCIES,
   FLOW_B_RUN_RECORD_VERSION,
+  exactMasteryDelta,
   finalizeFlowBRunRecord,
   valueDigest,
   type FlowBAssertionConfig,
@@ -11,6 +14,12 @@ import {
 import { ChromeCdpSession } from "./cdp.js";
 
 interface PreflightView {
+  readonly boundary: {
+    readonly contractVersion: "connected-demo-boundary-v1";
+    readonly destinationClass: "staff-controlled-test";
+    readonly learnerClass: "staff-controlled";
+    readonly sourceClass: "human-approved-rights-cleared";
+  };
   readonly checkedAt: string;
   readonly contractVersion: string;
   readonly dependencies: readonly {
@@ -38,8 +47,10 @@ interface CapturedAssessment extends Record<string, unknown> {
 }
 
 interface TraceProbe {
-  readonly capturedFieldSet: FlowBRunRecord["trace"]["capturedFieldSet"];
+  readonly allowlistValidated: true;
+  readonly coreFieldCoverage: FlowBRunRecord["trace"]["coreFieldCoverage"];
   readonly eventCount: number;
+  readonly observedFieldSet: FlowBRunRecord["trace"]["observedFieldSet"];
   readonly schemaVersion: FlowBRunRecord["trace"]["schemaVersion"];
 }
 
@@ -268,10 +279,27 @@ function buildRunRecord(input: {
   const lessonMastery = exactDecimal(lessonConcept, "mastery");
   const finalMastery = exactDecimal(finalConcept, "mastery");
   const delta = signedDecimal(loopResult, "masteryDelta");
-  const initialMastery = exactDecimal(initialConcept, "mastery");
-  const expectedInitialLabel = exactPercentLabel(
-    exactDecimal(loopResult, "initialMastery"),
-  );
+  const initialMastery = exactDecimal(loopResult, "initialMastery");
+  assertConnectedMasteryProof({
+    concepts: {
+      finalView: stringField(finalConcept, "conceptId"),
+      initialEvidence: eligibleConceptIds(initialResult),
+      initialQuestion: stringField(initialQuestion, "conceptId"),
+      initialView: stringField(initialConcept, "conceptId"),
+      lessonView: stringField(lessonConcept, "conceptId"),
+      loopResult: stringField(loopResult, "conceptId"),
+      retestEvidence: eligibleConceptIds(retestResult),
+      retestQuestion: stringField(retestQuestion, "conceptId"),
+    },
+    finalMastery,
+    lessonBaselineMastery: lessonBaseline,
+    loopEvidenceAttemptId: stringField(loopResult, "evidenceAttemptId"),
+    loopFinalMastery: exactDecimal(loopResult, "finalMastery"),
+    loopInitialMastery: initialMastery,
+    masteryDelta: delta,
+    retestAttemptId,
+  });
+  const expectedInitialLabel = exactPercentLabel(initialMastery);
   const expectedFinalLabel = exactPercentLabel(
     exactDecimal(loopResult, "finalMastery"),
   );
@@ -280,7 +308,6 @@ function buildRunRecord(input: {
     priorStrategy === strategy ||
     Number(similarity) >= 0.85 ||
     lessonBaseline !== lessonMastery ||
-    exactDecimal(loopResult, "finalMastery") !== finalMastery ||
     stringField(loopResult, "outcome") !== "retest_succeeded" ||
     !input.summaryText.includes(expectedInitialLabel) ||
     !input.summaryText.includes(expectedFinalLabel) ||
@@ -354,10 +381,19 @@ function buildRunRecord(input: {
       retestBand: "correct",
     },
     honestBoundary: {
-      externalDestinationUsed: false,
-      externalLearnerUsed: false,
+      externalDestinationUsed:
+        input.preflight.boundary.destinationClass === "staff-controlled-test"
+          ? false
+          : failBoundary(),
+      externalLearnerUsed:
+        input.preflight.boundary.learnerClass === "staff-controlled"
+          ? false
+          : failBoundary(),
       repeatedReliabilityClaimed: false,
-      rightsClearedSeedRequired: true,
+      rightsClearedSeedRequired:
+        input.preflight.boundary.sourceClass === "human-approved-rights-cleared"
+          ? true
+          : failBoundary(),
     },
     lesson: {
       differentStrategy: true,
@@ -527,28 +563,34 @@ async function loadTraceProbe(
   });
   const body = (await response.json().catch(() => null)) as unknown;
   const record = asObject(body);
-  const expected = [
-    "attemptCount",
-    "durationMs",
-    "modelTask",
-    "operation",
-    "outcome",
-    "routePolicyVersion",
-    "stage",
-    "validationStatus",
-  ] as const;
+  const coreFieldCoverage = stringArrayField(record, "coreFieldCoverage");
+  const observedFieldSet = stringArrayField(record, "observedFieldSet");
   if (
     !response.ok ||
+    record.allowlistValidated !== true ||
     record.schemaVersion !== "demo-operational-trace-v1" ||
     !Number.isSafeInteger(record.eventCount) ||
     (record.eventCount as number) < 4 ||
-    JSON.stringify(record.capturedFieldSet) !== JSON.stringify(expected)
+    JSON.stringify(coreFieldCoverage) !==
+      JSON.stringify(FLOW_B_CORE_TRACE_FIELDS) ||
+    observedFieldSet.length < FLOW_B_CORE_TRACE_FIELDS.length ||
+    new Set(observedFieldSet).size !== observedFieldSet.length ||
+    observedFieldSet.some(
+      (field) =>
+        !FLOW_B_ALLOWED_TRACE_FIELDS.includes(
+          field as (typeof FLOW_B_ALLOWED_TRACE_FIELDS)[number],
+        ),
+    ) ||
+    FLOW_B_CORE_TRACE_FIELDS.some((field) => !observedFieldSet.includes(field))
   ) {
     throw new Error("Sanitized operational trace evidence is unavailable");
   }
   return {
-    capturedFieldSet: expected,
+    allowlistValidated: true,
+    coreFieldCoverage: FLOW_B_CORE_TRACE_FIELDS,
     eventCount: record.eventCount as number,
+    observedFieldSet:
+      observedFieldSet as FlowBRunRecord["trace"]["observedFieldSet"],
     schemaVersion: "demo-operational-trace-v1",
   };
 }
@@ -659,9 +701,14 @@ async function fill(
 
 function parsePreflight(value: unknown): PreflightView {
   const record = asObject(value);
+  const boundary = asObject(record.boundary);
   const dependencies = record.dependencies;
   if (
     record.contractVersion !== "connected-demo-preflight-v1" ||
+    boundary.contractVersion !== "connected-demo-boundary-v1" ||
+    boundary.destinationClass !== "staff-controlled-test" ||
+    boundary.learnerClass !== "staff-controlled" ||
+    boundary.sourceClass !== "human-approved-rights-cleared" ||
     typeof record.checkedAt !== "string" ||
     (record.status !== "ready" && record.status !== "unavailable") ||
     !Array.isArray(dependencies) ||
@@ -692,6 +739,12 @@ function parsePreflight(value: unknown): PreflightView {
     throw new Error("Connected Flow B dependency names are invalid");
   }
   return {
+    boundary: {
+      contractVersion: "connected-demo-boundary-v1",
+      destinationClass: "staff-controlled-test",
+      learnerClass: "staff-controlled",
+      sourceClass: "human-approved-rights-cleared",
+    },
     checkedAt: record.checkedAt,
     contractVersion: record.contractVersion,
     dependencies: parsed,
@@ -891,6 +944,64 @@ function assessmentBand(
   throw new Error("Flow B assessment band is invalid");
 }
 
+function eligibleConceptIds(result: Record<string, unknown>): string[] {
+  const evidence = result.evidence;
+  if (!Array.isArray(evidence)) {
+    throw new Error("Flow B assessment evidence is missing");
+  }
+  const conceptIds = evidence
+    .map(asObject)
+    .filter((entry) => entry.eligibleForMastery === true)
+    .map((entry) => stringField(entry, "conceptId"));
+  if (conceptIds.length < 1) {
+    throw new Error("Flow B assessment evidence is ineligible");
+  }
+  return conceptIds;
+}
+
+export function assertConnectedMasteryProof(input: {
+  readonly concepts: {
+    readonly finalView: string;
+    readonly initialEvidence: readonly string[];
+    readonly initialQuestion: string;
+    readonly initialView: string;
+    readonly lessonView: string;
+    readonly loopResult: string;
+    readonly retestEvidence: readonly string[];
+    readonly retestQuestion: string;
+  };
+  readonly finalMastery: string;
+  readonly lessonBaselineMastery: string;
+  readonly loopEvidenceAttemptId: string;
+  readonly loopFinalMastery: string;
+  readonly loopInitialMastery: string;
+  readonly masteryDelta: string;
+  readonly retestAttemptId: string;
+}): void {
+  const conceptIds = [
+    input.concepts.finalView,
+    ...input.concepts.initialEvidence,
+    input.concepts.initialQuestion,
+    input.concepts.initialView,
+    input.concepts.lessonView,
+    input.concepts.loopResult,
+    ...input.concepts.retestEvidence,
+    input.concepts.retestQuestion,
+  ];
+  if (
+    input.concepts.initialEvidence.length < 1 ||
+    input.concepts.retestEvidence.length < 1 ||
+    new Set(conceptIds).size !== 1 ||
+    input.loopEvidenceAttemptId !== input.retestAttemptId ||
+    input.loopInitialMastery !== input.lessonBaselineMastery ||
+    input.loopFinalMastery !== input.finalMastery ||
+    input.masteryDelta !==
+      exactMasteryDelta(input.loopFinalMastery, input.loopInitialMastery)
+  ) {
+    throw new Error("Flow B mastery evidence provenance assertion failed");
+  }
+}
+
 function assertedLoginUrl(value: string, appBaseUrl: URL): URL {
   const loginUrl = new URL(value);
   if (
@@ -924,6 +1035,20 @@ function stringField(value: Record<string, unknown>, name: string): string {
     throw new Error(`Flow B browser field is invalid: ${name}`);
   }
   return field;
+}
+
+function stringArrayField(
+  value: Record<string, unknown>,
+  name: string,
+): string[] {
+  const field = value[name];
+  if (
+    !Array.isArray(field) ||
+    field.some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error(`Flow B browser string array is invalid: ${name}`);
+  }
+  return field as string[];
 }
 
 function integerField(value: Record<string, unknown>, name: string): number {
@@ -970,12 +1095,35 @@ function literalField<const Value extends string>(
 }
 
 function exactPercentLabel(value: string): string {
-  return `${(Number(value) * 100).toFixed(3)}%`;
+  const units = unsignedMasteryUnits(value);
+  return `${units / 1_000n}.${String(units % 1_000n).padStart(3, "0")}%`;
 }
 
 function masteryDeltaLabel(value: string): string {
-  const points = Number(value) * 100;
-  return `${points >= 0 ? "+" : ""}${points.toFixed(3)} pts`;
+  const units = signedMasteryUnits(value);
+  const sign = units >= 0n ? "+" : "-";
+  const absolute = units < 0n ? -units : units;
+  return `${sign}${absolute / 1_000n}.${String(absolute % 1_000n).padStart(
+    3,
+    "0",
+  )} pts`;
+}
+
+function unsignedMasteryUnits(value: string): bigint {
+  if (!/^(?:0|1)\.\d{5}$/.test(value)) {
+    throw new Error("Flow B browser mastery is invalid");
+  }
+  const [whole, fraction] = value.split(".");
+  return BigInt(whole!) * 100_000n + BigInt(fraction!);
+}
+
+function signedMasteryUnits(value: string): bigint {
+  const sign = value.startsWith("-") ? -1n : 1n;
+  return sign * unsignedMasteryUnits(value.replace(/^-/, ""));
+}
+
+function failBoundary(): never {
+  throw new Error("Connected Flow B safety boundary is unavailable");
 }
 
 function delay(milliseconds: number): Promise<void> {

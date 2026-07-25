@@ -519,6 +519,12 @@ describe("auth, library, and session-history API", () => {
     };
     const preflight = {
       check: vi.fn().mockResolvedValue({
+        boundary: {
+          contractVersion: "connected-demo-boundary-v1" as const,
+          destinationClass: "staff-controlled-test" as const,
+          learnerClass: "staff-controlled" as const,
+          sourceClass: "human-approved-rights-cleared" as const,
+        },
         checkedAt: "2026-07-24T12:00:00.000Z",
         contractVersion: "connected-demo-preflight-v1",
         dependencies: [

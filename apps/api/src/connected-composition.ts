@@ -8,6 +8,7 @@ import {
 } from "@reflo/assessment";
 import type { Deployment } from "@reflo/config";
 import {
+  CONNECTED_DEMO_BOUNDARY_VERSION,
   CONNECTED_DEMO_PREFLIGHT_VERSION,
   type ConnectedDemoPreflightDependency,
   type ConnectedDemoPreflightView,
@@ -55,6 +56,7 @@ import {
 import { ConnectedStudyService } from "./connected-study.js";
 
 const CONNECTED_MODE = "staff-only-demo-v1";
+const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
 const MODEL_ADAPTER = "litellm-dev";
 const POSTGRES_CONTRACT_VERSION = "reflo-schema-20260724000300";
 const STORAGE_CONTRACT_VERSION = "local-smoke-object-store-v1";
@@ -125,6 +127,13 @@ export function createConnectedDemoRuntime(
       "REFLO_MODEL_ADAPTER is not available for the demo runtime",
     );
   }
+  if (
+    input.REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE !== CONNECTED_BOUNDARY_PROFILE
+  ) {
+    throw new Error(
+      "REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE must attest the staff-controlled rights-cleared demo boundary",
+    );
+  }
   if (deployment !== "dev" || input.REFLO_ENV !== "dev") {
     throw new Error("LiteLLM connected composition is development-only");
   }
@@ -185,6 +194,12 @@ export function createConnectedDemoRuntime(
     assessment,
     preflight: new RuntimePreflight({
       artifactRoot,
+      boundary: {
+        contractVersion: CONNECTED_DEMO_BOUNDARY_VERSION,
+        destinationClass: "staff-controlled-test",
+        learnerClass: "staff-controlled",
+        sourceClass: "human-approved-rights-cleared",
+      },
       database: connectedRepository,
       dependencyVersions: {
         delivery: DEMO_DELIVERY_CONTRACT_VERSION,
@@ -332,6 +347,7 @@ class RuntimePreflight implements ConnectedDemoPreflight {
   constructor(
     private readonly dependencies: {
       readonly artifactRoot: string;
+      readonly boundary: ConnectedDemoPreflightView["boundary"];
       readonly database: Pick<PostgresConnectedDemoRepository, "ping">;
       readonly dependencyVersions: Readonly<
         Record<"delivery" | "model" | "postgres" | "storage" | "vector", string>
@@ -380,6 +396,7 @@ class RuntimePreflight implements ConnectedDemoPreflight {
       },
     ];
     return {
+      boundary: this.dependencies.boundary,
       checkedAt: new Date().toISOString(),
       contractVersion: CONNECTED_DEMO_PREFLIGHT_VERSION,
       dependencies,

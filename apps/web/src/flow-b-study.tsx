@@ -621,6 +621,7 @@ async function requestPreflight(
     credentials: "include",
   });
   const body = (await response.json().catch(() => ({}))) as {
+    readonly boundary?: ConnectedDemoPreflightView["boundary"];
     readonly checkedAt?: string;
     readonly contractVersion?: string;
     readonly dependencies?: readonly ConnectedDemoPreflightDependency[];
@@ -629,6 +630,10 @@ async function requestPreflight(
   if (
     (response.status !== 200 && response.status !== 503) ||
     body.dependencies === undefined ||
+    body.boundary?.contractVersion !== "connected-demo-boundary-v1" ||
+    body.boundary.destinationClass !== "staff-controlled-test" ||
+    body.boundary.learnerClass !== "staff-controlled" ||
+    body.boundary.sourceClass !== "human-approved-rights-cleared" ||
     body.checkedAt === undefined ||
     body.contractVersion !== "connected-demo-preflight-v1" ||
     body.status === undefined
@@ -636,6 +641,7 @@ async function requestPreflight(
     throw new Error("Connected dependency preflight could not be confirmed.");
   }
   return {
+    boundary: body.boundary,
     checkedAt: body.checkedAt,
     contractVersion: body.contractVersion,
     dependencies: body.dependencies,

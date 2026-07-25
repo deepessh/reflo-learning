@@ -10,6 +10,8 @@ export interface HealthResponse {
 export const CONNECTED_STUDY_VIEW_VERSION = "connected-study-view-v1" as const;
 export const CONNECTED_DEMO_PREFLIGHT_VERSION =
   "connected-demo-preflight-v1" as const;
+export const CONNECTED_DEMO_BOUNDARY_VERSION =
+  "connected-demo-boundary-v1" as const;
 
 export type ConnectedDemoDependencyName =
   "delivery" | "model" | "postgres" | "storage" | "vector";
@@ -21,6 +23,12 @@ export interface ConnectedDemoPreflightDependency {
 }
 
 export interface ConnectedDemoPreflightView {
+  readonly boundary: {
+    readonly contractVersion: typeof CONNECTED_DEMO_BOUNDARY_VERSION;
+    readonly destinationClass: "staff-controlled-test";
+    readonly learnerClass: "staff-controlled";
+    readonly sourceClass: "human-approved-rights-cleared";
+  };
   readonly checkedAt: string;
   readonly contractVersion: typeof CONNECTED_DEMO_PREFLIGHT_VERSION;
   readonly dependencies: readonly ConnectedDemoPreflightDependency[];

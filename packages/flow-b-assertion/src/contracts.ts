@@ -3,6 +3,29 @@ import path from "node:path";
 
 export const FLOW_B_ASSERTION_VERSION = "flow-b-browser-assertion-v1" as const;
 export const FLOW_B_RUN_RECORD_VERSION = "flow-b-run-record-v1" as const;
+export const FLOW_B_CORE_TRACE_FIELDS = [
+  "attemptCount",
+  "durationMs",
+  "modelTask",
+  "operation",
+  "outcome",
+  "routePolicyVersion",
+  "stage",
+  "validationStatus",
+] as const;
+export const FLOW_B_ALLOWED_TRACE_FIELDS = [
+  ...FLOW_B_CORE_TRACE_FIELDS,
+  "component",
+  "demoRunId",
+  "eventId",
+  "model",
+  "modelVersion",
+  "promptId",
+  "promptVersion",
+  "schemaVersion",
+] as const;
+
+export type FlowBTraceField = (typeof FLOW_B_ALLOWED_TRACE_FIELDS)[number];
 
 export const FLOW_B_DEPENDENCIES = [
   "delivery",
@@ -99,7 +122,8 @@ export interface FlowBRunRecord {
   readonly startedAt: string;
   readonly targetOriginDigest: string;
   readonly trace: {
-    readonly capturedFieldSet: readonly [
+    readonly allowlistValidated: true;
+    readonly coreFieldCoverage: readonly [
       "attemptCount",
       "durationMs",
       "modelTask",
@@ -110,6 +134,7 @@ export interface FlowBRunRecord {
       "validationStatus",
     ];
     readonly eventCount: number;
+    readonly observedFieldSet: readonly FlowBTraceField[];
     readonly schemaVersion: "demo-operational-trace-v1";
   };
   readonly ui: {
@@ -262,16 +287,7 @@ export function assertFlowBRunRecord(record: FlowBRunRecord): FlowBRunRecord {
     },
     { injectedUnavailable: null, sequence: 4, status: "ready" },
   ];
-  const expectedTraceFields = [
-    "attemptCount",
-    "durationMs",
-    "modelTask",
-    "operation",
-    "outcome",
-    "routePolicyVersion",
-    "stage",
-    "validationStatus",
-  ];
+  const observedTraceFields = [...record.trace.observedFieldSet];
   if (
     record.recordVersion !== FLOW_B_RUN_RECORD_VERSION ||
     record.assertionVersion !== FLOW_B_ASSERTION_VERSION ||
@@ -309,9 +325,10 @@ export function assertFlowBRunRecord(record: FlowBRunRecord): FlowBRunRecord {
     record.lesson.generationVersion !== "reteach-generation-v1" ||
     record.replay.initialAttemptReplayed !== true ||
     record.replay.retestAttemptReplayed !== true ||
+    record.trace.allowlistValidated !== true ||
     record.trace.schemaVersion !== "demo-operational-trace-v1" ||
-    canonicalJson(record.trace.capturedFieldSet) !==
-      canonicalJson(expectedTraceFields) ||
+    canonicalJson(record.trace.coreFieldCoverage) !==
+      canonicalJson(FLOW_B_CORE_TRACE_FIELDS) ||
     record.ui.exactDeltaDisplayedInKnowledgeMap !== true ||
     record.ui.exactDeltaDisplayedInSummary !== true ||
     canonicalJson(record.ui.explicitFailureStates) !==
@@ -344,8 +361,14 @@ export function assertFlowBRunRecord(record: FlowBRunRecord): FlowBRunRecord {
     !/^-?(?:0|1)\.\d{5}$/.test(record.evidence.masteryDelta) ||
     !/^(?:0|1)\.\d{5}$/.test(record.lesson.semanticSimilarity) ||
     Number(record.lesson.semanticSimilarity) >= 0.85 ||
+    record.evidence.initialMastery !== record.evidence.lessonBaselineMastery ||
     record.evidence.lessonBaselineMastery !==
       record.evidence.lessonExposureMastery ||
+    record.evidence.masteryDelta !==
+      exactMasteryDelta(
+        record.evidence.finalMastery,
+        record.evidence.initialMastery,
+      ) ||
     record.evidence.initialEligibleAttemptCount < 2 ||
     record.evidence.initialEligibleAttemptCount > 100 ||
     record.lesson.sourceSpanCount < 1 ||
@@ -353,11 +376,32 @@ export function assertFlowBRunRecord(record: FlowBRunRecord): FlowBRunRecord {
     !Number.isSafeInteger(record.trace.eventCount) ||
     record.trace.eventCount < 4 ||
     record.trace.eventCount > 100 ||
+    observedTraceFields.length < FLOW_B_CORE_TRACE_FIELDS.length ||
+    new Set(observedTraceFields).size !== observedTraceFields.length ||
+    observedTraceFields.some(
+      (field) => !FLOW_B_ALLOWED_TRACE_FIELDS.includes(field),
+    ) ||
+    FLOW_B_CORE_TRACE_FIELDS.some(
+      (field) => !observedTraceFields.includes(field),
+    ) ||
     record.dependencyPreflight.attempts.length !== 4
   ) {
     throw new Error("flow_b_assertion_invariant_failed");
   }
   return record;
+}
+
+export function exactMasteryDelta(
+  finalMastery: string,
+  initialMastery: string,
+): string {
+  const delta = masteryUnits(finalMastery) - masteryUnits(initialMastery);
+  const sign = delta < 0n ? "-" : "";
+  const absolute = delta < 0n ? -delta : delta;
+  return `${sign}${absolute / 100_000n}.${String(absolute % 100_000n).padStart(
+    5,
+    "0",
+  )}`;
 }
 
 export function valueDigest(value: string): string {
@@ -492,4 +536,12 @@ function canonicalJson(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function masteryUnits(value: string): bigint {
+  if (!DECIMAL.test(value)) {
+    throw new Error("flow_b_mastery_invalid");
+  }
+  const [whole, fraction] = value.split(".");
+  return BigInt(whole!) * 100_000n + BigInt(fraction!);
 }

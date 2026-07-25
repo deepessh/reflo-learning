@@ -7,40 +7,26 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import {
+  FLOW_B_ALLOWED_TRACE_FIELDS,
+  FLOW_B_CORE_TRACE_FIELDS,
+  type FlowBTraceField,
+} from "./contracts.js";
+
 const HOST = "127.0.0.1";
 const PORT = readPort(process.env.REFLO_FLOW_B_MODEL_FIXTURE_PORT ?? "4000");
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const TRACE_SCHEMA_VERSION = "demo-operational-trace-v1";
-const CORE_TRACE_FIELDS = [
-  "attemptCount",
-  "durationMs",
-  "modelTask",
-  "operation",
-  "outcome",
-  "routePolicyVersion",
-  "stage",
-  "validationStatus",
-] as const;
-const CORE_OTLP_KEYS = new Map(
-  CORE_TRACE_FIELDS.map((field) => [
+const OTLP_TRACE_KEYS = new Map(
+  FLOW_B_ALLOWED_TRACE_FIELDS.map((field) => [
     `reflo_${field.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}`,
     field,
   ]),
 );
-const ALLOWED_OPERATIONAL_KEYS = new Set([
-  ...CORE_OTLP_KEYS.keys(),
-  "reflo_component",
-  "reflo_demo_run_id",
-  "reflo_event_id",
-  "reflo_model",
-  "reflo_model_version",
-  "reflo_prompt_id",
-  "reflo_prompt_version",
-  "reflo_schema_version",
-]);
+const ALLOWED_OPERATIONAL_KEYS = new Set([...OTLP_TRACE_KEYS.keys()]);
 
 let operationalEventCount = 0;
-const observedCoreFields = new Set<string>();
+const observedFields = new Set<FlowBTraceField>();
 
 const server = createServer(async (request, response) => {
   try {
@@ -53,12 +39,16 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (request.method === "GET" && url.pathname === "/__reflo/traces/") {
-      const complete = CORE_TRACE_FIELDS.every((field) =>
-        observedCoreFields.has(field),
+      const complete = FLOW_B_CORE_TRACE_FIELDS.every((field) =>
+        observedFields.has(field),
       );
       sendJson(response, complete ? 200 : 503, {
-        capturedFieldSet: complete ? CORE_TRACE_FIELDS : [],
+        allowlistValidated: complete,
+        coreFieldCoverage: complete ? FLOW_B_CORE_TRACE_FIELDS : [],
         eventCount: operationalEventCount,
+        observedFieldSet: FLOW_B_ALLOWED_TRACE_FIELDS.filter((field) =>
+          observedFields.has(field),
+        ),
         schemaVersion: TRACE_SCHEMA_VERSION,
       });
       return;
@@ -224,9 +214,9 @@ function recordOperationalTraces(value: unknown): void {
           throw new Error("operational trace escaped its safe allowlist");
         }
         for (const key of keys) {
-          const field = CORE_OTLP_KEYS.get(key);
+          const field = OTLP_TRACE_KEYS.get(key);
           if (field !== undefined) {
-            observedCoreFields.add(field);
+            observedFields.add(field);
           }
         }
         operationalEventCount += 1;

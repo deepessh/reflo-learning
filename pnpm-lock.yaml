@@ -32,6 +32,9 @@ importers:
       "@reflo/accounts":
         specifier: workspace:*
         version: link:../../packages/accounts
+      "@reflo/assessment":
+        specifier: workspace:*
+        version: link:../../packages/assessment
       "@reflo/config":
         specifier: workspace:*
         version: link:../../packages/config
@@ -44,9 +47,21 @@ importers:
       "@reflo/delivery":
         specifier: workspace:*
         version: link:../../packages/delivery
+      "@reflo/dev-smoke":
+        specifier: workspace:*
+        version: link:../../packages/dev-smoke
+      "@reflo/knowledge-model":
+        specifier: workspace:*
+        version: link:../../packages/knowledge-model
+      "@reflo/model-router":
+        specifier: workspace:*
+        version: link:../../packages/model-router
       "@reflo/observability":
         specifier: workspace:*
         version: link:../../packages/observability
+      "@reflo/retrieval":
+        specifier: workspace:*
+        version: link:../../packages/retrieval
       "@reflo/tutor-agent":
         specifier: workspace:*
         version: link:../../packages/tutor-agent

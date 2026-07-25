@@ -170,6 +170,7 @@ export class InMemoryAssessmentRepository implements AssessmentRepositoryPort {
       fallback: publicFallback,
       learnerMessage: finalization.learnerMessage,
       outcome: finalization.outcome,
+      replacementForAttemptId: null,
       requestDigest: finalization.requestDigest,
       status: "created",
     };
@@ -192,6 +193,10 @@ export class InMemoryAssessmentRepository implements AssessmentRepositoryPort {
     finalization: ReplacementFinalization,
   ): Promise<AssessmentFinalizationView> {
     assertAuthorized(authorization, finalization);
+    const bundle = this.bundles.get(finalization.bundleId);
+    if (bundle === undefined) {
+      throw new AssessmentError("authorization_denied");
+    }
     const view: AssessmentFinalizationView = {
       attemptId: finalization.attemptId,
       evidence: [finalization.evidence],
@@ -199,6 +204,7 @@ export class InMemoryAssessmentRepository implements AssessmentRepositoryPort {
       learnerMessage:
         "The replacement answer was graded from its keyed option.",
       outcome: "graded",
+      replacementForAttemptId: bundle.originalAttemptId,
       requestDigest: finalization.requestDigest,
       status: "created",
     };

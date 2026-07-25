@@ -491,6 +491,134 @@ describe("auth, library, and session-history API", () => {
       },
     });
   });
+
+  it("serves bounded preflight, assessment replay, and persisted summaries", async () => {
+    const fixture = createAccountFixture();
+    const sessionId = "70000000-0000-4000-8000-000000000002";
+    const assessmentResult = {
+      attemptId: "80000000-0000-4000-8000-000000000002",
+      evidence: [],
+      fallback: null,
+      learnerMessage: "Your response was graded.",
+      outcome: "graded" as const,
+      replacementForAttemptId: null,
+      requestDigest: "a".repeat(64),
+      status: "replayed" as const,
+    };
+    const assessment = {
+      gradeReplacement: vi.fn().mockResolvedValue(assessmentResult),
+      gradeShortAnswer: vi.fn().mockResolvedValue(assessmentResult),
+    };
+    const preflight = {
+      check: vi.fn().mockResolvedValue({
+        checkedAt: "2026-07-24T12:00:00.000Z",
+        dependencies: [
+          { code: "unavailable", name: "delivery" },
+          { code: "available", name: "model" },
+          { code: "available", name: "postgres" },
+          { code: "available", name: "storage" },
+          { code: "available", name: "vector" },
+        ],
+        status: "unavailable",
+      }),
+    };
+    const sessions = {
+      loadSummary: vi.fn().mockResolvedValue({
+        courseId: "50000000-0000-4000-8000-000000000002",
+        sessionId,
+        status: "active",
+        summary: { flowB: {} },
+      }),
+    };
+    const seed = {
+      reset: vi.fn().mockResolvedValue({
+        conceptId: "40000000-0000-4000-8000-000000000162",
+        courseId: "50000000-0000-4000-8000-000000000162",
+        demoOnly: true as const,
+        sessionId: "70000000-0000-4000-8000-000000000162",
+      }),
+    };
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      { assessment, preflight, seed, sessions },
+    );
+
+    const preflightResponse = await fetch(`${baseUrl}/v1/demo/preflight`);
+    expect(preflightResponse.status).toBe(503);
+    expect(await preflightResponse.json()).toMatchObject({
+      dependencies: [
+        { name: "delivery" },
+        { name: "model" },
+        { name: "postgres" },
+        { name: "storage" },
+        { name: "vector" },
+      ],
+      status: "unavailable",
+    });
+
+    const cookie = await login(baseUrl, fixture.email);
+    const submission = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/answers/short-answer`,
+      {
+        body: JSON.stringify({
+          answer: "A source-grounded answer",
+          idempotencyKey: "demo/assessment/v1/retest-2",
+          questionId: "60000000-0000-4000-8000-000000000002",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(submission.status).toBe(200);
+    expect(await submission.json()).toMatchObject({
+      result: { status: "replayed" },
+    });
+    expect(assessment.gradeShortAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: expect.objectContaining({
+          ownerScopeId: expect.any(String),
+        }),
+        sessionId,
+      }),
+    );
+
+    const summary = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/summary`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(summary.status).toBe(200);
+    expect(await summary.json()).toMatchObject({
+      session: { sessionId, summary: { flowB: {} } },
+    });
+
+    const reset = await fetch(`${baseUrl}/v1/demo/seed/reset`, {
+      headers: {
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+      },
+      method: "POST",
+    });
+    expect(reset.status).toBe(200);
+    expect(await reset.json()).toMatchObject({
+      seed: { demoOnly: true, sessionId: expect.any(String) },
+    });
+    expect(seed.reset).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+    );
+  });
 });
 
 function createAccountFixture() {
@@ -518,6 +646,7 @@ async function startAccountServer(
   service: AccountService,
   tutorAgent?: Parameters<typeof createApiServer>[1]["tutorAgent"],
   delivery?: Parameters<typeof createApiServer>[1]["delivery"],
+  extra: Partial<Parameters<typeof createApiServer>[1]> = {},
 ) {
   const server = createApiServer(
     {
@@ -527,6 +656,7 @@ async function startAccountServer(
       service: "api",
     },
     {
+      ...extra,
       accounts: service,
       ...(delivery === undefined ? {} : { delivery }),
       ...(tutorAgent === undefined ? {} : { tutorAgent }),

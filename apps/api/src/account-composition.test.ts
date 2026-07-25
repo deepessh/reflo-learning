@@ -86,4 +86,22 @@ describe("account production composition", () => {
       true,
     );
   });
+
+  it("composes the private local inbox only in development", () => {
+    const environment = {
+      ...productionEnvironment(),
+      REFLO_AUTH_EMAIL_ADAPTER: "local-inbox",
+      REFLO_DEV_AUTH_INBOX_ACCESS_KEY: "a".repeat(32),
+      REFLO_DEV_AUTH_INBOX_DESTINATION: "staff-demo@example.test",
+      REFLO_ENV: "dev",
+    };
+    const runtime = createAccountRuntime(environment, "dev");
+    runtimes.push(runtime);
+    expect(runtime.accounts).toBeDefined();
+    expect(runtime.localInbox).toBeDefined();
+
+    expect(() =>
+      createAccountRuntime({ ...environment, REFLO_ENV: "staging" }, "staging"),
+    ).toThrow("development-only");
+  });
 });

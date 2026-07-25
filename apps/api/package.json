@@ -17,11 +17,16 @@
   },
   "dependencies": {
     "@reflo/accounts": "workspace:*",
+    "@reflo/assessment": "workspace:*",
     "@reflo/config": "workspace:*",
     "@reflo/contracts": "workspace:*",
     "@reflo/db": "workspace:*",
+    "@reflo/dev-smoke": "workspace:*",
     "@reflo/delivery": "workspace:*",
+    "@reflo/knowledge-model": "workspace:*",
+    "@reflo/model-router": "workspace:*",
     "@reflo/observability": "workspace:*",
+    "@reflo/retrieval": "workspace:*",
     "@reflo/tutor-agent": "workspace:*"
   },
   "devDependencies": {

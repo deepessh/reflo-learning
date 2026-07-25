@@ -241,6 +241,7 @@ export interface AssessmentFinalizationView {
   readonly fallback: ReplacementBundle | null;
   readonly learnerMessage: string;
   readonly outcome: "abstained" | "graded";
+  readonly replacementForAttemptId: string | null;
   readonly requestDigest: string;
   readonly status: "created" | "replayed";
 }

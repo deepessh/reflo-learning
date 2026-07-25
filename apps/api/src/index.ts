@@ -1,6 +1,7 @@
 import { readServerEnvironment } from "@reflo/config";
 
 import { createAccountRuntime } from "./account-composition.js";
+import { createConnectedDemoRuntime } from "./connected-composition.js";
 import { createDeliveryRuntime } from "./delivery-composition.js";
 import { createApiServer } from "./server.js";
 
@@ -19,9 +20,19 @@ const deliveryRuntime = createDeliveryRuntime(
   process.env,
   environment.deployment,
 );
+const connectedRuntime = createConnectedDemoRuntime(
+  process.env,
+  environment.deployment,
+);
 const server = createApiServer(environment, {
   accounts: accountRuntime.accounts,
+  assessment: connectedRuntime.assessment,
   delivery: deliveryRuntime.delivery,
+  localAuthInbox: accountRuntime.localInbox,
+  preflight: connectedRuntime.preflight,
+  seed: connectedRuntime.seed,
+  sessions: connectedRuntime.sessions,
+  tutorAgent: connectedRuntime.tutorAgent,
 });
 
 server.listen(environment.port, environment.host, () => {
@@ -33,12 +44,14 @@ server.listen(environment.port, environment.host, () => {
 function shutdown(signal: NodeJS.Signals) {
   console.info(`Reflo API received ${signal}; shutting down`);
   server.close(async (error) => {
-    await accountRuntime.close().catch(() => {
+    const cleanup = await Promise.allSettled([
+      accountRuntime.close(),
+      connectedRuntime.close(),
+      deliveryRuntime.close(),
+    ]);
+    if (cleanup.some((result) => result.status === "rejected")) {
       process.exitCode = 1;
-    });
-    await deliveryRuntime.close().catch(() => {
-      process.exitCode = 1;
-    });
+    }
     if (error) {
       console.error("Reflo API shutdown failed");
       process.exitCode = 1;

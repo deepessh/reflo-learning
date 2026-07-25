@@ -15,7 +15,8 @@
     "dist",
     "migrations",
     "schema.sql",
-    "scripts"
+    "scripts",
+    "sql"
   ],
   "scripts": {
     "build": "node scripts/check-migrations.mjs && tsc -p tsconfig.build.json",

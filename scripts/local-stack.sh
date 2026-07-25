@@ -7,6 +7,7 @@ REFLO_LOCAL_COMPOSE_FILE="$REFLO_LOCAL_ROOT/compose.yaml"
 REFLO_LOCAL_STATE_DIR="$REFLO_LOCAL_ROOT/.reflo/local-stack"
 REFLO_LOCAL_COMPOSE_ENV="$REFLO_LOCAL_STATE_DIR/compose.env"
 REFLO_LOCAL_APP_ENV="$REFLO_LOCAL_STATE_DIR/app.env"
+REFLO_LOCAL_RUNTIME_ENV="$REFLO_LOCAL_STATE_DIR/runtime.env"
 REFLO_LOCAL_PROJECT=reflo-local
 REFLO_LOCAL_RDS_CONTAINER=reflo-local-rds-1
 REFLO_LOCAL_RETRIEVAL_SQL="$REFLO_LOCAL_ROOT/packages/retrieval/sql/20260721000100_vector_namespace_v1.sql"
@@ -47,21 +48,34 @@ random_secret() {
 }
 
 write_compose_env() {
-  if [ -f "$REFLO_LOCAL_COMPOSE_ENV" ]; then
-    return
-  fi
-
-  mkdir -p "$REFLO_LOCAL_STATE_DIR"
-  umask 077
-  REFLO_LOCAL_RDS_SECRET=$(random_secret)
-  REFLO_LOCAL_VECTOR_SECRET=$(random_secret)
-  cat >"$REFLO_LOCAL_COMPOSE_ENV" <<EOF
+  if [ ! -f "$REFLO_LOCAL_COMPOSE_ENV" ]; then
+    mkdir -p "$REFLO_LOCAL_STATE_DIR"
+    umask 077
+    REFLO_LOCAL_RDS_SECRET=$(random_secret)
+    REFLO_LOCAL_VECTOR_SECRET=$(random_secret)
+    cat >"$REFLO_LOCAL_COMPOSE_ENV" <<EOF
 REFLO_LOCAL_RDS_PASSWORD=$REFLO_LOCAL_RDS_SECRET
 REFLO_LOCAL_RDS_PORT=${REFLO_LOCAL_RDS_PORT:-55432}
 REFLO_LOCAL_VECTOR_PASSWORD=$REFLO_LOCAL_VECTOR_SECRET
 REFLO_LOCAL_VECTOR_PORT=${REFLO_LOCAL_VECTOR_PORT:-55433}
 EOF
+    chmod 600 "$REFLO_LOCAL_COMPOSE_ENV"
+  fi
+
+  append_compose_env_default REFLO_LOCAL_API_PORT "${REFLO_LOCAL_API_PORT:-53001}"
+  if ! grep -q "^REFLO_LOCAL_API_RDS_PASSWORD=" "$REFLO_LOCAL_COMPOSE_ENV"; then
+    append_compose_env_default REFLO_LOCAL_API_RDS_PASSWORD "$(random_secret)"
+  fi
+  append_compose_env_default REFLO_LOCAL_JOBS_PORT "${REFLO_LOCAL_JOBS_PORT:-53002}"
+  append_compose_env_default REFLO_LOCAL_RUNTIME_ENV_FILE "$REFLO_LOCAL_RUNTIME_ENV"
+  append_compose_env_default REFLO_LOCAL_WEB_PORT "${REFLO_LOCAL_WEB_PORT:-53000}"
   chmod 600 "$REFLO_LOCAL_COMPOSE_ENV"
+}
+
+append_compose_env_default() {
+  if ! grep -q "^$1=" "$REFLO_LOCAL_COMPOSE_ENV"; then
+    printf '%s=%s\n' "$1" "$2" >>"$REFLO_LOCAL_COMPOSE_ENV"
+  fi
 }
 
 env_value() {
@@ -88,10 +102,16 @@ write_app_env() {
   REFLO_LOCAL_RDS_HOST_PORT=$(env_value REFLO_LOCAL_RDS_PORT)
   REFLO_LOCAL_VECTOR_SECRET=$(env_value REFLO_LOCAL_VECTOR_PASSWORD)
   REFLO_LOCAL_VECTOR_HOST_PORT=$(env_value REFLO_LOCAL_VECTOR_PORT)
+  REFLO_LOCAL_API_HOST_PORT=$(env_value REFLO_LOCAL_API_PORT)
+  REFLO_LOCAL_JOBS_HOST_PORT=$(env_value REFLO_LOCAL_JOBS_PORT)
+  REFLO_LOCAL_WEB_HOST_PORT=$(env_value REFLO_LOCAL_WEB_PORT)
   assert_env_value REFLO_LOCAL_RDS_PASSWORD "$REFLO_LOCAL_RDS_SECRET"
   assert_env_value REFLO_LOCAL_VECTOR_PASSWORD "$REFLO_LOCAL_VECTOR_SECRET"
   assert_port REFLO_LOCAL_RDS_PORT "$REFLO_LOCAL_RDS_HOST_PORT"
   assert_port REFLO_LOCAL_VECTOR_PORT "$REFLO_LOCAL_VECTOR_HOST_PORT"
+  assert_port REFLO_LOCAL_API_PORT "$REFLO_LOCAL_API_HOST_PORT"
+  assert_port REFLO_LOCAL_JOBS_PORT "$REFLO_LOCAL_JOBS_HOST_PORT"
+  assert_port REFLO_LOCAL_WEB_PORT "$REFLO_LOCAL_WEB_HOST_PORT"
 
   umask 077
   cat >"$REFLO_LOCAL_APP_ENV" <<EOF
@@ -101,13 +121,35 @@ REFLO_VECTOR_DATABASE_URL=postgresql://reflo_vectors:$REFLO_LOCAL_VECTOR_SECRET@
 REFLO_POSTGRES_CONTAINER_ID=$REFLO_LOCAL_RDS_CONTAINER
 REFLO_POSTGRES_CONTAINER_REWRITE_FROM=127.0.0.1:$REFLO_LOCAL_RDS_HOST_PORT
 REFLO_POSTGRES_CONTAINER_REWRITE_TO=127.0.0.1:5432
+REFLO_LOCAL_API_ORIGIN=http://127.0.0.1:$REFLO_LOCAL_API_HOST_PORT
+REFLO_LOCAL_JOBS_ORIGIN=http://127.0.0.1:$REFLO_LOCAL_JOBS_HOST_PORT
+REFLO_LOCAL_WEB_ORIGIN=http://127.0.0.1:$REFLO_LOCAL_WEB_HOST_PORT
 EOF
   chmod 600 "$REFLO_LOCAL_APP_ENV"
+}
+
+write_runtime_env() {
+  if [ -f "$REFLO_LOCAL_RUNTIME_ENV" ]; then
+    chmod 600 "$REFLO_LOCAL_RUNTIME_ENV"
+    return
+  fi
+
+  umask 077
+  cat >"$REFLO_LOCAL_RUNTIME_ENV" <<'EOF'
+# Ignored local application runtime configuration. Add development-only model,
+# authentication, delivery, and tracing credentials here; never commit it.
+REFLO_AUTH_EMAIL_ADAPTER=disabled
+REFLO_CONNECTED_DEMO_MODE=disabled
+REFLO_DEMO_DELIVERY_MODE=disabled
+REFLO_DEMO_TRACING_MODE=disabled
+EOF
+  chmod 600 "$REFLO_LOCAL_RUNTIME_ENV"
 }
 
 ensure_runtime_files() {
   write_compose_env
   write_app_env
+  write_runtime_env
 }
 
 require_docker_compose() {

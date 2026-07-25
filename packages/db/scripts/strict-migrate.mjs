@@ -10,6 +10,13 @@ const packageRoot = path.resolve(
   "..",
 );
 
+export function resolveDbmateCli() {
+  return path.join(
+    path.dirname(fileURLToPath(import.meta.resolve("dbmate"))),
+    "cli.js",
+  );
+}
+
 export function findOutOfOrderMigrations(knownVersions, appliedVersions) {
   const known = new Set(knownVersions);
   const unknownApplied = appliedVersions.filter(
@@ -72,8 +79,9 @@ export async function migrateStrict(databaseUrl = process.env.DATABASE_URL) {
   // --strict flag. This preflight preserves that accepted behavior while
   // dbmate remains the only process that applies migration SQL.
   execFileSync(
-    "dbmate",
+    process.execPath,
     [
+      resolveDbmateCli(),
       "--migrations-dir",
       path.join(packageRoot, "migrations"),
       "--schema-file",

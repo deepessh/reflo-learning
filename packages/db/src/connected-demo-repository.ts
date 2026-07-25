@@ -118,7 +118,11 @@ export class PostgresConnectedDemoRepository {
                 lesson.id AS asset_id,
                 coalesce(lesson.strategy_tag, 'micro-lesson-v1')
                   AS strategy_tag,
-                array_agg(question.id ORDER BY question.item_order, question.id)
+                array_agg(
+                  question.id ORDER BY question.item_order, question.id
+                ) FILTER (
+                  WHERE question.item_type = 'multiple_choice'
+                )
                   AS quiz_item_ids
          FROM course
          JOIN chapter
@@ -161,13 +165,18 @@ export class PostgresConnectedDemoRepository {
                AND all_links.quiz_item_id = question.id
            ) = 1
          GROUP BY concept.id, chapter.id, lesson.id
-         HAVING count(question.id) >= 3
+         HAVING count(question.id) FILTER (
+                  WHERE question.item_type = 'multiple_choice'
+                ) >= 4
+            AND count(question.id) FILTER (
+                  WHERE question.item_type = 'short_answer'
+                ) >= 2
          ORDER BY chapter.chapter_order, concept.concept_order, concept.id
          LIMIT 1`,
         [authorization.actorId, authorization.ownerScopeId, courseId],
       );
       const row = seed.rows[0];
-      if (row === undefined || row.quiz_item_ids.length < 3) {
+      if (row === undefined || row.quiz_item_ids.length < 2) {
         throw new Error("connected demo seed content is unavailable");
       }
 

@@ -18,6 +18,7 @@ import type {
 } from "@reflo/accounts";
 
 import { courseProgress, sessionDuration } from "./account-view";
+import { FlowBStudy } from "./flow-b-study";
 import { KnowledgeMap } from "./knowledge-map";
 
 interface AccountShellProps {
@@ -151,6 +152,7 @@ export function AccountShell({
       ) : null}
       {screen === "dashboard" ? (
         <Dashboard
+          apiOrigin={apiOrigin}
           courses={courses}
           onRetryProgress={() => {
             if (selectedCourseId !== null) {
@@ -232,6 +234,7 @@ function EmailSent({ email }: { readonly email: string }) {
 }
 
 function Dashboard({
+  apiOrigin,
   courses,
   onRetryProgress,
   onSelectCourse,
@@ -240,6 +243,7 @@ function Dashboard({
   selectedCourseId,
   sessions,
 }: {
+  readonly apiOrigin: string;
   readonly courses: readonly LibraryCourse[];
   readonly onRetryProgress: () => void;
   readonly onSelectCourse: (courseId: string) => void;
@@ -255,9 +259,7 @@ function Dashboard({
           <p className="eyebrow">Personal library</p>
           <h1>Good to have you back.</h1>
         </div>
-        <button className="secondary-button" type="button">
-          + Add material
-        </button>
+        <span className="demo-boundary">Staff-controlled demo library</span>
       </div>
 
       <div className="dashboard-grid">
@@ -337,6 +339,21 @@ function Dashboard({
           )}
         </section>
       </div>
+
+      {selectedCourseId !== null ? (
+        <FlowBStudy
+          apiOrigin={apiOrigin}
+          courseId={selectedCourseId}
+          onProgressRefresh={onRetryProgress}
+          resumeSessionId={
+            sessions.find(
+              (session) =>
+                session.courseId === selectedCourseId &&
+                session.status === "active",
+            )?.sessionId ?? null
+          }
+        />
+      ) : null}
 
       {selectedCourseId !== null && progressScreen === "loading" ? (
         <section className="panel progress-state">

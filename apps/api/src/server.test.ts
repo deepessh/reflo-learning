@@ -530,6 +530,40 @@ describe("auth, library, and session-history API", () => {
         summary: { flowB: {} },
       }),
     };
+    const study = {
+      load: vi.fn().mockResolvedValue({
+        concept: {
+          conceptId: "40000000-0000-4000-8000-000000000162",
+          conceptName: "Virtual Private Cloud",
+          eligibleAttemptCount: 2,
+          latestEligibleAttempt: {
+            attemptId: "80000000-0000-4000-8000-000000000001",
+            createdAt: "2026-07-24T12:02:00.000Z",
+            rubricBand: "incorrect",
+          },
+          mastery: "0.16667",
+        },
+        contractVersion: "connected-study-view-v1",
+        courseId: "50000000-0000-4000-8000-000000000002",
+        demoOnly: true as const,
+        lesson: null,
+        loopResult: null,
+        plan: {
+          steps: ["answer", "different_lesson", "retest", "refresh_map"],
+          target: "close_evidence_gap",
+        },
+        question: {
+          conceptId: "40000000-0000-4000-8000-000000000162",
+          difficulty: 2,
+          itemId: "60000000-0000-4000-8000-000000000002",
+          itemType: "short_answer",
+          prompt: "What makes a VPC isolated?",
+        },
+        sessionId,
+        sourceDocumentId: "90000000-0000-4000-8000-000000000002",
+        state: "question",
+      }),
+    };
     const seed = {
       reset: vi.fn().mockResolvedValue({
         conceptId: "40000000-0000-4000-8000-000000000162",
@@ -542,7 +576,7 @@ describe("auth, library, and session-history API", () => {
       fixture.service,
       undefined,
       undefined,
-      { assessment, preflight, seed, sessions },
+      { assessment, preflight, seed, sessions, study },
     );
 
     const preflightResponse = await fetch(`${baseUrl}/v1/demo/preflight`);
@@ -587,6 +621,28 @@ describe("auth, library, and session-history API", () => {
         }),
         sessionId,
       }),
+    );
+
+    const state = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/state`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(state.status).toBe(200);
+    expect(await state.json()).toMatchObject({
+      view: {
+        contractVersion: "connected-study-view-v1",
+        question: { itemType: "short_answer" },
+        sessionId,
+      },
+    });
+    expect(study.load).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+      sessionId,
     );
 
     const summary = await fetch(

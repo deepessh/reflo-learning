@@ -15,7 +15,11 @@ import {
   type AssessmentFinalizationView,
 } from "@reflo/assessment";
 import type { ServerEnvironment } from "@reflo/config";
-import { HEALTH_CONTRACT_VERSION, type HealthResponse } from "@reflo/contracts";
+import {
+  HEALTH_CONTRACT_VERSION,
+  type ConnectedStudyView,
+  type HealthResponse,
+} from "@reflo/contracts";
 import {
   DeliveryError,
   type DemoDeliveryService,
@@ -84,6 +88,12 @@ export interface ApiDependencies {
       readonly status: "active" | "completed" | "abandoned";
       readonly summary: Readonly<Record<string, unknown>> | null;
     } | null>;
+  };
+  readonly study?: {
+    load(
+      authorization: ReturnType<typeof deliveryAuthorization>,
+      sessionId: string,
+    ): Promise<ConnectedStudyView | null>;
   };
   readonly tutorAgent?: Pick<TutorAgentService, "ask" | "nextAction">;
 }
@@ -350,6 +360,27 @@ export function createApiServer(
               writeCors(response, origin);
             }
             sendJson(response, 200, { session: summary });
+            return;
+          }
+          const stateSessionId = studySessionRoute(url.pathname, "state");
+          if (request.method === "GET" && stateSessionId !== null) {
+            const study = dependencies.study;
+            if (study === undefined) {
+              sendJson(response, 503, { error: "service_unavailable" });
+              return;
+            }
+            const view = await study.load(
+              deliveryAuthorization(account),
+              stateSessionId,
+            );
+            if (view === null) {
+              sendJson(response, 404, { error: "study_session_not_found" });
+              return;
+            }
+            if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+              writeCors(response, origin);
+            }
+            sendJson(response, 200, { view });
             return;
           }
 
@@ -725,7 +756,12 @@ function deliveryErrorStatus(error: DeliveryError): number {
 function studySessionRoute(
   pathname: string,
   action:
-    "answers/replacement" | "answers/short-answer" | "ask" | "next" | "summary",
+    | "answers/replacement"
+    | "answers/short-answer"
+    | "ask"
+    | "next"
+    | "state"
+    | "summary",
 ): string | null {
   const match = new RegExp(
     `^/v1/study-sessions/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/${action}$`,

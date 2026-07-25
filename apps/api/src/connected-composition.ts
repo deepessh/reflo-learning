@@ -42,6 +42,8 @@ import {
   type TutorLessonReference,
 } from "@reflo/tutor-agent";
 
+import { ConnectedStudyService } from "./connected-study.js";
+
 const CONNECTED_MODE = "staff-only-demo-v1";
 const MODEL_ADAPTER = "litellm-dev";
 
@@ -92,6 +94,7 @@ export interface ConnectedDemoRuntime {
       sessionId: string,
     ): Promise<ConnectedDemoSessionSummary | null>;
   };
+  readonly study?: Pick<ConnectedStudyService, "load">;
   readonly tutorAgent?: TutorAgentService;
   close(): Promise<void>;
 }
@@ -149,11 +152,14 @@ export function createConnectedDemoRuntime(
   });
   const assessmentRepository = new PostgresAssessmentRepository(databaseUrl);
   const knowledgeRepository = new PostgresKnowledgeRepository(databaseUrl);
-  const tutorRepository = new PostgresTutorAgentRepository(databaseUrl);
+  const tutorRepository = new PostgresTutorAgentRepository(databaseUrl, {
+    retestItemTypes: ["short_answer"],
+  });
   const connectedRepository = new PostgresConnectedDemoRepository(databaseUrl);
   const objects = new LocalSmokeObjectStore(artifactRoot);
+  const tutorArtifacts = new AuthorizedLocalTutorArtifacts(objects);
   const tutorAgent = new TutorAgentService({
-    artifacts: new AuthorizedLocalTutorArtifacts(objects),
+    artifacts: tutorArtifacts,
     models: router,
     repository: tutorRepository,
     retrieval,
@@ -189,6 +195,7 @@ export function createConnectedDemoRuntime(
       requiredUuid(input, "REFLO_DEMO_SEED_COURSE_ID"),
       preference,
     ),
+    study: new ConnectedStudyService(tutorRepository, tutorArtifacts),
     tutorAgent,
     close: async () => {
       const results = await Promise.allSettled([

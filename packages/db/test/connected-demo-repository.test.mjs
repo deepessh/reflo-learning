@@ -36,6 +36,9 @@ const ids = {
   quizA: "16200000-0000-4000-8000-000000000011",
   quizB: "16200000-0000-4000-8000-000000000012",
   quizC: "16200000-0000-4000-8000-000000000013",
+  quizD: "16200000-0000-4000-8000-000000000017",
+  quizE: "16200000-0000-4000-8000-000000000018",
+  quizF: "16200000-0000-4000-8000-000000000019",
   scope: "16200000-0000-4000-8000-000000000014",
   span: "16200000-0000-4000-8000-000000000015",
   user: "16200000-0000-4000-8000-000000000016",
@@ -80,7 +83,9 @@ test(
 
       connected = new PostgresConnectedDemoRepository(databaseUrl.toString());
       knowledge = new PostgresKnowledgeRepository(databaseUrl.toString());
-      tutor = new PostgresTutorAgentRepository(databaseUrl.toString());
+      tutor = new PostgresTutorAgentRepository(databaseUrl.toString(), {
+        retestItemTypes: ["short_answer"],
+      });
 
       await assert.rejects(
         connected.resetWeakState(
@@ -127,6 +132,10 @@ test(
       assert.equal(
         tutorSession.concepts[0].nextRetestQuestion.itemId,
         ids.quizC,
+      );
+      assert.equal(
+        tutorSession.concepts[0].nextRetestQuestion.itemType,
+        "short_answer",
       );
 
       const replay = await resetAndReplay(connected, knowledge);
@@ -335,36 +344,67 @@ async function seedConnectedFixture(client) {
     [ids.scope, ids.asset, ids.span],
   );
 
-  for (const [index, quizId] of [ids.quizA, ids.quizB, ids.quizC].entries()) {
+  const questions = [
+    { id: ids.quizA, itemType: "multiple_choice" },
+    { id: ids.quizB, itemType: "multiple_choice" },
+    { id: ids.quizC, itemType: "short_answer" },
+    { id: ids.quizD, itemType: "multiple_choice" },
+    { id: ids.quizE, itemType: "short_answer" },
+    { id: ids.quizF, itemType: "multiple_choice" },
+  ];
+  for (const [index, question] of questions.entries()) {
     await client.query(
       `INSERT INTO quiz_item
          (id, owner_scope_id, course_id, item_type, difficulty, prompt,
           keyed_answer, version, item_order, normalized_prompt_hash,
-          response_options)
-       VALUES ($1, $2, $3, 'multiple_choice', $4, $5,
-               to_jsonb('An isolated network'::text), 'fixture-v1', $6, $7,
-               '["An isolated network","A public bucket"]'::jsonb)`,
+          response_options, rubric)
+       VALUES (
+         $1, $2, $3, $4, $5, $6,
+         CASE WHEN $4 = 'multiple_choice'
+           THEN to_jsonb('An isolated network'::text)
+           ELSE 'null'::jsonb
+         END,
+         'fixture-v1', $7, $8,
+         CASE WHEN $4 = 'multiple_choice'
+           THEN '["An isolated network","A public bucket"]'::jsonb
+           ELSE NULL
+         END,
+         CASE WHEN $4 = 'short_answer'
+           THEN jsonb_build_array(jsonb_build_object(
+             'conceptId', $9::text,
+             'rubricId', 'connected-demo-rubric',
+             'rubricVersion', '1',
+             'requiredCriteria', jsonb_build_array('Explains isolation'),
+             'materialContradictions', '[]'::jsonb,
+             'sourceSpanIds', jsonb_build_array($10::text)
+           ))
+           ELSE NULL
+         END
+       )`,
       [
-        quizId,
+        question.id,
         ids.scope,
         ids.course,
-        index + 1,
+        question.itemType,
+        (index % 5) + 1,
         `Connected demo question ${index + 1}`,
         index,
         String(index + 1).repeat(64),
+        ids.concept,
+        ids.span,
       ],
     );
     await client.query(
       `INSERT INTO quiz_item_concept
          (owner_scope_id, quiz_item_id, concept_id)
        VALUES ($1, $2, $3)`,
-      [ids.scope, quizId, ids.concept],
+      [ids.scope, question.id, ids.concept],
     );
     await client.query(
       `INSERT INTO quiz_item_source_span
          (owner_scope_id, quiz_item_id, source_span_id)
        VALUES ($1, $2, $3)`,
-      [ids.scope, quizId, ids.span],
+      [ids.scope, question.id, ids.span],
     );
   }
 }

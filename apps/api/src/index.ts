@@ -32,6 +32,7 @@ const server = createApiServer(environment, {
   preflight: connectedRuntime.preflight,
   seed: connectedRuntime.seed,
   sessions: connectedRuntime.sessions,
+  study: connectedRuntime.study,
   tutorAgent: connectedRuntime.tutorAgent,
 });
 

@@ -262,10 +262,11 @@ artifact counts change.
 
 Prepare these local-only prerequisites first:
 
-- development-compatible rootless Podman 5.8.3 or production-pinned 6.0.1;
+- matching rootless Podman client and connected server at
+  development-compatible 5.8.3 or production-pinned 6.0.1;
 - a reachable development LiteLLM gateway with JSON-capable text and exactly
   1,024-dimensional embedding aliases;
-- Python 3.13 for the checksum-pinned development Piper environment.
+- Python 3.13.12 for the checksum-pinned development Piper environment.
 
 One repository-owned command builds or reuses the existing ingestion
 `Containerfile`, records its inspected digest, refreshes upstream-verified

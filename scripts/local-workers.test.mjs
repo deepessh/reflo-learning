@@ -7,7 +7,11 @@ import {
   hostPlatformKey,
   ingestionLaunchArguments,
   isSupportedPodmanVersion,
+  parsePodmanVersionReport,
+  piperStatePathsMatch,
+  podmanVersionReportIsSupported,
   renderProfileEnvironment,
+  unexpectedClamavDirectoryEntries,
   validateLocalWorkersContract,
 } from "./local-workers.mjs";
 
@@ -82,12 +86,58 @@ describe("optional local worker profile", () => {
     }
   });
 
+  it("requires supported Podman client and server runtimes", () => {
+    const report = parsePodmanVersionReport(
+      JSON.stringify({
+        Client: { Version: "5.8.3" },
+        Server: { Version: "5.8.5" },
+      }),
+    );
+
+    assert.deepEqual(report, {
+      clientVersion: "5.8.3",
+      serverVersion: "5.8.5",
+    });
+    assert.ok(
+      !podmanVersionReportIsSupported(report, contract.supportedPodmanVersions),
+    );
+    assert.equal(
+      podmanVersionReportIsSupported(
+        { clientVersion: "5.8.3", serverVersion: "6.0.1" },
+        contract.supportedPodmanVersions,
+      ),
+      false,
+    );
+    assert.equal(
+      podmanVersionReportIsSupported(
+        { clientVersion: "6.0.1", serverVersion: "6.0.1" },
+        contract.supportedPodmanVersions,
+      ),
+      true,
+    );
+    assert.equal(parsePodmanVersionReport('{"Client":{}}'), undefined);
+  });
+
   it("pins Piper wheels for every supported host platform", () => {
     assert.deepEqual(
       contract.piper.runtimes.map((runtime) => runtime.platform).sort(),
       ["darwin/arm64", "darwin/x64", "linux/arm64", "linux/x64"],
     );
     assert.match(hostPlatformKey("darwin", "x64"), /^darwin\/x64$/);
+  });
+
+  it("pins the exact checked-in Piper Python patch version", () => {
+    const mismatched = structuredClone(contract);
+    mismatched.piper.pythonVersion = "3.13.11";
+
+    assert.ok(
+      validateLocalWorkersContract(
+        mismatched,
+        ingestionManifest,
+        piperManifest,
+        containerfile,
+      ).includes("Piper Python version does not match the checked-in manifest"),
+    );
   });
 
   it("generates a non-secret profile with safely quoted paths", () => {
@@ -152,7 +202,61 @@ describe("optional local worker profile", () => {
     assert.ok(
       workerScript.includes('path.basename(generatedRoot) !== "local-workers"'),
     );
+    assert.ok(workerScript.includes("if (archiveLoaded) throw error"));
+    assert.ok(workerScript.includes('"archive",'));
+    assert.ok(workerScript.includes('"reflo-ingestion-build-"'));
     assert.ok(!/podman", \["(?:system|image)", "prune"/.test(workerScript));
+  });
+
+  it("rejects additional ClamAV inputs outside the recorded snapshot", () => {
+    const file = (name) => ({ name, isFile: () => true });
+    const directory = (name) => ({ name, isFile: () => false });
+
+    assert.deepEqual(
+      unexpectedClamavDirectoryEntries(
+        [
+          file("main.cvd"),
+          file("daily.cld"),
+          file("bytecode.cvd"),
+          file("freshclam.dat"),
+        ],
+        ["main.cvd", "daily.cld", "bytecode.cvd"],
+        contract.clamav.allowedMetadataFiles,
+      ),
+      [],
+    );
+    assert.deepEqual(
+      unexpectedClamavDirectoryEntries(
+        [file("custom.ndb"), directory("nested")],
+        [],
+        contract.clamav.allowedMetadataFiles,
+      ),
+      ["custom.ndb", "nested"],
+    );
+  });
+
+  it("rejects state-recorded Piper paths before execution", () => {
+    const piperDirectory = "/tmp/reflo-workers/piper";
+    const state = {
+      configPath: `${piperDirectory}/en_US-ljspeech-high.onnx.json`,
+      modelPath: `${piperDirectory}/en_US-ljspeech-high.onnx`,
+      preflightWavPath: `${piperDirectory}/preflight.wav`,
+      pythonExecutable: `${piperDirectory}/venv/bin/python`,
+    };
+
+    assert.equal(
+      piperStatePathsMatch(state, piperDirectory, contract.piper.voice),
+      true,
+    );
+    assert.equal(
+      piperStatePathsMatch(
+        { ...state, pythonExecutable: "/tmp/untrusted-python" },
+        piperDirectory,
+        contract.piper.voice,
+      ),
+      false,
+    );
+    assert.equal(contract.piper.pythonVersion, "3.13.12");
   });
 });
 

@@ -17,6 +17,7 @@
     "updaterImage": "docker.io/clamav/clamav@sha256:48eaad9644475c2d466ce6d4ba2da892dbd4dcd47713201d31b665364655cc3c",
     "updaterImageDigest": "sha256:48eaad9644475c2d466ce6d4ba2da892dbd4dcd47713201d31b665364655cc3c",
     "maxAgeHours": 24,
+    "allowedMetadataFiles": ["freshclam.dat"],
     "databases": [
       ["main.cvd"],
       ["daily.cld", "daily.cvd"],
@@ -31,7 +32,7 @@
   },
   "piper": {
     "version": "1.4.2",
-    "pythonMajorMinor": "3.13",
+    "pythonVersion": "3.13.12",
     "voiceArtifactVersion": "piper-voice-en-us-ljspeech-high-v1",
     "voice": {
       "profileId": "en-US/reflo-narrator-v1",

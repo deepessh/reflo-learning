@@ -8,6 +8,7 @@ import {
   chmod,
   copyFile,
   cp,
+  mkdtemp,
   mkdir,
   readFile,
   readdir,
@@ -16,6 +17,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -61,11 +63,74 @@ export function isSupportedPodmanVersion(output, versions) {
   return match !== null && versions.includes(match[1]);
 }
 
+export function parsePodmanVersionReport(output) {
+  let report;
+  try {
+    report = JSON.parse(output);
+  } catch {
+    return undefined;
+  }
+  const clientVersion = report.Client?.Version;
+  const serverVersion = report.Server?.Version;
+  if (
+    typeof clientVersion !== "string" ||
+    typeof serverVersion !== "string" ||
+    !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(clientVersion) ||
+    !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(serverVersion)
+  ) {
+    return undefined;
+  }
+  return { clientVersion, serverVersion };
+}
+
+export function podmanVersionReportIsSupported(report, versions) {
+  return (
+    report !== undefined &&
+    report.clientVersion === report.serverVersion &&
+    versions.includes(report.clientVersion)
+  );
+}
+
 export function hostPlatformKey(
   platform = process.platform,
   arch = process.arch,
 ) {
   return `${platform}/${arch}`;
+}
+
+export function unexpectedClamavDirectoryEntries(
+  entries,
+  selectedDatabases,
+  allowedMetadataFiles,
+) {
+  const allowedEntries = new Set([
+    ...selectedDatabases,
+    ...allowedMetadataFiles,
+  ]);
+  return entries
+    .filter((entry) => !entry.isFile() || !allowedEntries.has(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+export function piperStatePathsMatch(state, piperDirectory, voiceContract) {
+  const expectedPaths = {
+    configPath: path.join(
+      piperDirectory,
+      path.basename(voiceContract.configPath),
+    ),
+    modelPath: path.join(
+      piperDirectory,
+      path.basename(voiceContract.modelPath),
+    ),
+    preflightWavPath: path.join(piperDirectory, "preflight.wav"),
+    pythonExecutable: path.join(piperDirectory, "venv", "bin", "python"),
+  };
+  return Object.entries(expectedPaths).every(
+    ([key, expected]) =>
+      typeof state?.[key] === "string" &&
+      path.resolve(state[key]) === path.resolve(expected),
+  );
 }
 
 export function renderProfileEnvironment(state) {
@@ -128,7 +193,9 @@ export function validateLocalWorkersContract(
       `@${contract.clamav.updaterImageDigest}`,
     ) ||
     !digestPattern.test(contract.clamav.updaterImageDigest) ||
-    contract.clamav.maxAgeHours !== 24
+    contract.clamav.maxAgeHours !== 24 ||
+    JSON.stringify(contract.clamav.allowedMetadataFiles) !==
+      JSON.stringify(["freshclam.dat"])
   ) {
     errors.push("invalid development ClamAV contract");
   }
@@ -138,6 +205,9 @@ export function validateLocalWorkersContract(
     !sha256Pattern.test(contract.tessdata.sha256)
   ) {
     errors.push("tessdata does not match the ingestion Containerfile");
+  }
+  if (contract.piper.pythonVersion !== piperManifest.baseImage.pythonVersion) {
+    errors.push("Piper Python version does not match the checked-in manifest");
   }
   if (
     contract.piper.version !== piperManifest.piper.version ||
@@ -234,7 +304,8 @@ async function prepare() {
     preparedAt: new Date().toISOString(),
     profile: contract.profile,
     hostPlatform: hostPlatformKey(),
-    podmanVersion: podman.version,
+    podmanClientVersion: podman.clientVersion,
+    podmanServerVersion: podman.serverVersion,
     ingestion,
     clamav,
     tessdata,
@@ -396,7 +467,7 @@ async function collectReadiness(contract, ingestionManifest) {
       {
         state: "AVAILABLE",
         component: "podman",
-        message: `rootless development-compatible Podman ${podman.version}`,
+        message: podmanReadinessMessage(podman),
       },
       {
         state: (await pathExists(generatedRoot)) ? "INVALID" : "SKIPPED",
@@ -416,7 +487,7 @@ async function collectReadiness(contract, ingestionManifest) {
       {
         state: "AVAILABLE",
         component: "podman",
-        message: `rootless development-compatible Podman ${podman.version}`,
+        message: podmanReadinessMessage(podman),
       },
       readinessFromError(error, "local-workers"),
     ];
@@ -425,7 +496,7 @@ async function collectReadiness(contract, ingestionManifest) {
     {
       state: "AVAILABLE",
       component: "podman",
-      message: `rootless development-compatible Podman ${podman.version}`,
+      message: podmanReadinessMessage(podman),
     },
   ];
   const checks = [
@@ -473,7 +544,9 @@ async function verifyPodmanHost(contract) {
   let versionOutput;
   try {
     versionOutput = (
-      await runCommand("podman", ["--version"], { timeout: 10_000 })
+      await runCommand("podman", ["version", "--format", "json"], {
+        timeout: 10_000,
+      })
     ).stdout.trim();
   } catch {
     throw new LocalWorkerError(
@@ -482,13 +555,21 @@ async function verifyPodmanHost(contract) {
       "install development-compatible Podman 5.8.3 or 6.0.1",
     );
   }
+  const report = parsePodmanVersionReport(versionOutput);
+  if (report === undefined) {
+    throw new LocalWorkerError(
+      "UNSUPPORTED",
+      "podman",
+      "could not read both Podman client and server versions",
+    );
+  }
   if (
-    !isSupportedPodmanVersion(versionOutput, contract.supportedPodmanVersions)
+    !podmanVersionReportIsSupported(report, contract.supportedPodmanVersions)
   ) {
     throw new LocalWorkerError(
       "UNSUPPORTED",
       "podman",
-      `${versionOutput || "unknown version"}; expected exactly 5.8.3 or 6.0.1`,
+      `client ${report.clientVersion}, server ${report.serverVersion}; both must match at exactly 5.8.3 or 6.0.1`,
     );
   }
   const rootless = (
@@ -510,23 +591,35 @@ async function verifyPodmanHost(contract) {
       "the local Podman connection must be rootless",
     );
   }
-  return {
-    version: versionOutput.replace(/^podman version /i, ""),
-  };
+  return report;
+}
+
+function podmanReadinessMessage(podman) {
+  return `rootless development-compatible Podman client ${podman.clientVersion}, server ${podman.serverVersion}`;
 }
 
 async function prepareIngestion(contract, ingestionManifest, podman) {
   const imageReference = contract.ingestion.imageReference;
   const archive = process.env.REFLO_LOCAL_INGESTION_ARCHIVE;
+  const archiveSha256 = process.env.REFLO_LOCAL_INGESTION_ARCHIVE_SHA256;
+  const archiveConfigured = archive !== undefined && archive.length > 0;
+  const archiveSha256Configured =
+    archiveSha256 !== undefined && archiveSha256.length > 0;
+  if (archiveConfigured !== archiveSha256Configured) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "ingestion-worker",
+      "set REFLO_LOCAL_INGESTION_ARCHIVE and REFLO_LOCAL_INGESTION_ARCHIVE_SHA256 together",
+    );
+  }
   let archiveLoaded = false;
-  if (archive !== undefined && archive.length > 0) {
+  if (archiveConfigured) {
     const archivePath = safeAbsoluteInput(
       archive,
       "REFLO_LOCAL_INGESTION_ARCHIVE",
     );
     await verifyRegularFile(archivePath, "ingestion-worker");
-    const archiveSha256 = process.env.REFLO_LOCAL_INGESTION_ARCHIVE_SHA256;
-    if (!sha256Pattern.test(archiveSha256 ?? "")) {
+    if (!sha256Pattern.test(archiveSha256)) {
       throw new LocalWorkerError(
         "INVALID",
         "ingestion-worker",
@@ -566,9 +659,11 @@ async function prepareIngestion(contract, ingestionManifest, podman) {
       console.info(`Reusing verified ingestion image ${verified.imageDigest}`);
       return {
         ...verified,
-        podmanVersion: podman.version,
+        podmanClientVersion: podman.clientVersion,
+        podmanServerVersion: podman.serverVersion,
       };
-    } catch {
+    } catch (error) {
+      if (archiveLoaded) throw error;
       console.info("Rebuilding stale or mismatched local ingestion image");
     }
   } else if (
@@ -581,7 +676,6 @@ async function prepareIngestion(contract, ingestionManifest, podman) {
     );
   }
 
-  const workerPath = absoluteContractPath(contract.ingestion.context);
   if (
     !(await commandSucceeds("git", [
       "diff",
@@ -613,31 +707,73 @@ async function prepareIngestion(contract, ingestionManifest, podman) {
       "could not resolve the worker source revision",
     );
   }
-  await runCommand(
-    "podman",
-    [
-      "build",
-      "--platform",
-      contract.ingestion.platform,
-      "--target",
-      "runtime",
-      "--build-arg",
-      `REFLO_SOURCE_COMMIT=${sourceRevision}`,
-      "--tag",
-      imageReference,
-      "--file",
-      absoluteContractPath(contract.ingestion.containerfile),
-      workerPath,
-    ],
-    { maxBuffer: 16 * maximumCommandOutputBytes, timeout: 30 * 60_000 },
+  const containerfileRelativePath = path.relative(
+    contract.ingestion.context,
+    contract.ingestion.containerfile,
   );
+  if (
+    path.isAbsolute(containerfileRelativePath) ||
+    containerfileRelativePath === ".." ||
+    containerfileRelativePath.startsWith(`..${path.sep}`)
+  ) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "ingestion-worker",
+      "ingestion Containerfile escaped its build context",
+    );
+  }
+  const trackedBuildRoot = await mkdtemp(
+    path.join(tmpdir(), "reflo-ingestion-build-"),
+  );
+  const archivePath = path.join(trackedBuildRoot, "context.tar");
+  const buildContext = path.join(trackedBuildRoot, "context");
+  await ensureDirectory(buildContext);
+  try {
+    await runCommand("git", [
+      "archive",
+      "--format=tar",
+      `--output=${archivePath}`,
+      `${sourceRevision}:${contract.ingestion.context}`,
+    ]);
+    await runCommand("tar", [
+      "--extract",
+      "--file",
+      archivePath,
+      "--directory",
+      buildContext,
+    ]);
+    await runCommand(
+      "podman",
+      [
+        "build",
+        "--platform",
+        contract.ingestion.platform,
+        "--target",
+        "runtime",
+        "--build-arg",
+        `REFLO_SOURCE_COMMIT=${sourceRevision}`,
+        "--tag",
+        imageReference,
+        "--file",
+        path.join(buildContext, containerfileRelativePath),
+        buildContext,
+      ],
+      { maxBuffer: 16 * maximumCommandOutputBytes, timeout: 30 * 60_000 },
+    );
+  } finally {
+    await rm(trackedBuildRoot, { force: true, recursive: true });
+  }
   const verified = await verifyImageContract(
     contract,
     ingestionManifest,
     undefined,
   );
   console.info(`Built ingestion image ${verified.imageDigest}`);
-  return { ...verified, podmanVersion: podman.version };
+  return {
+    ...verified,
+    podmanClientVersion: podman.clientVersion,
+    podmanServerVersion: podman.serverVersion,
+  };
 }
 
 async function verifyImageContract(
@@ -810,6 +946,7 @@ async function prepareClamav(contract) {
   await verifyUpdaterImage(contract);
 
   const targetDirectory = path.join(generatedRoot, "clamav");
+  let reuseExistingSnapshot = false;
   if (await pathExists(targetDirectory)) {
     try {
       const existing = await inspectClamavDirectory(contract, targetDirectory);
@@ -829,6 +966,8 @@ async function prepareClamav(contract) {
       ) {
         throw error;
       }
+      reuseExistingSnapshot =
+        error instanceof LocalWorkerError && error.state === "STALE";
       console.info("Refreshing stale or invalid ClamAV development signatures");
     }
   }
@@ -836,13 +975,13 @@ async function prepareClamav(contract) {
   const previousDirectory = path.join(generatedRoot, ".clamav-previous");
   await rm(nextDirectory, { force: true, recursive: true });
   await ensureDirectory(nextDirectory);
-  if (await pathExists(targetDirectory)) {
+  if (reuseExistingSnapshot) {
     await cp(targetDirectory, nextDirectory, {
       errorOnExist: false,
       force: true,
       recursive: true,
     });
-  } else {
+  } else if (!(await pathExists(targetDirectory))) {
     const legacy = path.join(
       repositoryRoot,
       ".reflo",
@@ -963,6 +1102,19 @@ async function inspectClamavDirectory(contract, directory) {
       );
     }
     selected.push(present[0]);
+  }
+  const directoryEntries = await readdir(directory, { withFileTypes: true });
+  const unexpectedEntries = unexpectedClamavDirectoryEntries(
+    directoryEntries,
+    selected,
+    contract.clamav.allowedMetadataFiles,
+  );
+  if (unexpectedEntries.length > 0) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "clamav",
+      `unexpected database directory entries: ${unexpectedEntries.join(", ")}`,
+    );
   }
   const files = [];
   let dailyBuiltAt;
@@ -1267,6 +1419,7 @@ async function preparePiper(contract, runtime) {
     piperWheelSha256: runtime.piperWheelSha256,
     platform: runtime.platform,
     preflightWavPath,
+    pythonVersion: packageIdentity.pythonVersion,
     pythonExecutable,
     voiceArtifactVersion: contract.piper.voiceArtifactVersion,
     voiceId: contract.piper.voice.voiceId,
@@ -1326,20 +1479,30 @@ async function findBootstrapPython(contract) {
     throw new LocalWorkerError(
       "UNSUPPORTED",
       "piper",
-      `install Python ${contract.piper.pythonMajorMinor} or set REFLO_LOCAL_PIPER_BOOTSTRAP_PYTHON`,
+      `install Python ${contract.piper.pythonVersion} or set REFLO_LOCAL_PIPER_BOOTSTRAP_PYTHON`,
     );
   }
-  if (!version.startsWith(`Python ${contract.piper.pythonMajorMinor}.`)) {
+  if (version !== `Python ${contract.piper.pythonVersion}`) {
     throw new LocalWorkerError(
       "UNSUPPORTED",
       "piper",
-      `${version}; expected Python ${contract.piper.pythonMajorMinor}.x`,
+      `${version}; expected exactly Python ${contract.piper.pythonVersion}`,
     );
   }
   return executable;
 }
 
 async function inspectPiperPackages(pythonExecutable, contract, runtime) {
+  const pythonVersion = (
+    await runCommand(pythonExecutable, ["--version"], { timeout: 10_000 })
+  ).stdout.trim();
+  if (pythonVersion !== `Python ${contract.piper.pythonVersion}`) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "piper",
+      `${pythonVersion}; expected exactly Python ${contract.piper.pythonVersion}`,
+    );
+  }
   const output = (
     await runCommand(
       pythonExecutable,
@@ -1394,6 +1557,7 @@ async function inspectPiperPackages(pythonExecutable, contract, runtime) {
     }
   }
   const identity = [
+    `python=${contract.piper.pythonVersion}`,
     `piper=${runtime.piperWheelSha256}`,
     `onnxruntime=${runtime.onnxRuntimeWheelSha256}`,
     ...packageFreeze,
@@ -1401,13 +1565,17 @@ async function inspectPiperPackages(pythonExecutable, contract, runtime) {
   return {
     environmentSha256: sha256Bytes(Buffer.from(identity, "utf8")),
     packageFreeze,
+    pythonVersion: contract.piper.pythonVersion,
   };
 }
 
 async function verifyPiperDirectory(contract, state, runtime) {
+  const piperDirectory = path.join(generatedRoot, "piper");
   if (
     state === undefined ||
+    !piperStatePathsMatch(state, piperDirectory, contract.piper.voice) ||
     state.platform !== runtime.platform ||
+    state.pythonVersion !== contract.piper.pythonVersion ||
     state.piperVersion !== contract.piper.version ||
     state.piperWheel !== runtime.piperWheel ||
     state.piperWheelSha256 !== runtime.piperWheelSha256 ||
@@ -1469,17 +1637,6 @@ async function verifyPiperDirectory(contract, state, runtime) {
 async function verifyPreparedPiper(contract, state) {
   const runtime = selectPiperRuntime(contract);
   await verifyPiperDirectory(contract, state.piper, runtime);
-  if (
-    !state.piper.pythonExecutable.startsWith(
-      path.join(generatedRoot, "piper") + path.sep,
-    )
-  ) {
-    throw new LocalWorkerError(
-      "INVALID",
-      "piper",
-      "Piper executable escaped the generated worker root",
-    );
-  }
   return {
     state: "AVAILABLE",
     component: "piper",

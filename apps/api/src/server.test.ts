@@ -273,6 +273,7 @@ describe("auth, library, and session-history API", () => {
       fixture.service,
       undefined,
       delivery,
+      { now: () => new Date("2030-07-25T09:00:00.000Z") },
     );
     const cookie = await login(baseUrl, fixture.email);
 
@@ -295,6 +296,7 @@ describe("auth, library, and session-history API", () => {
         authorization: expect.objectContaining({
           ownerScopeId: expect.any(String),
         }),
+        now: "2030-07-25T09:00:00.000Z",
         provider: "email",
       }),
     );
@@ -329,7 +331,7 @@ describe("auth, library, and session-history API", () => {
       expect.objectContaining({ ownerScopeId: expect.any(String) }),
       "signed-token",
       [{ answer: "B", deliveryItemId }],
-      expect.stringMatching(/Z$/),
+      "2030-07-25T09:00:00.000Z",
     );
 
     const telegram = await fetch(`${baseUrl}/v1/webhooks/telegram`, {
@@ -355,7 +357,13 @@ describe("auth, library, and session-history API", () => {
     const fixture = createAccountFixture();
     const { baseUrl } = await startAccountServer(fixture.service);
 
-    expect((await fetch(`${baseUrl}/v1/library`)).status).toBe(401);
+    const unauthenticated = await fetch(`${baseUrl}/v1/library`, {
+      headers: { origin: "https://app.reflo.example" },
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.headers.get("access-control-allow-origin")).toBe(
+      "https://app.reflo.example",
+    );
     const cookie = await login(baseUrl, fixture.email);
     expect(
       (
@@ -512,12 +520,33 @@ describe("auth, library, and session-history API", () => {
     const preflight = {
       check: vi.fn().mockResolvedValue({
         checkedAt: "2026-07-24T12:00:00.000Z",
+        contractVersion: "connected-demo-preflight-v1",
         dependencies: [
-          { code: "unavailable", name: "delivery" },
-          { code: "available", name: "model" },
-          { code: "available", name: "postgres" },
-          { code: "available", name: "storage" },
-          { code: "available", name: "vector" },
+          {
+            code: "unavailable",
+            contractVersion: "demo-delivery-v1",
+            name: "delivery",
+          },
+          {
+            code: "available",
+            contractVersion: "route-policy-v3/test-adapter-v1",
+            name: "model",
+          },
+          {
+            code: "available",
+            contractVersion: "reflo-schema-test-v1",
+            name: "postgres",
+          },
+          {
+            code: "available",
+            contractVersion: "test-storage-v1",
+            name: "storage",
+          },
+          {
+            code: "available",
+            contractVersion: "test-vector-v1",
+            name: "vector",
+          },
         ],
         status: "unavailable",
       }),
@@ -582,6 +611,7 @@ describe("auth, library, and session-history API", () => {
     const preflightResponse = await fetch(`${baseUrl}/v1/demo/preflight`);
     expect(preflightResponse.status).toBe(503);
     expect(await preflightResponse.json()).toMatchObject({
+      contractVersion: "connected-demo-preflight-v1",
       dependencies: [
         { name: "delivery" },
         { name: "model" },

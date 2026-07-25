@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import type { Deployment } from "@reflo/config";
 import {
@@ -97,6 +97,13 @@ export function createDeliveryRuntime(
   if (!DIRECTMAIL_REGIONS.has(region as DemoDirectMailRegion)) {
     throw new Error("REFLO_DIRECTMAIL_REGION is not allowlisted");
   }
+  const messageAdapter = input.REFLO_DEMO_MESSAGE_ADAPTER ?? "provider";
+  if (messageAdapter !== "provider" && messageAdapter !== "local-fixture") {
+    throw new Error("REFLO_DEMO_MESSAGE_ADAPTER is not allowlisted");
+  }
+  if (messageAdapter === "local-fixture" && deployment !== "dev") {
+    throw new Error("The local delivery fixture is development-only");
+  }
 
   const repository = new PostgresDemoDeliveryRepository(databaseUrl);
   const knowledgeRepository = new PostgresKnowledgeRepository(databaseUrl);
@@ -110,21 +117,26 @@ export function createDeliveryRuntime(
       );
     },
   };
-  const directMail = createDirectMailDemoMessageAdapter({
-    fromAlias: required(input, "REFLO_DIRECTMAIL_FROM_ALIAS"),
-    ramRoleName: required(input, "REFLO_DIRECTMAIL_RAM_ROLE_NAME"),
-    region: region as DemoDirectMailRegion,
-    senderAddress: required(input, "REFLO_DIRECTMAIL_SENDER_ADDRESS"),
-  });
-  const emailPort = new CapacityGuardedEmailPort(
-    directMail,
-    capacityRepository,
-    dailyLimit,
-    totalLimit,
-  );
-  const telegramPort = createTelegramDemoMessageAdapter({
-    botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
-  });
+  const emailPort =
+    messageAdapter === "local-fixture"
+      ? new LocalFixtureMessagePort("email")
+      : new CapacityGuardedEmailPort(
+          createDirectMailDemoMessageAdapter({
+            fromAlias: required(input, "REFLO_DIRECTMAIL_FROM_ALIAS"),
+            ramRoleName: required(input, "REFLO_DIRECTMAIL_RAM_ROLE_NAME"),
+            region: region as DemoDirectMailRegion,
+            senderAddress: required(input, "REFLO_DIRECTMAIL_SENDER_ADDRESS"),
+          }),
+          capacityRepository,
+          dailyLimit,
+          totalLimit,
+        );
+  const telegramPort =
+    messageAdapter === "local-fixture"
+      ? new LocalFixtureMessagePort("telegram")
+      : createTelegramDemoMessageAdapter({
+          botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
+        });
   const delivery = new DemoDeliveryService({
     destinations: [telegram, email],
     emailLinkOrigin: required(input, "REFLO_DEMO_EMAIL_LINK_ORIGIN"),
@@ -278,6 +290,23 @@ class CapacityGuardedEmailPort implements DemoMessagePort {
       throw new Error("directmail_free_capacity_exhausted");
     }
     return this.delegate.send(message);
+  }
+}
+
+class LocalFixtureMessagePort implements DemoMessagePort {
+  constructor(readonly provider: "email" | "telegram") {}
+
+  async send(message: DeliveryMessage): Promise<{
+    readonly providerMessageId: string;
+  }> {
+    if (message.provider !== this.provider) {
+      throw new Error("local delivery fixture provider mismatch");
+    }
+    return {
+      providerMessageId: `local-fixture/${createHash("sha256")
+        .update(`${message.provider}/${message.deliveryId}`)
+        .digest("hex")}`,
+    };
   }
 }
 

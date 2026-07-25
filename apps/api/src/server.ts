@@ -16,6 +16,7 @@ import {
 } from "@reflo/assessment";
 import type { ServerEnvironment } from "@reflo/config";
 import {
+  type ConnectedDemoPreflightView,
   HEALTH_CONTRACT_VERSION,
   type ConnectedStudyView,
   type HealthResponse,
@@ -42,6 +43,7 @@ export interface ApiDependencies {
       readonly loginUrl: string;
     } | null;
   };
+  readonly now?: () => Date;
   readonly assessment?: {
     gradeReplacement(input: {
       readonly answer: string;
@@ -61,14 +63,7 @@ export interface ApiDependencies {
     }): Promise<AssessmentFinalizationView>;
   };
   readonly preflight?: {
-    check(deliveryAvailable: boolean): Promise<{
-      readonly checkedAt: string;
-      readonly dependencies: readonly {
-        readonly code: "available" | "unavailable";
-        readonly name: "delivery" | "model" | "postgres" | "storage" | "vector";
-      }[];
-      readonly status: "ready" | "unavailable";
-    }>;
+    check(deliveryAvailable: boolean): Promise<ConnectedDemoPreflightView>;
   };
   readonly seed?: {
     reset(authorization: ReturnType<typeof deliveryAuthorization>): Promise<{
@@ -120,6 +115,13 @@ export function createApiServer(
 
     if (request.method === "GET" && request.url === "/v1/demo/preflight") {
       const preflight = dependencies.preflight;
+      const preflightOrigin = singleHeader(request.headers.origin);
+      if (
+        preflightOrigin !== undefined &&
+        dependencies.accounts?.isTrustedOrigin(preflightOrigin) === true
+      ) {
+        writeCors(response, preflightOrigin);
+      }
       if (preflight === undefined) {
         sendJson(response, 503, {
           dependencies: [],
@@ -245,8 +247,14 @@ export function createApiServer(
           const sessionSecret = cookies.get(SESSION_COOKIE) ?? "";
           const account = await accounts.authenticate(sessionSecret);
           if (account === null) {
+            if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+              writeCors(response, origin);
+            }
             sendJson(response, 401, { error: "authentication_required" });
             return;
+          }
+          if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+            writeCors(response, origin);
           }
 
           if (request.method === "GET" && url.pathname === "/v1/account") {
@@ -320,7 +328,7 @@ export function createApiServer(
               quiz: await delivery.previewEmail(
                 deliveryAuthorization(account),
                 token,
-                new Date().toISOString(),
+                currentTime(dependencies),
               ),
             });
             return;
@@ -425,7 +433,7 @@ export function createApiServer(
               const result = await delivery.dispatch({
                 authorization: deliveryAuthorization(account),
                 idempotencyKey: stringField(body, "idempotencyKey"),
-                now: new Date().toISOString(),
+                now: currentTime(dependencies),
                 provider,
               });
               writeCors(response, origin!);
@@ -454,7 +462,7 @@ export function createApiServer(
                 deliveryAuthorization(account),
                 stringField(body, "token"),
                 answerFields(body, "answers"),
-                new Date().toISOString(),
+                currentTime(dependencies),
               );
               writeCors(response, origin!);
               sendJson(response, 200, { results });
@@ -627,10 +635,14 @@ export function createApiServer(
   });
 }
 
+function currentTime(dependencies: ApiDependencies): string {
+  return (dependencies.now?.() ?? new Date()).toISOString();
+}
+
 function sendJson(
   response: ServerResponse,
   status: number,
-  body: Readonly<Record<string, unknown>>,
+  body: object,
 ): void {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",

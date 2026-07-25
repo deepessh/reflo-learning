@@ -28,6 +28,15 @@ describe("demo delivery composition", () => {
         "staging",
       ),
     ).toThrow(/keys must be independent/);
+    expect(() =>
+      createDeliveryRuntime(
+        {
+          ...environment(),
+          REFLO_DEMO_MESSAGE_ADAPTER: "local-fixture",
+        },
+        "staging",
+      ),
+    ).toThrow(/development-only/);
   });
 
   it("composes only explicit staff destinations and approved free capacity", async () => {
@@ -40,6 +49,15 @@ describe("demo delivery composition", () => {
     const runtime = createDeliveryRuntime(environment(), "staging");
     expect(runtime.delivery).toBeDefined();
     await runtime.close();
+    const local = createDeliveryRuntime(
+      {
+        ...environment(),
+        REFLO_DEMO_MESSAGE_ADAPTER: "local-fixture",
+      },
+      "dev",
+    );
+    expect(local.delivery).toBeDefined();
+    await local.close();
   });
 
   it("records bounded delivery health without changing delivery outcomes", async () => {

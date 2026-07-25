@@ -3,6 +3,8 @@
 import { useState, type FormEvent } from "react";
 
 import type {
+  ConnectedDemoPreflightDependency,
+  ConnectedDemoPreflightView,
   ConnectedStudyQuestion,
   ConnectedStudyView,
 } from "@reflo/contracts";
@@ -12,6 +14,7 @@ import {
   unavailableDependencyNames,
   type BrowserAssessmentResult,
 } from "./flow-b-view";
+import { exactPercentLabel, masteryDeltaLabel } from "./account-view";
 
 type Phase =
   | "blocked"
@@ -469,7 +472,9 @@ export function FlowBStudy({
         <div className="flow-lesson">
           <div className="lesson-meta">
             <span>Replacement {view.lesson.replacementOrdinal}</span>
-            <span>{view.lesson.strategyTag}</span>
+            <span>
+              {view.lesson.priorStrategyTag} → {view.lesson.strategyTag}
+            </span>
             <span>
               Similarity{" "}
               {Math.round(Number(view.lesson.semanticSimilarity) * 100)}%
@@ -499,17 +504,10 @@ export function FlowBStudy({
           </h3>
           {view.loopResult !== null ? (
             <div className="delta-hero">
-              <span>
-                {Math.round(Number(view.loopResult.initialMastery) * 100)}%
-              </span>
+              <span>{exactPercentLabel(view.loopResult.initialMastery)}</span>
               <span aria-hidden="true">→</span>
-              <strong>
-                {Math.round(Number(view.loopResult.finalMastery) * 100)}%
-              </strong>
-              <em>
-                {Number(view.loopResult.masteryDelta) >= 0 ? "+" : ""}
-                {Math.round(Number(view.loopResult.masteryDelta) * 100)} pts
-              </em>
+              <strong>{exactPercentLabel(view.loopResult.finalMastery)}</strong>
+              <em>{masteryDeltaLabel(view.loopResult.masteryDelta)}</em>
             </div>
           ) : null}
           <p>
@@ -616,31 +614,30 @@ async function requestJson<Value>(url: string): Promise<Value> {
   return parseResponse<Value>(response);
 }
 
-async function requestPreflight(apiOrigin: string): Promise<{
-  readonly dependencies: readonly {
-    readonly code: "available" | "unavailable";
-    readonly name: string;
-  }[];
-  readonly status: "ready" | "unavailable";
-}> {
+async function requestPreflight(
+  apiOrigin: string,
+): Promise<ConnectedDemoPreflightView> {
   const response = await fetch(`${apiOrigin}/v1/demo/preflight`, {
     credentials: "include",
   });
   const body = (await response.json().catch(() => ({}))) as {
-    readonly dependencies?: readonly {
-      readonly code: "available" | "unavailable";
-      readonly name: string;
-    }[];
+    readonly checkedAt?: string;
+    readonly contractVersion?: string;
+    readonly dependencies?: readonly ConnectedDemoPreflightDependency[];
     readonly status?: "ready" | "unavailable";
   };
   if (
     (response.status !== 200 && response.status !== 503) ||
     body.dependencies === undefined ||
+    body.checkedAt === undefined ||
+    body.contractVersion !== "connected-demo-preflight-v1" ||
     body.status === undefined
   ) {
     throw new Error("Connected dependency preflight could not be confirmed.");
   }
   return {
+    checkedAt: body.checkedAt,
+    contractVersion: body.contractVersion,
     dependencies: body.dependencies,
     status: body.status,
   };

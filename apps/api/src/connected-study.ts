@@ -45,8 +45,11 @@ export class ConnectedStudyService {
       lessonContent !== null &&
       sha256(lessonContent) === persistedLesson.contentHash
         ? {
+            baselineMastery: persistedLesson.baselineMastery,
             content: lessonContent,
+            generationVersion: persistedLesson.generationVersion,
             modality: "text" as const,
+            priorStrategyTag: concept.lesson?.strategyTag ?? "unknown",
             replacementOrdinal: persistedLesson.replacementOrdinal,
             semanticSimilarity: persistedLesson.semanticSimilarity,
             servedAt: persistedLesson.servedAt,

@@ -8,6 +8,11 @@ import {
 } from "@reflo/assessment";
 import type { Deployment } from "@reflo/config";
 import {
+  CONNECTED_DEMO_PREFLIGHT_VERSION,
+  type ConnectedDemoPreflightDependency,
+  type ConnectedDemoPreflightView,
+} from "@reflo/contracts";
+import {
   PostgresAnalyticDbPool,
   PostgresAssessmentRepository,
   PostgresConnectedDemoRepository,
@@ -17,6 +22,7 @@ import {
   type ConnectedDemoSessionSummary,
 } from "@reflo/db";
 import { LocalSmokeObjectStore } from "@reflo/dev-smoke";
+import { DEMO_DELIVERY_CONTRACT_VERSION } from "@reflo/delivery";
 import {
   KNOWLEDGE_ALGORITHM_VERSION,
   KNOWLEDGE_CONFIGURATION_ID,
@@ -25,10 +31,14 @@ import {
 } from "@reflo/knowledge-model";
 import {
   ROUTE_POLICY_V3,
+  ROUTE_POLICY_VERSION,
   buildPromptBundle,
   createModelRouter,
 } from "@reflo/model-router";
-import { createLiteLlmDevAdapters } from "@reflo/model-router/litellm";
+import {
+  LITELLM_DEV_ADAPTER_VERSION,
+  createLiteLlmDevAdapters,
+} from "@reflo/model-router/litellm";
 import { createDemoTraceRuntime } from "@reflo/observability";
 import {
   DevelopmentPgVectorStore,
@@ -46,6 +56,8 @@ import { ConnectedStudyService } from "./connected-study.js";
 
 const CONNECTED_MODE = "staff-only-demo-v1";
 const MODEL_ADAPTER = "litellm-dev";
+const POSTGRES_CONTRACT_VERSION = "reflo-schema-20260724000300";
+const STORAGE_CONTRACT_VERSION = "local-smoke-object-store-v1";
 
 export interface ConnectedAssessmentRuntime {
   gradeReplacement(input: {
@@ -67,14 +79,7 @@ export interface ConnectedAssessmentRuntime {
 }
 
 export interface ConnectedDemoPreflight {
-  check(deliveryAvailable: boolean): Promise<{
-    readonly checkedAt: string;
-    readonly dependencies: readonly {
-      readonly code: "available" | "unavailable";
-      readonly name: "delivery" | "model" | "postgres" | "storage" | "vector";
-    }[];
-    readonly status: "ready" | "unavailable";
-  }>;
+  check(deliveryAvailable: boolean): Promise<ConnectedDemoPreflightView>;
 }
 
 export interface ConnectedDemoRuntime {
@@ -181,6 +186,13 @@ export function createConnectedDemoRuntime(
     preflight: new RuntimePreflight({
       artifactRoot,
       database: connectedRepository,
+      dependencyVersions: {
+        delivery: DEMO_DELIVERY_CONTRACT_VERSION,
+        model: `${ROUTE_POLICY_VERSION}/${LITELLM_DEV_ADAPTER_VERSION}`,
+        postgres: POSTGRES_CONTRACT_VERSION,
+        storage: STORAGE_CONTRACT_VERSION,
+        vector: liteLlm.embeddingProfileVersion,
+      },
       liteLlmApiKey: required(input, "REFLO_LITELLM_API_KEY"),
       liteLlmBaseUrl: new URL(required(input, "REFLO_LITELLM_BASE_URL")),
       vector: vectorPool,
@@ -321,6 +333,9 @@ class RuntimePreflight implements ConnectedDemoPreflight {
     private readonly dependencies: {
       readonly artifactRoot: string;
       readonly database: Pick<PostgresConnectedDemoRepository, "ping">;
+      readonly dependencyVersions: Readonly<
+        Record<"delivery" | "model" | "postgres" | "storage" | "vector", string>
+      >;
       readonly liteLlmApiKey: string;
       readonly liteLlmBaseUrl: URL;
       readonly vector: Pick<AnalyticDbPoolPort, "connect">;
@@ -337,21 +352,36 @@ class RuntimePreflight implements ConnectedDemoPreflight {
     const deliveryCode: "available" | "unavailable" = deliveryAvailable
       ? "available"
       : "unavailable";
-    const dependencies: {
-      readonly code: "available" | "unavailable";
-      readonly name: "delivery" | "model" | "postgres" | "storage" | "vector";
-    }[] = [
+    const dependencies: ConnectedDemoPreflightDependency[] = [
       {
         code: deliveryCode,
+        contractVersion: this.dependencies.dependencyVersions.delivery,
         name: "delivery" as const,
       },
-      { code: model, name: "model" as const },
-      { code: postgres, name: "postgres" as const },
-      { code: storage, name: "storage" as const },
-      { code: vector, name: "vector" as const },
+      {
+        code: model,
+        contractVersion: this.dependencies.dependencyVersions.model,
+        name: "model" as const,
+      },
+      {
+        code: postgres,
+        contractVersion: this.dependencies.dependencyVersions.postgres,
+        name: "postgres" as const,
+      },
+      {
+        code: storage,
+        contractVersion: this.dependencies.dependencyVersions.storage,
+        name: "storage" as const,
+      },
+      {
+        code: vector,
+        contractVersion: this.dependencies.dependencyVersions.vector,
+        name: "vector" as const,
+      },
     ];
     return {
       checkedAt: new Date().toISOString(),
+      contractVersion: CONNECTED_DEMO_PREFLIGHT_VERSION,
       dependencies,
       status: dependencies.every(
         (dependency) => dependency.code === "available",

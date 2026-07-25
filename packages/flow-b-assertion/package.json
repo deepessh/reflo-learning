@@ -1,0 +1,33 @@
+{
+  "name": "@reflo/flow-b-assertion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "reflo-flow-b-assert": "dist/cli.js",
+    "reflo-flow-b-local-run": "dist/local-run.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "assert": "node dist/cli.js",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "local:run": "pnpm build && node dist/local-run.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

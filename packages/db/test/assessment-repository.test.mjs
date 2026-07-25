@@ -131,10 +131,12 @@ test(
 
       assert.equal(first.status, "created");
       assert.equal(first.outcome, "abstained");
+      assert.equal(first.replacementForAttemptId, null);
       assert.equal(first.fallback.items.length, 2);
       assert.equal("keyedAnswer" in first.fallback.items[0].question, false);
       assert.equal(replay.status, "replayed");
       assert.equal(replay.attemptId, first.attemptId);
+      assert.equal(replay.replacementForAttemptId, null);
       await assert.rejects(
         repository.claimShortAnswer(authorization, {
           ...claimRequest,
@@ -236,6 +238,8 @@ test(
       );
       assert.equal(replacementFirst.status, "created");
       assert.equal(replacementReplay.status, "replayed");
+      assert.equal(replacementFirst.replacementForAttemptId, ids.attempt);
+      assert.equal(replacementReplay.replacementForAttemptId, ids.attempt);
       assert.equal(replacementFirst.evidence.length, 1);
       assert.deepEqual(
         {

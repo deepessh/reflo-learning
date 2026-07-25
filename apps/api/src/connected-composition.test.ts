@@ -46,6 +46,7 @@ describe("connected demo composition", () => {
     runtimes.push(runtime);
 
     expect(runtime.assessment).toBeDefined();
+    expect(runtime.study).toBeDefined();
     expect(runtime.tutorAgent).toBeDefined();
     expect(runtime.sessions).toBeDefined();
     await expect(runtime.preflight!.check(false)).resolves.toMatchObject({

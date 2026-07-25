@@ -94,11 +94,29 @@ export class PostgresTutorAgentRepository
   implements TutorAgentRepositoryPort, TutorReviewSchedulerPort
 {
   readonly #pool: InstanceType<typeof Pool>;
+  readonly #retestItemTypes: readonly TutorRetestQuestion["itemType"][];
 
-  constructor(connectionString: string) {
+  constructor(
+    connectionString: string,
+    options: {
+      readonly retestItemTypes?: readonly TutorRetestQuestion["itemType"][];
+    } = {},
+  ) {
     if (connectionString.length === 0) {
       throw new TutorAgentError("invalid_configuration");
     }
+    const retestItemTypes = options.retestItemTypes ?? [
+      "concept_linking",
+      "multiple_choice",
+      "short_answer",
+    ];
+    if (
+      retestItemTypes.length === 0 ||
+      new Set(retestItemTypes).size !== retestItemTypes.length
+    ) {
+      throw new TutorAgentError("invalid_configuration");
+    }
+    this.#retestItemTypes = retestItemTypes;
     this.#pool = new Pool({ connectionString });
   }
 
@@ -127,7 +145,7 @@ export class PostgresTutorAgentRepository
         loadConceptRows(client, session),
         loadSourceSpans(client, session),
         loadReteaches(client, session),
-        loadRetestQuestions(client, session),
+        loadRetestQuestions(client, session, this.#retestItemTypes),
       ]);
       return materializeSession(
         authorization,
@@ -757,6 +775,7 @@ async function loadReteaches(
 async function loadRetestQuestions(
   client: PoolClient,
   session: SessionRow,
+  itemTypes: readonly TutorRetestQuestion["itemType"][],
 ): Promise<readonly QuestionRow[]> {
   const result = await client.query<QuestionRow>(
     `SELECT link.concept_id, item.id AS item_id, item.item_type,
@@ -772,6 +791,7 @@ async function loadRetestQuestions(
       AND source.quiz_item_id = item.id
      WHERE item.owner_scope_id = $1 AND item.course_id = $2
        AND item.normalized_prompt_hash IS NOT NULL
+       AND item.item_type::text = ANY($4::text[])
        AND (
          SELECT count(*)
          FROM quiz_item_concept AS all_concepts
@@ -794,7 +814,7 @@ async function loadRetestQuestions(
        )
      GROUP BY link.concept_id, item.id
      ORDER BY link.concept_id, item.difficulty, item.item_order, item.id`,
-    [session.owner_scope_id, session.course_id, session.session_id],
+    [session.owner_scope_id, session.course_id, session.session_id, itemTypes],
   );
   return result.rows;
 }

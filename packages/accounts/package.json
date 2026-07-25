@@ -20,6 +20,10 @@
     "./directmail": {
       "types": "./dist/adapters/directmail.d.ts",
       "default": "./dist/adapters/directmail.js"
+    },
+    "./local-inbox": {
+      "types": "./dist/adapters/local-inbox.d.ts",
+      "default": "./dist/adapters/local-inbox.js"
     }
   },
   "scripts": {

@@ -17,6 +17,9 @@ export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generatio
 export { PostgresAssessmentRepository } from "./assessment-repository.js";
 export { PostgresDemoDeliveryRepository } from "./delivery-repository.js";
 export { PostgresTutorAgentRepository } from "./tutor-agent-repository.js";
+export { PostgresConnectedDemoRepository } from "./connected-demo-repository.js";
+export type { ConnectedDemoSessionSummary } from "./connected-demo-repository.js";
+export type { ConnectedDemoSeedResult } from "./connected-demo-repository.js";
 export { PostgresGateAttestationIndex } from "./gate-attestation-index.js";
 export {
   KnowledgePersistenceError,

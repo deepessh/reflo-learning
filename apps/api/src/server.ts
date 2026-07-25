@@ -10,6 +10,10 @@ import {
   type AccountService,
   RecentAuthenticationRequiredError,
 } from "@reflo/accounts";
+import {
+  AssessmentError,
+  type AssessmentFinalizationView,
+} from "@reflo/assessment";
 import type { ServerEnvironment } from "@reflo/config";
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from "@reflo/contracts";
 import {
@@ -28,6 +32,59 @@ export interface ApiDependencies {
     DemoDeliveryService,
     "dispatch" | "handleTelegramWebhook" | "previewEmail" | "submitEmail"
   >;
+  readonly localAuthInbox?: {
+    take(accessKey: string | undefined): {
+      readonly expiresAt: string;
+      readonly loginUrl: string;
+    } | null;
+  };
+  readonly assessment?: {
+    gradeReplacement(input: {
+      readonly answer: string;
+      readonly authorization: ReturnType<typeof deliveryAuthorization>;
+      readonly bundleId: string;
+      readonly idempotencyKey: string;
+      readonly itemId: string;
+      readonly sessionId: string;
+    }): Promise<AssessmentFinalizationView>;
+    gradeShortAnswer(input: {
+      readonly answer: string;
+      readonly authorization: ReturnType<typeof deliveryAuthorization>;
+      readonly deadlineMs: number;
+      readonly idempotencyKey: string;
+      readonly questionId: string;
+      readonly sessionId: string;
+    }): Promise<AssessmentFinalizationView>;
+  };
+  readonly preflight?: {
+    check(deliveryAvailable: boolean): Promise<{
+      readonly checkedAt: string;
+      readonly dependencies: readonly {
+        readonly code: "available" | "unavailable";
+        readonly name: "delivery" | "model" | "postgres" | "storage" | "vector";
+      }[];
+      readonly status: "ready" | "unavailable";
+    }>;
+  };
+  readonly seed?: {
+    reset(authorization: ReturnType<typeof deliveryAuthorization>): Promise<{
+      readonly conceptId: string;
+      readonly courseId: string;
+      readonly demoOnly: true;
+      readonly sessionId: string;
+    }>;
+  };
+  readonly sessions?: {
+    loadSummary(
+      authorization: ReturnType<typeof deliveryAuthorization>,
+      sessionId: string,
+    ): Promise<{
+      readonly courseId: string;
+      readonly sessionId: string;
+      readonly status: "active" | "completed" | "abandoned";
+      readonly summary: Readonly<Record<string, unknown>> | null;
+    } | null>;
+  };
   readonly tutorAgent?: Pick<TutorAgentService, "ask" | "nextAction">;
 }
 
@@ -48,6 +105,21 @@ export function createApiServer(
         "content-type": "application/json; charset=utf-8",
       });
       response.end(JSON.stringify(body));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/v1/demo/preflight") {
+      const preflight = dependencies.preflight;
+      if (preflight === undefined) {
+        sendJson(response, 503, {
+          dependencies: [],
+          error: "connected_demo_unavailable",
+          status: "unavailable",
+        });
+        return;
+      }
+      const result = await preflight.check(dependencies.delivery !== undefined);
+      sendJson(response, result.status === "ready" ? 200 : 503, result);
       return;
     }
 
@@ -81,6 +153,21 @@ export function createApiServer(
       request.resume();
       response.writeHead(204);
       response.end();
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      request.url === "/v1/dev/auth-inbox/latest"
+    ) {
+      const message = dependencies.localAuthInbox?.take(
+        singleHeader(request.headers["x-reflo-dev-inbox-key"]),
+      );
+      if (message === null || message === undefined) {
+        sendJson(response, 404, { error: "not_found" });
+        return;
+      }
+      sendJson(response, 200, { message });
       return;
     }
 
@@ -244,6 +331,27 @@ export function createApiServer(
             sendJson(response, 200, { progress });
             return;
           }
+          const summarySessionId = studySessionRoute(url.pathname, "summary");
+          if (request.method === "GET" && summarySessionId !== null) {
+            const sessions = dependencies.sessions;
+            if (sessions === undefined) {
+              sendJson(response, 503, { error: "service_unavailable" });
+              return;
+            }
+            const summary = await sessions.loadSummary(
+              deliveryAuthorization(account),
+              summarySessionId,
+            );
+            if (summary === null) {
+              sendJson(response, 404, { error: "study_session_not_found" });
+              return;
+            }
+            if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+              writeCors(response, origin);
+            }
+            sendJson(response, 200, { session: summary });
+            return;
+          }
 
           if (request.method === "POST") {
             if (
@@ -291,6 +399,17 @@ export function createApiServer(
               });
               writeCors(response, origin!);
               sendJson(response, 200, { result });
+              return;
+            }
+            if (url.pathname === "/v1/demo/seed/reset") {
+              const seed = dependencies.seed;
+              if (seed === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const result = await seed.reset(deliveryAuthorization(account));
+              writeCors(response, origin!);
+              sendJson(response, 200, { seed: result });
               return;
             }
             if (url.pathname === "/v1/demo/email-quiz/submit") {
@@ -355,9 +474,81 @@ export function createApiServer(
               sendJson(response, 200, { answer });
               return;
             }
+            const shortAnswerSessionId = studySessionRoute(
+              url.pathname,
+              "answers/short-answer",
+            );
+            if (shortAnswerSessionId !== null) {
+              const assessment = dependencies.assessment;
+              if (assessment === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const body = await readJsonBody(request);
+              const result = await assessment.gradeShortAnswer({
+                answer: stringField(body, "answer"),
+                authorization: deliveryAuthorization(account),
+                deadlineMs: 30_000,
+                idempotencyKey: stringField(body, "idempotencyKey"),
+                questionId: stringField(body, "questionId"),
+                sessionId: shortAnswerSessionId,
+              });
+              writeCors(response, origin!);
+              sendJson(response, 200, { result });
+              return;
+            }
+            const replacementSessionId = studySessionRoute(
+              url.pathname,
+              "answers/replacement",
+            );
+            if (replacementSessionId !== null) {
+              const assessment = dependencies.assessment;
+              if (assessment === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const body = await readJsonBody(request);
+              const result = await assessment.gradeReplacement({
+                answer: stringField(body, "answer"),
+                authorization: deliveryAuthorization(account),
+                bundleId: stringField(body, "bundleId"),
+                idempotencyKey: stringField(body, "idempotencyKey"),
+                itemId: stringField(body, "itemId"),
+                sessionId: replacementSessionId,
+              });
+              writeCors(response, origin!);
+              sendJson(response, 200, { result });
+              return;
+            }
           }
         }
       } catch (error) {
+        if (error instanceof AssessmentError) {
+          if (
+            error.code === "authorization_denied" ||
+            error.code === "question_unavailable"
+          ) {
+            sendJson(response, 404, { error: "assessment_not_found" });
+            return;
+          }
+          if (
+            error.code === "conflicting_duplicate" ||
+            error.code === "grading_in_progress"
+          ) {
+            sendJson(response, 409, { error: error.code });
+            return;
+          }
+          if (
+            error.code === "fallback_unavailable" ||
+            error.code === "invalid_configuration" ||
+            error.code === "invalid_input"
+          ) {
+            sendJson(response, 400, { error: error.code });
+            return;
+          }
+          sendJson(response, 503, { error: "assessment_unavailable" });
+          return;
+        }
         if (error instanceof DeliveryError) {
           sendJson(response, deliveryErrorStatus(error), {
             error: error.code,
@@ -533,7 +724,8 @@ function deliveryErrorStatus(error: DeliveryError): number {
 
 function studySessionRoute(
   pathname: string,
-  action: "ask" | "next",
+  action:
+    "answers/replacement" | "answers/short-answer" | "ask" | "next" | "summary",
 ): string | null {
   const match = new RegExp(
     `^/v1/study-sessions/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/${action}$`,

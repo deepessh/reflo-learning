@@ -5,6 +5,10 @@ import {
   createDirectMailTransactionalEmailAdapter,
   type DirectMailRegion,
 } from "@reflo/accounts/directmail";
+import {
+  createLocalAuthInbox,
+  type LocalAuthInbox,
+} from "@reflo/accounts/local-inbox";
 import type { Deployment } from "@reflo/config";
 import { PostgresAccountRepository } from "@reflo/db";
 
@@ -20,6 +24,7 @@ const FREE_TOTAL_LIMIT = 2_000;
 
 export interface AccountRuntime {
   readonly accounts?: AccountService;
+  readonly localInbox?: LocalAuthInbox;
   close(): Promise<void>;
 }
 
@@ -35,6 +40,22 @@ export function createAccountRuntime(
       );
     }
     return { close: async () => undefined };
+  }
+  if (adapter === "local-inbox") {
+    if (deployment !== "dev" || input.REFLO_ENV !== "dev") {
+      throw new Error(
+        "REFLO_AUTH_EMAIL_ADAPTER=local-inbox is development-only",
+      );
+    }
+    const repository = new PostgresAccountRepository(
+      required(input, "DATABASE_URL"),
+    );
+    const localInbox = createLocalAuthInbox(input);
+    return {
+      accounts: createAccountService(input, repository, localInbox, 50, 200),
+      localInbox,
+      close: () => repository.close(),
+    };
   }
   if (adapter !== "directmail") {
     throw new Error("REFLO_AUTH_EMAIL_ADAPTER is not allowlisted");
@@ -52,28 +73,6 @@ export function createAccountRuntime(
     throw new Error("DirectMail daily limit cannot exceed total limit");
   }
 
-  const callbackOrigins = required(input, "REFLO_AUTH_CALLBACK_ORIGINS")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value) => value !== "");
-  if (callbackOrigins.length === 0) {
-    throw new Error("REFLO_AUTH_CALLBACK_ORIGINS must not be empty");
-  }
-
-  const keys = [
-    readKey(input, "REFLO_AUTH_EMAIL_ENCRYPTION_KEY"),
-    readKey(input, "REFLO_AUTH_LOOKUP_KEY"),
-    readKey(input, "REFLO_AUTH_SESSION_DIGEST_KEY"),
-    readKey(input, "REFLO_AUTH_TOKEN_DIGEST_KEY"),
-  ] as const;
-  for (let left = 0; left < keys.length; left += 1) {
-    for (let right = left + 1; right < keys.length; right += 1) {
-      if (Buffer.from(keys[left]!).equals(Buffer.from(keys[right]!))) {
-        throw new Error("Authentication keys must be independent");
-      }
-    }
-  }
-
   const region = required(input, "REFLO_DIRECTMAIL_REGION");
   if (!DIRECTMAIL_REGIONS.has(region as DirectMailRegion)) {
     throw new Error("REFLO_DIRECTMAIL_REGION is not allowlisted");
@@ -87,7 +86,46 @@ export function createAccountRuntime(
   const repository = new PostgresAccountRepository(
     required(input, "DATABASE_URL"),
   );
-  const accounts = new AccountService({
+  return {
+    accounts: createAccountService(
+      input,
+      repository,
+      emailPort,
+      dailyLimit,
+      totalLimit,
+    ),
+    close: () => repository.close(),
+  };
+}
+
+function createAccountService(
+  input: NodeJS.ProcessEnv,
+  repository: PostgresAccountRepository,
+  emailPort: ConstructorParameters<typeof AccountService>[0]["emailPort"],
+  dailyLimit: number,
+  totalLimit: number,
+): AccountService {
+  const callbackOrigins = required(input, "REFLO_AUTH_CALLBACK_ORIGINS")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+  if (callbackOrigins.length === 0) {
+    throw new Error("REFLO_AUTH_CALLBACK_ORIGINS must not be empty");
+  }
+  const keys = [
+    readKey(input, "REFLO_AUTH_EMAIL_ENCRYPTION_KEY"),
+    readKey(input, "REFLO_AUTH_LOOKUP_KEY"),
+    readKey(input, "REFLO_AUTH_SESSION_DIGEST_KEY"),
+    readKey(input, "REFLO_AUTH_TOKEN_DIGEST_KEY"),
+  ] as const;
+  for (let left = 0; left < keys.length; left += 1) {
+    for (let right = left + 1; right < keys.length; right += 1) {
+      if (Buffer.from(keys[left]!).equals(Buffer.from(keys[right]!))) {
+        throw new Error("Authentication keys must be independent");
+      }
+    }
+  }
+  return new AccountService({
     abuseLimiter: new FixedWindowAuthAbuseLimiter(),
     callbackOrigins,
     clock: { now: () => new Date() },
@@ -101,11 +139,6 @@ export function createAccountRuntime(
     sessionDigestKey: keys[2],
     tokenDigestKey: keys[3],
   });
-
-  return {
-    accounts,
-    close: () => repository.close(),
-  };
 }
 
 function required(input: NodeJS.ProcessEnv, name: string): string {

@@ -785,6 +785,13 @@ async function loadRetestQuestions(
            AND presented.session_id = $3
            AND presented.normalized_prompt_hash = item.normalized_prompt_hash
        )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM attempt
+         WHERE attempt.owner_scope_id = item.owner_scope_id
+           AND attempt.session_id = $3
+           AND attempt.quiz_item_id = item.id
+       )
      GROUP BY link.concept_id, item.id
      ORDER BY link.concept_id, item.difficulty, item.item_order, item.id`,
     [session.owner_scope_id, session.course_id, session.session_id],

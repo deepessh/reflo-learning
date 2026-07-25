@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch --clear-screen=false src/dev.ts",
+    "dev": "tsx src/dev.ts",
     "lint": "eslint .",
     "test": "vitest run"
   },

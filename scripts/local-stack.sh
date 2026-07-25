@@ -63,6 +63,9 @@ EOF
   fi
 
   append_compose_env_default REFLO_LOCAL_API_PORT "${REFLO_LOCAL_API_PORT:-53001}"
+  if ! grep -q "^REFLO_LOCAL_API_RDS_PASSWORD=" "$REFLO_LOCAL_COMPOSE_ENV"; then
+    append_compose_env_default REFLO_LOCAL_API_RDS_PASSWORD "$(random_secret)"
+  fi
   append_compose_env_default REFLO_LOCAL_JOBS_PORT "${REFLO_LOCAL_JOBS_PORT:-53002}"
   append_compose_env_default REFLO_LOCAL_RUNTIME_ENV_FILE "$REFLO_LOCAL_RUNTIME_ENV"
   append_compose_env_default REFLO_LOCAL_WEB_PORT "${REFLO_LOCAL_WEB_PORT:-53000}"

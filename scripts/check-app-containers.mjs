@@ -10,9 +10,14 @@ const APPS = ["api", "jobs", "web"];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function collectApplicationContainerViolations({
+  databaseMigrationSource,
+  databasePackageSource,
   composeSource,
+  databaseSetupSource,
   dockerfiles,
   dockerignoreSource,
+  jobsContainerSource,
+  jobsRunnerSource,
   lifecycleSource,
 }) {
   const errors = [];
@@ -56,6 +61,12 @@ export function collectApplicationContainerViolations({
       "HEALTHCHECK --interval=5s",
       `apps/${app} bounded image health check`,
     );
+    requireText(
+      errors,
+      source,
+      `find /${app === "web" ? "workspace/apps/web/out" : `opt/reflo/${app}`}`,
+      `apps/${app} runtime artifact secret scan`,
+    );
     if (
       /\b(?:ARG|ENV)\s+[A-Z0-9_]*(?:KEY|PASSWORD|SECRET|TOKEN)\b/.test(source)
     ) {
@@ -73,19 +84,37 @@ export function collectApplicationContainerViolations({
     }
   }
 
+  const dockerignoreLines = dockerignoreSource.split("\n");
+  if (dockerignoreLines.find((line) => line.trim() !== "") !== "**") {
+    errors.push(".dockerignore must default-deny the build context");
+  }
+  for (const allowed of [
+    "!package.json",
+    "!pnpm-lock.yaml",
+    "!pnpm-workspace.yaml",
+    "!turbo.json",
+    "!apps/**",
+    "!packages/**",
+  ]) {
+    if (!dockerignoreLines.includes(allowed)) {
+      errors.push(`.dockerignore must allow only required source ${allowed}`);
+    }
+  }
   for (const ignored of [
-    ".env",
-    ".env.*",
-    ".reflo",
+    "**/.env",
+    "**/.env.*",
     "**/node_modules",
     "**/dist",
     "**/out",
   ]) {
-    if (!dockerignoreSource.split("\n").includes(ignored)) {
+    if (!dockerignoreLines.includes(ignored)) {
       errors.push(`.dockerignore must exclude ${ignored}`);
     }
   }
-  if (!dockerignoreSource.includes("!.env.example")) {
+  if (
+    dockerignoreLines.lastIndexOf("!.env.example") <
+    dockerignoreLines.lastIndexOf("**/.env.*")
+  ) {
     errors.push(".dockerignore must preserve the non-secret .env.example");
   }
 
@@ -114,6 +143,7 @@ export function collectApplicationContainerViolations({
   }
 
   const setup = serviceBlock(servicesSource, "app-setup");
+  const api = serviceBlock(servicesSource, "api");
   requireText(errors, setup, 'profiles: ["apps"]', "setup application profile");
   requireText(
     errors,
@@ -125,7 +155,7 @@ export function collectApplicationContainerViolations({
   requireText(
     errors,
     setup,
-    "prepare-local-app-profile.mjs",
+    "/opt/reflo/api/node_modules/@reflo/db/scripts/prepare-local-app-profile.mjs",
     "repository-owned application database setup",
   );
   requireText(
@@ -134,6 +164,24 @@ export function collectApplicationContainerViolations({
     "condition: service_healthy",
     "setup dependency readiness",
   );
+  requireText(
+    errors,
+    setup,
+    "postgresql://reflo:${REFLO_LOCAL_RDS_PASSWORD:",
+    "setup-only database owner credential",
+  );
+  requireText(
+    errors,
+    api,
+    "postgresql://reflo_api:${REFLO_LOCAL_API_RDS_PASSWORD:",
+    "DML-only API database credential",
+  );
+  if (
+    api.includes("postgresql://reflo:${REFLO_LOCAL_RDS_PASSWORD:") ||
+    api.includes("REFLO_LOCAL_RDS_PASSWORD")
+  ) {
+    errors.push("API runtime must not receive the database owner credential");
+  }
   requireText(
     errors,
     servicesSource,
@@ -218,13 +266,83 @@ export function collectApplicationContainerViolations({
     );
   }
 
+  requireText(
+    errors,
+    databaseSetupSource,
+    'runtimeDatabaseRole: "dml_only"',
+    "live DML-only runtime role assertion",
+  );
+  requireText(
+    errors,
+    databaseSetupSource,
+    "has_schema_privilege",
+    "runtime schema-create denial",
+  );
+  requireText(
+    errors,
+    databaseSetupSource,
+    "NOBYPASSRLS",
+    "runtime RLS bypass denial",
+  );
+  requireText(
+    errors,
+    databaseMigrationSource,
+    "resolveDbmateCli()",
+    "packaged database migration executable resolution",
+  );
+  requireText(
+    errors,
+    databaseMigrationSource,
+    "process.execPath",
+    "Node-invoked database migration executable",
+  );
+  requireText(
+    errors,
+    databasePackageSource,
+    '"sql"',
+    "packaged local database setup SQL",
+  );
+  requireText(
+    errors,
+    jobsContainerSource,
+    "runDevelopmentJob",
+    "jobs container bounded runner composition",
+  );
+  requireText(
+    errors,
+    jobsRunnerSource,
+    "REFLO_JOBS_DEV_AUDIO_ENVELOPE",
+    "jobs configured envelope consumption",
+  );
+  requireText(
+    errors,
+    jobsRunnerSource,
+    "executeBoundedHandler",
+    "jobs configured bounded execution",
+  );
+
   return errors;
 }
 
 export function validateRepositoryApplicationContainers(repositoryRoot = root) {
   return collectApplicationContainerViolations({
+    databaseMigrationSource: readFileSync(
+      path.join(repositoryRoot, "packages/db/scripts/strict-migrate.mjs"),
+      "utf8",
+    ),
+    databasePackageSource: readFileSync(
+      path.join(repositoryRoot, "packages/db/package.json"),
+      "utf8",
+    ),
     composeSource: readFileSync(
       path.join(repositoryRoot, "compose.yaml"),
+      "utf8",
+    ),
+    databaseSetupSource: readFileSync(
+      path.join(
+        repositoryRoot,
+        "packages/db/scripts/prepare-local-app-profile.mjs",
+      ),
       "utf8",
     ),
     dockerfiles: Object.fromEntries(
@@ -238,6 +356,14 @@ export function validateRepositoryApplicationContainers(repositoryRoot = root) {
     ),
     dockerignoreSource: readFileSync(
       path.join(repositoryRoot, ".dockerignore"),
+      "utf8",
+    ),
+    jobsContainerSource: readFileSync(
+      path.join(repositoryRoot, "apps/jobs/src/container.ts"),
+      "utf8",
+    ),
+    jobsRunnerSource: readFileSync(
+      path.join(repositoryRoot, "apps/jobs/src/development-runner.ts"),
       "utf8",
     ),
     lifecycleSource: readFileSync(

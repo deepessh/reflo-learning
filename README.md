@@ -85,9 +85,13 @@ scripts/local-stack.sh reset      # also remove only reflo-local named data volu
 The explicit Compose `apps` profile builds and runs the independently packaged
 web, API, and jobs applications with the repository-pinned Node.js 24.18.0 and
 pnpm 10.34.5 toolchain. One bounded setup job waits for both databases, applies
-the repository-owned RDS migrations and development schemas, and exits before
-the application services start. API, jobs, and web expose bounded health checks
-and bind host ports only on loopback.
+the repository-owned RDS migrations and development schemas, provisions a
+separate DML-only `reflo_api` role, and exits before the application services
+start. The database owner credential remains setup-only. API, jobs, and web
+expose bounded health checks and bind host ports only on loopback. When
+`REFLO_JOBS_DEV_AUDIO_ENVELOPE` is configured, jobs executes that envelope
+through the bounded development handler before it reports ready; failed or
+timed-out handler execution prevents startup.
 
 ```sh
 # Build the three images, prepare both schemas, and wait for all health checks.
@@ -117,7 +121,9 @@ container-visible URL such as `http://host.docker.internal:4000` on Docker
 Desktop. Database and vector URLs always use the internal `rds` and `vector`
 service names. Images receive no `.env` files, provider credentials, generated
 private assets, or database contents; connected artifacts use the named
-`reflo-local_app-artifacts` development volume.
+`reflo-local_app-artifacts` development volume. The Docker build context is
+default-deny allowlisted, and each build rejects secret-shaped files from its
+runtime artifact before publishing the final image.
 
 This profile is a connected development execution path. It is not an Alibaba
 emulator, production deployment artifact, offline product surface, or release

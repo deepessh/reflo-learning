@@ -1,8 +1,8 @@
 import { once } from "node:events";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createJobsReadinessServer } from "./container";
+import { createJobsReadinessServer, prepareJobsContainer } from "./container";
 
 const servers: ReturnType<typeof createJobsReadinessServer>[] = [];
 
@@ -18,6 +18,35 @@ afterEach(async () => {
 });
 
 describe("jobs container readiness server", () => {
+  it("runs configured bounded work before declaring the container ready", async () => {
+    const handler = vi.fn().mockResolvedValue({ outcome: "processed" });
+
+    await expect(
+      prepareJobsContainer(
+        {
+          JOBS_HOST: "127.0.0.1",
+          JOBS_PORT: "3002",
+          REFLO_ENV: "dev",
+          REFLO_JOBS_DEV_AUDIO_ENVELOPE: '{"id":"configured"}',
+          REFLO_JOBS_HANDLER_TIMEOUT_MS: "100",
+        },
+        { handler },
+      ),
+    ).resolves.toMatchObject({
+      environment: {
+        deployment: "dev",
+        host: "127.0.0.1",
+        port: 3002,
+        service: "jobs",
+      },
+      execution: {
+        kind: "completed",
+        result: { outcome: "processed" },
+      },
+    });
+    expect(handler).toHaveBeenCalledWith({ id: "configured" }, 1);
+  });
+
   it("serves the shared health contract and rejects other paths", async () => {
     const server = createJobsReadinessServer({
       deployment: "dev",

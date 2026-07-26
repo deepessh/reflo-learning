@@ -70,7 +70,7 @@ describe("typed model router", () => {
     expect(Object.isFrozen(scripted.invocations[0]?.input)).toBe(false);
     expect(traces.traces).toHaveLength(1);
     expect(traces.traces[0]?.attempts).toHaveLength(1);
-    expect(traces.traces[0]?.promptVersion).toBe("1");
+    expect(traces.traces[0]?.promptVersion).toBe("2");
   });
 
   it("retries one normalized transient language failure without tracing diagnostics", async () => {

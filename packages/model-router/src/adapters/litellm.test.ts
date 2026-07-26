@@ -6,6 +6,8 @@ import { InMemoryTraceSink } from "../testing.js";
 import { EMBEDDING_V1_DIMENSIONS } from "../validation.js";
 import {
   createLiteLlmDevAdapters,
+  LITELLM_DEV_EMBEDDING_ADAPTER_VERSION,
+  LITELLM_DEV_TEXT_ADAPTER_VERSION,
   type LiteLlmDevEnvironment,
 } from "./litellm.js";
 
@@ -85,9 +87,17 @@ describe("LiteLLM development adapters", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]?.body).toMatchObject({
         model: "local/test-text",
-        response_format: { type: "json_object" },
         stream: false,
       });
+      const responseFormat = requests[0]?.body.response_format;
+      if (task === "tutor.answer.v1") {
+        expect(responseFormat).toEqual({ type: "json_object" });
+      } else {
+        expect(responseFormat).toMatchObject({
+          json_schema: { strict: true },
+          type: "json_schema",
+        });
+      }
       const messages = requests[0]?.body.messages as Array<{
         readonly content: string;
         readonly role: string;
@@ -102,6 +112,42 @@ describe("LiteLLM development adapters", () => {
       expect(system.outputContract).toEqual(
         expect.stringMatching(/^Return exactly this JSON shape/),
       );
+      if (task === "assessment.quiz.v1") {
+        expect(system.outputContract).not.toContain('"responseOptions"?:');
+        expect(system.outputContract).not.toContain('"rubric"?:');
+        expect(system.outputContract).toContain(
+          '"itemType":"multiple_choice"|"concept_linking"',
+        );
+        expect(system.outputContract).toContain('"itemType":"short_answer"');
+        expect(responseFormat).toMatchObject({
+          json_schema: {
+            schema: {
+              properties: {
+                items: {
+                  maxItems: 1,
+                  minItems: 1,
+                  type: "array",
+                },
+              },
+            },
+          },
+        });
+        const serializedResponseFormat = JSON.stringify(responseFormat);
+        expect(serializedResponseFormat).toContain('"span-1"');
+        expect(serializedResponseFormat).toContain('"vpc"');
+        expect(serializedResponseFormat).not.toContain("A VPC is isolated.");
+      }
+      if (task === "lesson.text.v1") {
+        expect(responseFormat).toMatchObject({
+          json_schema: {
+            schema: {
+              properties: {
+                content: { minLength: 2_400, type: "string" },
+              },
+            },
+          },
+        });
+      }
       expect(system).not.toHaveProperty("sourceMaterial");
       expect(user.sourceMaterial).toEqual(
         "sourceSpans" in input ? input.sourceSpans : [],
@@ -316,6 +362,13 @@ describe("LiteLLM development adapters", () => {
       original.embeddingProfileVersion,
     );
     expect(original.embeddingProfileVersion).not.toBe("embedding-v1");
+    expect(
+      original.adapters.embedding["embedding-v1"]?.descriptor.adapterVersion,
+    ).toBe(LITELLM_DEV_EMBEDDING_ADAPTER_VERSION);
+    expect(
+      original.adapters.structured["qwen.structured"]?.descriptor
+        .adapterVersion,
+    ).toBe(LITELLM_DEV_TEXT_ADAPTER_VERSION);
   });
 });
 
@@ -396,6 +449,30 @@ function textFixtures(): readonly {
         content: "A VPC is an isolated network.",
         kind: "answer",
         sourceSpanIds: ["span-1"],
+      },
+    },
+    {
+      capability: "quiz generation",
+      input: {
+        conceptIds: ["vpc"],
+        count: 1,
+        courseId: "cloud",
+        requiredItemTypes: ["multiple_choice"],
+        sourceSpans,
+      },
+      task: "assessment.quiz.v1",
+      value: {
+        items: [
+          {
+            conceptIds: ["vpc"],
+            difficulty: 1,
+            itemType: "multiple_choice",
+            keyedAnswer: "An isolated network",
+            prompt: "What is a VPC?",
+            responseOptions: ["An isolated network", "A public DNS record"],
+            sourceSpanIds: ["span-1"],
+          },
+        ],
       },
     },
   ];

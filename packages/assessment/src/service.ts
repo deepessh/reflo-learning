@@ -515,7 +515,7 @@ function validatePolicy(policy: FrozenGradingPolicy): void {
       "short-answer-grading-input-v2" ||
     policy.expectedModelProvenance.promptId !==
       "assessment-grade-short-answer" ||
-    policy.expectedModelProvenance.promptVersion !== "2" ||
+    policy.expectedModelProvenance.promptVersion !== "3" ||
     policy.expectedModelProvenance.resultSchemaVersion !==
       "short-answer-judgment-result-v2" ||
     policy.expectedModelProvenance.generationParametersVersion !==

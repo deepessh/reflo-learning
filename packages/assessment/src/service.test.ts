@@ -418,7 +418,7 @@ function gradingFixture(results: readonly unknown[]) {
       inputSchemaVersion: "short-answer-grading-input-v2",
       promptDefinitionDigest: prompt.definitionDigest,
       promptId: "assessment-grade-short-answer",
-      promptVersion: "2",
+      promptVersion: "3",
       resultSchemaVersion: "short-answer-judgment-result-v2",
       routePolicyVersion: "route-policy-v3",
     },

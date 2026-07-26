@@ -331,12 +331,7 @@
     "sha256": "0cf0a55563ecc7efb2bcb8dc04b942f31a4fb1ac482a664ff7bae3d0e15d7ca9",
     "bytes": 478301,
     "pages": 133,
-    "page_dimensions_points": [
-      [
-        612.0,
-        792.0
-      ]
-    ],
+    "page_dimensions_points": [[612.0, 792.0]],
     "within_reflo_standard_profile": true
   },
   "verification": {
@@ -361,31 +356,12 @@
       "dpi": 110,
       "directory": "tmp/pdfs/rendered",
       "rendered_page_count": 133,
-      "render_dimensions_pixels": [
-        [
-          935,
-          1210
-        ]
-      ],
+      "render_dimensions_pixels": [[935, 1210]],
       "all_renders_nontrivial": true
     },
     "visual_review": {
       "status": "passed",
-      "pages": [
-        1,
-        2,
-        3,
-        4,
-        28,
-        39,
-        41,
-        75,
-        92,
-        108,
-        127,
-        132,
-        133
-      ],
+      "pages": [1, 2, 3, 4, 28, 39, 41, 75, 92, 108, 127, 132, 133],
       "coverage": [
         "cover and prominent adaptation notice",
         "contents and source-file listing",

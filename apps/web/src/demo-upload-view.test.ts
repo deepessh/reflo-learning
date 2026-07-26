@@ -9,6 +9,7 @@ describe("staff demo upload presentation", () => {
       "validating",
       "queued",
       "parsing",
+      "generating_outline",
     ] as const) {
       expect(demoUploadPresentation(state)).toMatchObject({
         poll: true,

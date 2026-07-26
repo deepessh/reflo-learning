@@ -25,7 +25,7 @@ const connectedRuntime = createConnectedDemoRuntime(
   process.env,
   environment.deployment,
 );
-const demoUploadRuntime = createDemoUploadRuntime(
+const demoUploadRuntime = await createDemoUploadRuntime(
   process.env,
   environment.deployment,
 );

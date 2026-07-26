@@ -66,6 +66,16 @@ test("toolchain policy reports Turbo environment drift", () => {
       /turbo test env must pass REFLO_POSTGRES_CONTAINER_REWRITE_FROM/,
     );
 
+    const devAltered = readFileSync(
+      path.join(root, "turbo.json"),
+      "utf8",
+    ).replace('        "REFLO_DEMO_UPLOAD_PROCESSOR_MODE",\n', "");
+    writeFileSync(turboPath, devAltered);
+    assert.match(
+      checkToolchainPolicy(fixture).join("\n"),
+      /turbo dev env must pass REFLO_DEMO_UPLOAD_PROCESSOR_MODE/,
+    );
+
     const packagePath = path.join(fixture, "package.json");
     const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
     packageJson.scripts.test = packageJson.scripts.test.replace(

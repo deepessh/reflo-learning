@@ -39,7 +39,15 @@ export function demoUploadPresentation(
       return {
         detail:
           "The source is being parsed in the isolated, networkless ingestion worker.",
-        label: "Building the outline",
+        label: "Parsing source",
+        poll: true,
+        tone: "neutral",
+      };
+    case "generating_outline":
+      return {
+        detail:
+          "The validated source has left the parser. Reflo is generating the owner-scoped, source-backed outline.",
+        label: "Generating outline",
         poll: true,
         tone: "neutral",
       };

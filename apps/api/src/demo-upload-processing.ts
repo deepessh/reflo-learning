@@ -1,5 +1,9 @@
 import type { IngestionRunResult, NormalizedDocument } from "@reflo/ingestion";
-import type { ScopeAuthorizationContext } from "@reflo/retrieval";
+import { ModelRouterError } from "@reflo/model-router";
+import {
+  RetrievalError,
+  type ScopeAuthorizationContext,
+} from "@reflo/retrieval";
 
 import type {
   DemoUploadPersistence,
@@ -9,6 +13,9 @@ import type {
 
 const MAX_INGESTION_DELIVERIES = 5;
 const DEFAULT_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000] as const;
+const DEFAULT_ACTIVE_POLL_DELAY_MS = 1_000;
+const DEFAULT_ACTIVE_POLL_LIMIT = 155;
+const DEFAULT_GENERATION_RETRY_DELAYS_MS = [500, 1_000] as const;
 
 export interface DemoUploadIngestionRunner {
   execute(work: DemoUploadProcessingWork): Promise<IngestionRunResult>;
@@ -33,36 +40,61 @@ export interface DemoUploadCurriculumBuilder {
   }): Promise<unknown>;
 }
 
+type GenerationRepository = Pick<
+  DemoUploadPersistence,
+  | "claimCourseGeneration"
+  | "completeCourseGeneration"
+  | "failCourseGenerationAttempt"
+>;
+
 export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
+  readonly #activePollDelayMs: number;
+  readonly #activePollLimit: number;
   readonly #artifacts: DemoUploadNormalizedArtifactReader;
   readonly #curriculum: DemoUploadCurriculumBuilder;
   readonly #delay: (milliseconds: number) => Promise<void>;
+  readonly #generationRetryDelaysMs: readonly number[];
   readonly #ingestion: DemoUploadIngestionRunner;
-  readonly #repository: Pick<DemoUploadPersistence, "failCourseGeneration">;
+  readonly #repository: GenerationRepository;
   readonly #retryDelaysMs: readonly number[];
   readonly #scheduled = new Set<string>();
   #closed = false;
   #tail: Promise<void> = Promise.resolve();
 
   constructor(options: {
+    readonly activePollDelayMs?: number;
+    readonly activePollLimit?: number;
     readonly artifacts: DemoUploadNormalizedArtifactReader;
     readonly curriculum: DemoUploadCurriculumBuilder;
     readonly delay?: (milliseconds: number) => Promise<void>;
+    readonly generationRetryDelaysMs?: readonly number[];
     readonly ingestion: DemoUploadIngestionRunner;
-    readonly repository: Pick<DemoUploadPersistence, "failCourseGeneration">;
+    readonly repository: GenerationRepository;
     readonly retryDelaysMs?: readonly number[];
   }) {
+    this.#activePollDelayMs =
+      options.activePollDelayMs ?? DEFAULT_ACTIVE_POLL_DELAY_MS;
+    this.#activePollLimit =
+      options.activePollLimit ?? DEFAULT_ACTIVE_POLL_LIMIT;
     this.#artifacts = options.artifacts;
     this.#curriculum = options.curriculum;
     this.#delay = options.delay ?? boundedDelay;
+    this.#generationRetryDelaysMs =
+      options.generationRetryDelaysMs ?? DEFAULT_GENERATION_RETRY_DELAYS_MS;
     this.#ingestion = options.ingestion;
     this.#repository = options.repository;
     this.#retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
     if (
       this.#retryDelaysMs.length !== MAX_INGESTION_DELIVERIES - 1 ||
-      this.#retryDelaysMs.some(
-        (delay) => !Number.isSafeInteger(delay) || delay < 0 || delay > 30_000,
-      )
+      !isDelayList(this.#retryDelaysMs) ||
+      this.#generationRetryDelaysMs.length !== 2 ||
+      !isDelayList(this.#generationRetryDelaysMs) ||
+      !Number.isSafeInteger(this.#activePollDelayMs) ||
+      this.#activePollDelayMs < 0 ||
+      this.#activePollDelayMs > 30_000 ||
+      !Number.isSafeInteger(this.#activePollLimit) ||
+      this.#activePollLimit < 1 ||
+      this.#activePollLimit > 300
     ) {
       throw new Error("demo upload retry policy is invalid");
     }
@@ -73,14 +105,15 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
       throw new Error("demo upload processing is closed");
     }
     validateWork(work);
-    if (this.#scheduled.has(work.operationId)) {
+    if (this.#scheduled.has(work.generationOperationId)) {
       return;
     }
-    this.#scheduled.add(work.operationId);
+    this.#scheduled.add(work.generationOperationId);
     this.#tail = this.#tail
       .then(() => this.#process(work))
-      .catch(async () => {
-        await this.#failGeneratedCourse(work).catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        this.#scheduled.delete(work.generationOperationId);
       });
   }
 
@@ -90,34 +123,7 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
   }
 
   async #process(work: DemoUploadProcessingWork): Promise<void> {
-    let result: IngestionRunResult | undefined;
-    for (
-      let delivery = 1;
-      delivery <= MAX_INGESTION_DELIVERIES;
-      delivery += 1
-    ) {
-      result = await this.#ingestion.execute(work);
-      if (
-        result.kind !== "completed" ||
-        result.outcome.kind !== "failed" ||
-        !result.outcome.failure.retryable
-      ) {
-        break;
-      }
-      const retryDelay = this.#retryDelaysMs[delivery - 1];
-      if (retryDelay !== undefined) {
-        await this.#delay(retryDelay);
-      }
-    }
-    if (
-      result?.kind === "completed" &&
-      result.outcome.kind === "failed" &&
-      result.outcome.failure.retryable
-    ) {
-      // The durable store performs this reconciliation without starting a
-      // sixth delivery once the five-delivery budget is exhausted.
-      result = await this.#ingestion.execute(work);
-    }
+    const result = await this.#runIngestion(work);
     if (
       result === undefined ||
       result.kind === "in_progress" ||
@@ -127,31 +133,143 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
       return;
     }
 
-    try {
-      const document = await this.#artifacts.readNormalizedDocument({
-        artifactId: result.outcome.artifact.artifactId,
-        documentKind: result.outcome.artifact.documentKind,
-        inputSha256: work.expectedInputSha256,
-        ownerScopeId: work.authorization.ownerScopeId,
-      });
-      await this.#curriculum.buildCurriculum({
-        authorization: work.authorization,
-        courseId: work.courseId,
-        deadlineMs: 120_000,
-        document,
-        sourceDocumentId: work.sourceDocumentId,
-      });
-    } catch {
-      await this.#failGeneratedCourse(work);
+    let activePolls = 0;
+    let localGenerationRetries = 0;
+    for (;;) {
+      const claim = await this.#repository.claimCourseGeneration(work);
+      if (claim.kind === "completed") {
+        return;
+      }
+      if (claim.kind === "active") {
+        if (activePolls >= this.#activePollLimit) {
+          return;
+        }
+        activePolls += 1;
+        await this.#delay(this.#activePollDelayMs);
+        continue;
+      }
+      try {
+        const document = await this.#artifacts.readNormalizedDocument({
+          artifactId: result.outcome.artifact.artifactId,
+          documentKind: result.outcome.artifact.documentKind,
+          inputSha256: work.expectedInputSha256,
+          ownerScopeId: work.authorization.ownerScopeId,
+        });
+        await this.#curriculum.buildCurriculum({
+          authorization: work.authorization,
+          courseId: work.courseId,
+          deadlineMs: claim.deadlineMs,
+          document,
+          sourceDocumentId: work.sourceDocumentId,
+        });
+        await this.#repository.completeCourseGeneration(work);
+        return;
+      } catch (error) {
+        const outcome = await this.#repository.failCourseGenerationAttempt(
+          work,
+          normalizeGenerationFailure(error),
+        );
+        if (outcome === "failed") {
+          return;
+        }
+        const delay =
+          this.#generationRetryDelaysMs[localGenerationRetries] ?? 0;
+        localGenerationRetries += 1;
+        await this.#delay(delay);
+      }
     }
   }
 
-  #failGeneratedCourse(work: DemoUploadProcessingWork): Promise<void> {
-    return this.#repository.failCourseGeneration(
-      work.authorization,
-      work.sourceDocumentId,
-    );
+  async #runIngestion(
+    work: DemoUploadProcessingWork,
+  ): Promise<IngestionRunResult | undefined> {
+    let activePolls = 0;
+    let delivery = 1;
+    while (delivery <= MAX_INGESTION_DELIVERIES) {
+      const result = await this.#ingestion.execute(work);
+      if (result.kind === "in_progress") {
+        if (activePolls >= this.#activePollLimit) {
+          return result;
+        }
+        activePolls += 1;
+        await this.#delay(this.#activePollDelayMs);
+        continue;
+      }
+      if (
+        result.outcome.kind !== "failed" ||
+        !result.outcome.failure.retryable
+      ) {
+        return result;
+      }
+      const retryDelay = this.#retryDelaysMs[delivery - 1];
+      if (retryDelay === undefined) {
+        // The durable store reconciles the exhausted delivery budget without
+        // starting an additional delivery.
+        return this.#ingestion.execute(work);
+      }
+      await this.#delay(retryDelay);
+      delivery += 1;
+    }
+    return undefined;
   }
+}
+
+function normalizeGenerationFailure(error: unknown): {
+  readonly failureClass: string;
+  readonly retryable: boolean;
+} {
+  if (error instanceof ModelRouterError) {
+    switch (error.code) {
+      case "adapter_unavailable":
+      case "provider_failure":
+      case "trace_failure":
+        return {
+          failureClass: "generation_dependency_unavailable",
+          retryable:
+            error.code !== "provider_failure" ||
+            error.providerFailure?.transient !== false,
+        };
+      case "deadline_exceeded":
+        return {
+          failureClass: "generation_deadline_exceeded",
+          retryable: false,
+        };
+      case "feature_disabled":
+      case "invalid_adapter_configuration":
+      case "invalid_result":
+      case "unknown_task":
+        return {
+          failureClass: "generation_invalid_result",
+          retryable: false,
+        };
+    }
+  }
+  if (error instanceof RetrievalError) {
+    switch (error.code) {
+      case "persistence_failure":
+        return {
+          failureClass: "generation_dependency_unavailable",
+          retryable: true,
+        };
+      case "authorization_denied":
+        return {
+          failureClass: "generation_authorization_denied",
+          retryable: false,
+        };
+      case "invalid_chunk":
+      case "invalid_configuration":
+      case "invalid_model_result":
+      case "invalid_vector_result":
+        return {
+          failureClass: "generation_invalid_result",
+          retryable: false,
+        };
+    }
+  }
+  return {
+    failureClass: "generation_dependency_unavailable",
+    retryable: true,
+  };
 }
 
 function validateWork(work: DemoUploadProcessingWork): void {
@@ -161,11 +279,18 @@ function validateWork(work: DemoUploadProcessingWork): void {
     !isUuid(work.authorization.ownerScopeId) ||
     !isUuid(work.courseId) ||
     !/^[a-f0-9]{64}$/.test(work.expectedInputSha256) ||
+    !isUuid(work.generationOperationId) ||
     !isUuid(work.operationId) ||
     !isUuid(work.sourceDocumentId)
   ) {
     throw new Error("demo upload processing work is invalid");
   }
+}
+
+function isDelayList(delays: readonly number[]): boolean {
+  return delays.every(
+    (delay) => Number.isSafeInteger(delay) && delay >= 0 && delay <= 30_000,
+  );
 }
 
 function isUuid(value: string): boolean {

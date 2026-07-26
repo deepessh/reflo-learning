@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  verify as verifySignature,
+} from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import {
@@ -136,7 +140,16 @@ export function piperStatePathsMatch(state, piperDirectory, voiceContract) {
 export function renderProfileEnvironment(state) {
   const entries = {
     REFLO_ENV: "dev",
+    REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE: "verified-clamav-v1",
+    REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR: state.clamavAdmission.directory,
     REFLO_LOCAL_CLAMAV_DATABASE_DIR: state.clamav.directory,
+    REFLO_LOCAL_CLAMAV_MANIFEST_PATH: state.clamavAdmission.manifestPath,
+    REFLO_LOCAL_CLAMAV_PUBLIC_KEY_KID: state.clamavAdmission.kid,
+    REFLO_LOCAL_CLAMAV_PUBLIC_KEY_PATH: state.clamavAdmission.publicKeyPath,
+    REFLO_LOCAL_CLAMAV_PUBLIC_KEY_SPKI_SHA256:
+      state.clamavAdmission.publicKeySpkiSha256,
+    REFLO_LOCAL_CLAMAV_SCANNER_IMAGE: state.clamavAdmission.scannerImage,
+    REFLO_LOCAL_CLAMAV_SIGNATURE_PATH: state.clamavAdmission.signaturePath,
     REFLO_LOCAL_INGESTION_IMAGE: state.ingestion.imageReference,
     REFLO_LOCAL_INGESTION_IMAGE_DIGEST: state.ingestion.imageDigest,
     REFLO_LOCAL_PIPER_ARTIFACT_REVISION: state.piper.artifactRevision,
@@ -299,6 +312,11 @@ async function prepare() {
     "failed to refresh and verify the ClamAV development snapshot",
     () => prepareClamav(contract),
   );
+  const clamavAdmission = await runPreparationStep(
+    "clamav-admission",
+    "configure and verify the KMS-signed ClamAV admission snapshot",
+    () => prepareClamavAdmission(contract, clamav),
+  );
   const state = {
     contractVersion: contract.stateVersion,
     preparedAt: new Date().toISOString(),
@@ -308,6 +326,7 @@ async function prepare() {
     podmanServerVersion: podman.serverVersion,
     ingestion,
     clamav,
+    clamavAdmission,
     tessdata,
     piper,
   };
@@ -505,6 +524,7 @@ async function collectReadiness(contract, ingestionManifest) {
       () => verifyPreparedIngestion(contract, ingestionManifest, state),
     ],
     ["clamav", () => verifyPreparedClamav(contract, state)],
+    ["clamav-admission", () => verifyPreparedClamavAdmission(contract, state)],
     ["tessdata", () => verifyPreparedTessdata(contract, state)],
     ["piper", () => verifyPreparedPiper(contract, state)],
     ["local-workers", () => verifyPreparedProfile(state)],
@@ -1233,6 +1253,191 @@ async function verifyPreparedClamav(contract, state) {
   };
 }
 
+async function prepareClamavAdmission(contract, clamav) {
+  const configured = {
+    directory: safeAbsoluteInput(
+      requiredEnvironment("REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR"),
+      "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
+    ),
+    kid: requiredEnvironment("REFLO_LOCAL_CLAMAV_PUBLIC_KEY_KID"),
+    manifestPath: safeAbsoluteInput(
+      requiredEnvironment("REFLO_LOCAL_CLAMAV_MANIFEST_PATH"),
+      "REFLO_LOCAL_CLAMAV_MANIFEST_PATH",
+    ),
+    publicKeyPath: safeAbsoluteInput(
+      requiredEnvironment("REFLO_LOCAL_CLAMAV_PUBLIC_KEY_PATH"),
+      "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_PATH",
+    ),
+    publicKeySpkiSha256: requiredEnvironment(
+      "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_SPKI_SHA256",
+    ),
+    scannerImage: contract.clamav.updaterImage,
+    signaturePath: safeAbsoluteInput(
+      requiredEnvironment("REFLO_LOCAL_CLAMAV_SIGNATURE_PATH"),
+      "REFLO_LOCAL_CLAMAV_SIGNATURE_PATH",
+    ),
+  };
+  await validateClamavAdmission(contract, clamav, configured);
+  return configured;
+}
+
+async function verifyPreparedClamavAdmission(contract, state) {
+  const admission = state.clamavAdmission;
+  if (
+    admission?.scannerImage !== contract.clamav.updaterImage ||
+    admission?.directory === state.clamav.directory
+  ) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "clamav-admission",
+      "recorded signed snapshot identity is invalid",
+    );
+  }
+  await validateClamavAdmission(contract, state.clamav, admission);
+  return {
+    state: "AVAILABLE",
+    component: "clamav-admission",
+    message: `KMS-signed snapshot ${path.basename(admission.manifestPath)} for ${admission.kid}`,
+  };
+}
+
+export async function validateClamavAdmission(contract, clamav, admission) {
+  if (
+    !/^[A-Za-z0-9._-]{1,128}$/.test(admission.kid ?? "") ||
+    !sha256Pattern.test(admission.publicKeySpkiSha256 ?? "") ||
+    path.dirname(admission.manifestPath) !== admission.directory ||
+    path.dirname(admission.signaturePath) !== admission.directory
+  ) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "clamav-admission",
+      "signed snapshot paths, key id, or fingerprint are invalid",
+    );
+  }
+  await Promise.all([
+    verifyRegularFile(admission.manifestPath, "clamav-admission"),
+    verifyRegularFile(admission.signaturePath, "clamav-admission"),
+    verifyRegularFile(admission.publicKeyPath, "clamav-admission"),
+  ]);
+  const manifestBytes = await readFile(admission.manifestPath);
+  const signatureText = await readFile(admission.signaturePath, "ascii");
+  const publicKeyPem = await readFile(admission.publicKeyPath, "utf8");
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    throw invalidClamavAdmission();
+  }
+  if (
+    !isRecord(manifest) ||
+    JSON.stringify(Object.keys(manifest).sort()) !==
+      JSON.stringify([
+        "clamAvVersion",
+        "contractVersion",
+        "files",
+        "kid",
+        "publicKeySpkiSha256",
+        "publishedAt",
+        "signatureProfile",
+        "snapshotId",
+      ]) ||
+    manifest.clamAvVersion !== contract.clamav.version ||
+    manifest.contractVersion !== "snapshot-manifest-v1" ||
+    manifest.signatureProfile !== "clamav-snapshot-signature-v1" ||
+    manifest.kid !== admission.kid ||
+    manifest.publicKeySpkiSha256 !== admission.publicKeySpkiSha256 ||
+    !/^[A-Za-z0-9._-]{1,128}$/.test(manifest.snapshotId ?? "") ||
+    !Array.isArray(manifest.files)
+  ) {
+    throw invalidClamavAdmission();
+  }
+  const publishedAt = new Date(manifest.publishedAt);
+  const ageMs = Date.now() - publishedAt.getTime();
+  if (
+    !Number.isFinite(publishedAt.getTime()) ||
+    ageMs < -5 * 60_000 ||
+    ageMs > contract.clamav.maxAgeHours * 60 * 60_000
+  ) {
+    throw new LocalWorkerError(
+      "STALE",
+      "clamav-admission",
+      "signed snapshot is absent or outside the 24-hour admission window",
+    );
+  }
+  const expectedFiles = new Map(
+    clamav.files.map((file) => [
+      file.filename,
+      { byteLength: file.byteLength, sha256: file.sha256 },
+    ]),
+  );
+  if (
+    manifest.files.length !== expectedFiles.size ||
+    manifest.files.some(
+      (file) =>
+        !isRecord(file) ||
+        Object.keys(file).sort().join(",") !== "byteLength,name,sha256" ||
+        !expectedFiles.has(file.name) ||
+        expectedFiles.get(file.name).byteLength !== file.byteLength ||
+        expectedFiles.get(file.name).sha256 !== file.sha256,
+    )
+  ) {
+    throw invalidClamavAdmission();
+  }
+  const directoryNames = (await readdir(admission.directory)).sort();
+  const allowedNames = [
+    ...manifest.files.map((file) => file.name),
+    path.basename(admission.manifestPath),
+    path.basename(admission.signaturePath),
+  ].sort();
+  if (JSON.stringify(directoryNames) !== JSON.stringify(allowedNames)) {
+    throw invalidClamavAdmission();
+  }
+  for (const file of manifest.files) {
+    const filePath = path.join(admission.directory, file.name);
+    await verifyRegularFile(filePath, "clamav-admission");
+    const fileStat = await stat(filePath);
+    if (
+      fileStat.size !== file.byteLength ||
+      (await sha256File(filePath)) !== file.sha256
+    ) {
+      throw invalidClamavAdmission();
+    }
+  }
+  let publicKey;
+  try {
+    publicKey = createPublicKey(publicKeyPem);
+  } catch {
+    throw invalidClamavAdmission();
+  }
+  const spki = publicKey.export({ format: "der", type: "spki" });
+  if (
+    publicKey.asymmetricKeyType !== "ec" ||
+    publicKey.asymmetricKeyDetails?.namedCurve !== "prime256v1" ||
+    createHash("sha256").update(spki).digest("hex") !==
+      admission.publicKeySpkiSha256 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      signatureText,
+    )
+  ) {
+    throw invalidClamavAdmission();
+  }
+  const signature = Buffer.from(signatureText, "base64");
+  if (
+    signature.toString("base64") !== signatureText ||
+    !verifySignature("sha256", manifestBytes, publicKey, signature)
+  ) {
+    throw invalidClamavAdmission();
+  }
+}
+
+function invalidClamavAdmission() {
+  return new LocalWorkerError(
+    "INVALID",
+    "clamav-admission",
+    "snapshot signature, manifest, or database identity is invalid",
+  );
+}
+
 async function prepareTessdata(contract) {
   const directory = path.join(generatedRoot, "tessdata");
   const filePath = path.join(directory, contract.tessdata.filename);
@@ -1810,6 +2015,7 @@ async function readState(contract) {
     typeof state.preparedAt !== "string" ||
     typeof state.ingestion !== "object" ||
     typeof state.clamav !== "object" ||
+    typeof state.clamavAdmission !== "object" ||
     typeof state.tessdata !== "object" ||
     typeof state.piper !== "object"
   ) {
@@ -1989,6 +2195,22 @@ function safeAbsoluteInput(value, name) {
     );
   }
   return path.resolve(value);
+}
+
+function requiredEnvironment(name) {
+  const value = process.env[name]?.trim();
+  if (value === undefined || value === "") {
+    throw new LocalWorkerError(
+      "INVALID",
+      "configuration",
+      `${name} is required`,
+    );
+  }
+  return value;
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertGeneratedRoot() {

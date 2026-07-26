@@ -17,6 +17,7 @@ import {
 
 const ids = {
   course: "55000000-0000-4000-8000-000000000002",
+  generationOperation: "55000000-0000-4000-8000-000000000007",
   operation: "55000000-0000-4000-8000-000000000003",
   scope: "55000000-0000-4000-8000-000000000004",
   session: "55000000-0000-4000-8000-000000000005",
@@ -113,6 +114,7 @@ describe("approved staff demo upload service", () => {
         authorization,
         checksum: approval.sha256,
         courseId: ids.course,
+        generationOperationId: ids.generationOperation,
         operationId: ids.operation,
         sourceDocumentId: ids.upload,
       }),
@@ -121,6 +123,7 @@ describe("approved staff demo upload service", () => {
       authorization,
       courseId: ids.course,
       expectedInputSha256: approval.sha256,
+      generationOperationId: ids.generationOperation,
       operationId: ids.operation,
       sourceDocumentId: ids.upload,
     });
@@ -142,7 +145,32 @@ describe("approved staff demo upload service", () => {
 
     fixture.repository.snapshot = {
       ...snapshot(),
+      operationState: "succeeded",
+      parseStatus: "parsed",
+    };
+    await expect(
+      fixture.service.get(authorization, ids.upload),
+    ).resolves.toMatchObject({
+      failure: null,
+      state: "generating_outline",
+    });
+
+    fixture.repository.snapshot = {
+      ...snapshot(),
       failureClass: "infrastructure_unavailable",
+      operationState: "failed_permanent",
+      parseStatus: "failed",
+    };
+    await expect(
+      fixture.service.get(authorization, ids.upload),
+    ).resolves.toMatchObject({
+      failure: { code: "dependency_unavailable", retryable: true },
+      state: "failed",
+    });
+
+    fixture.repository.snapshot = {
+      ...snapshot(),
+      failureClass: "scan_db_stale",
       operationState: "failed_permanent",
       parseStatus: "failed",
     };
@@ -169,7 +197,7 @@ describe("approved staff demo upload service", () => {
 
     fixture.repository.snapshot = {
       ...snapshot(),
-      activeCurriculumGenerationId: "55000000-0000-4000-8000-000000000007",
+      activeCurriculumGenerationId: "55000000-0000-4000-8000-00000000000a",
       courseStatus: "ready",
       operationState: "succeeded",
       parseStatus: "parsed",
@@ -206,6 +234,25 @@ describe("approved staff demo upload service", () => {
       uploadId: ids.upload,
     });
   });
+
+  it("re-enqueues persisted recoverable work when status is polled", async () => {
+    const fixture = createFixture();
+    fixture.repository.snapshot = snapshot();
+    fixture.repository.processingWork = {
+      authorization,
+      courseId: ids.course,
+      expectedInputSha256: approval.sha256,
+      generationOperationId: ids.generationOperation,
+      operationId: ids.operation,
+      sourceDocumentId: ids.upload,
+    };
+
+    await fixture.service.get(authorization, ids.upload);
+
+    expect(fixture.processing.schedule).toHaveBeenCalledWith(
+      fixture.repository.processingWork,
+    );
+  });
 });
 
 function createFixture() {
@@ -218,7 +265,12 @@ function createFixture() {
     })),
   };
   const processing = { schedule: vi.fn() };
-  const generatedIds = [ids.upload, ids.course, ids.operation];
+  const generatedIds = [
+    ids.upload,
+    ids.course,
+    ids.operation,
+    ids.generationOperation,
+  ];
   const service = new ApprovedDemoUploadService({
     approvals: [approval],
     clock: () => new Date("2026-07-25T20:00:00.000Z"),
@@ -232,13 +284,26 @@ function createFixture() {
 }
 
 class FakeRepository implements DemoUploadPersistence {
+  readonly claimCourseGeneration = vi.fn(async () => ({
+    deadlineMs: 120_000,
+    kind: "claimed" as const,
+  }));
+  readonly completeCourseGeneration = vi.fn(async () => undefined);
   readonly create = vi.fn(async (_input: DemoUploadCreate) => undefined);
-  readonly failCourseGeneration = vi.fn(async () => undefined);
+  readonly failCourseGenerationAttempt = vi.fn(async () => "failed" as const);
+  readonly listRecoverable = vi.fn(async () => []);
   outline: DemoUploadOutlineSnapshot | null = null;
+  processingWork: Awaited<
+    ReturnType<DemoUploadPersistence["getProcessingWork"]>
+  > = null;
   snapshot: DemoUploadSnapshot | null = null;
 
   async get(): Promise<DemoUploadSnapshot | null> {
     return this.snapshot;
+  }
+
+  async getProcessingWork() {
+    return this.processingWork;
   }
 
   async loadOutline(): Promise<DemoUploadOutlineSnapshot | null> {

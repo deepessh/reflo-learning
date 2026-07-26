@@ -109,6 +109,26 @@ export function checkToolchainPolicy(rootDirectory) {
       errors.push(`turbo test env must pass ${variable}`);
     }
   }
+  for (const variable of [
+    "REFLO_DEMO_OPERATOR_OWNER_SCOPE_ID",
+    "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE",
+    "REFLO_DEMO_UPLOAD_PROCESSOR_MODE",
+    "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
+    "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
+    "REFLO_LOCAL_CLAMAV_MANIFEST_PATH",
+    "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_KID",
+    "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_PATH",
+    "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_SPKI_SHA256",
+    "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
+    "REFLO_LOCAL_CLAMAV_SIGNATURE_PATH",
+    "REFLO_LOCAL_INGESTION_IMAGE",
+    "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
+    "REFLO_LOCAL_TESSDATA_DIR",
+  ]) {
+    if (!turbo.tasks?.dev?.env?.includes(variable)) {
+      errors.push(`turbo dev env must pass ${variable}`);
+    }
+  }
 
   for (const script of [
     "scripts/doctor.sh",

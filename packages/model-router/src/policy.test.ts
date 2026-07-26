@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { MODEL_TASK_IDS } from "./contracts.js";
-import { ROUTE_POLICY_V3 } from "./policy.js";
+import { ROUTE_POLICY_V4 } from "./policy.js";
 import { PROMPT_REGISTRY_V1, type PromptedTaskId } from "./prompts.js";
 
-describe("route-policy-v3", () => {
+describe("route-policy-v4", () => {
   it("contains every semantic task exactly once", () => {
-    expect(Object.keys(ROUTE_POLICY_V3).sort()).toEqual(
+    expect(Object.keys(ROUTE_POLICY_V4).sort()).toEqual(
       [...MODEL_TASK_IDS].sort(),
     );
     for (const task of MODEL_TASK_IDS) {
-      expect(ROUTE_POLICY_V3[task].task).toBe(task);
-      expect(ROUTE_POLICY_V3[task].fallback).toBe(
+      expect(ROUTE_POLICY_V4[task].task).toBe(task);
+      expect(ROUTE_POLICY_V4[task].fallback).toBe(
         task === "media.tts.v1" ? "piper-tts.cpu" : null,
       );
     }
@@ -27,7 +27,7 @@ describe("route-policy-v3", () => {
       expect(definition.fixedInstructions.join(" ")).toContain(
         "untrusted data",
       );
-      expect(ROUTE_POLICY_V3[task as PromptedTaskId]).toMatchObject({
+      expect(ROUTE_POLICY_V4[task as PromptedTaskId]).toMatchObject({
         promptId: definition.id,
         promptVersion: definition.version,
       });
@@ -37,7 +37,7 @@ describe("route-policy-v3", () => {
   it("versions the discriminated quiz contract without weakening validation", () => {
     const quiz = PROMPT_REGISTRY_V1["assessment.quiz.v1"];
 
-    expect(ROUTE_POLICY_V3["assessment.quiz.v1"].promptVersion).toBe("3");
+    expect(ROUTE_POLICY_V4["assessment.quiz.v1"].promptVersion).toBe("3");
     expect(quiz.version).toBe("3");
     expect(quiz.outputSchemaId).toBe("quiz-generation-result-v2");
     expect(quiz.outputContract).not.toContain('"responseOptions"?:');
@@ -57,7 +57,7 @@ describe("route-policy-v3", () => {
   it("versions the lesson target while retaining the activation bounds", () => {
     const lesson = PROMPT_REGISTRY_V1["lesson.text.v1"];
 
-    expect(ROUTE_POLICY_V3["lesson.text.v1"].promptVersion).toBe("2");
+    expect(ROUTE_POLICY_V4["lesson.text.v1"].promptVersion).toBe("2");
     expect(lesson.version).toBe("2");
     expect(lesson.outputSchemaId).toBe("lesson-result-v1");
     expect(lesson.fixedInstructions.join(" ")).toContain("450 to 550 word");
@@ -67,7 +67,7 @@ describe("route-policy-v3", () => {
   });
 
   it("caps attempts and requires proven submission idempotency for media retries", () => {
-    for (const route of Object.values(ROUTE_POLICY_V3)) {
+    for (const route of Object.values(ROUTE_POLICY_V4)) {
       if (route.capability === "speech" || route.capability === "video") {
         expect(
           "mediaRetryRequiresSubmissionIdempotency" in route &&

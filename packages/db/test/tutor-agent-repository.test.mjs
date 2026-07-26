@@ -368,7 +368,7 @@ function generatedLesson() {
       promptVersion: "1",
       requestedSelector: "qwen.grounded-generation",
       resultSchemaVersion: "lesson-result-v1",
-      routePolicyVersion: "route-policy-v3",
+      routePolicyVersion: "route-policy-v4",
       task: "lesson.reteach.v1",
       validationOutcome: "passed",
     },

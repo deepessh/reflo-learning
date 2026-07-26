@@ -19,6 +19,7 @@ const enabled =
   typeof baseDatabaseUrl === "string" && baseDatabaseUrl.length > 0;
 const ids = {
   course: "55000000-0000-4000-8000-000000000001",
+  generationOperation: "55000000-0000-4000-8000-00000000000a",
   member: "55000000-0000-4000-8000-000000000002",
   operation: "55000000-0000-4000-8000-000000000003",
   otherMember: "55000000-0000-4000-8000-000000000004",
@@ -65,6 +66,7 @@ test(
         byteSize: 478_301,
         checksum: "a".repeat(64),
         courseId: ids.course,
+        generationOperationId: ids.generationOperation,
         mediaType: "application/pdf",
         objectKey: `owners/${ids.scope}/sources/${ids.source}/versions/v1/original.pdf`,
         operationId: ids.operation,
@@ -86,6 +88,15 @@ test(
         title: "Approved Agents Course",
         updatedAt: (await repository.get(authorization, ids.source)).updatedAt,
       });
+      const [recoverable] = await repository.listRecoverable(authorization);
+      assert.deepEqual(recoverable, {
+        authorization,
+        courseId: ids.course,
+        expectedInputSha256: "a".repeat(64),
+        generationOperationId: ids.generationOperation,
+        operationId: ids.operation,
+        sourceDocumentId: ids.source,
+      });
       await client.query(
         `UPDATE source_document
          SET parse_status = 'parsed', page_count = 12,
@@ -93,7 +104,35 @@ test(
          WHERE id = $1`,
         [ids.source],
       );
-      await repository.failCourseGeneration(authorization, ids.source);
+      await client.query(
+        `UPDATE async_operation
+         SET state = 'succeeded', completed_at = clock_timestamp(),
+             updated_at = clock_timestamp()
+         WHERE id = $1`,
+        [ids.operation],
+      );
+      assert.equal(
+        (await repository.claimCourseGeneration(recoverable)).kind,
+        "claimed",
+      );
+      assert.equal(
+        await repository.failCourseGenerationAttempt(recoverable, {
+          failureClass: "generation_dependency_unavailable",
+          retryable: true,
+        }),
+        "retry_scheduled",
+      );
+      assert.equal(
+        (await repository.claimCourseGeneration(recoverable)).kind,
+        "claimed",
+      );
+      assert.equal(
+        await repository.failCourseGenerationAttempt(recoverable, {
+          failureClass: "generation_invalid_result",
+          retryable: false,
+        }),
+        "failed",
+      );
       const generationFailed = await repository.get(authorization, ids.source);
       assert.equal(generationFailed.courseStatus, "failed");
       assert.equal(
@@ -112,37 +151,6 @@ test(
         null,
       );
 
-      await client.query(
-        `UPDATE course
-         SET status = 'generating', updated_at = clock_timestamp()
-         WHERE id = $1`,
-        [ids.course],
-      );
-      await client.query(
-        `UPDATE source_document
-         SET parse_status = 'quarantined', page_count = NULL,
-             updated_at = clock_timestamp()
-         WHERE id = $1`,
-        [ids.source],
-      );
-      await client.query(
-        `UPDATE async_operation
-         SET state = 'failed_permanent',
-             sanitized_failure = '{"class":"infrastructure_unavailable"}',
-             completed_at = clock_timestamp(), updated_at = clock_timestamp()
-         WHERE id = $1`,
-        [ids.operation],
-      );
-      await client.query(
-        `UPDATE source_document
-         SET parse_status = 'failed', updated_at = clock_timestamp()
-         WHERE id = $1`,
-        [ids.source],
-      );
-      const failed = await repository.get(authorization, ids.source);
-      assert.equal(failed.failureClass, "infrastructure_unavailable");
-      assert.equal(failed.operationState, "failed_permanent");
-      assert.equal(failed.parseStatus, "failed");
       assert.equal(
         await repository.loadOutline(authorization, ids.source),
         null,

@@ -1,7 +1,7 @@
 import type { ModelTaskId } from "./contracts.js";
 import type { ModelCapability } from "./ports.js";
 
-export const ROUTE_POLICY_VERSION = "route-policy-v3" as const;
+export const ROUTE_POLICY_VERSION = "route-policy-v4" as const;
 
 export interface RouteDefinition {
   readonly capability: ModelCapability;
@@ -18,7 +18,7 @@ export interface RouteDefinition {
   readonly textType?: "document" | "query";
 }
 
-export const ROUTE_POLICY_V3 = Object.freeze({
+export const ROUTE_POLICY_V4 = Object.freeze({
   "assessment.grade-short-answer.v1": route({
     capability: "grading",
     fallback: null,

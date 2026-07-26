@@ -23,7 +23,10 @@ export type { ConnectedDemoSessionSummary } from "./connected-demo-repository.js
 export type { ConnectedDemoSeedResult } from "./connected-demo-repository.js";
 export type {
   DemoUploadCreate,
+  DemoUploadGenerationClaim,
+  DemoUploadGenerationFailure,
   DemoUploadOutlineSnapshot,
+  DemoUploadProcessingWorkRecord,
   DemoUploadSnapshot,
 } from "./demo-upload-repository.js";
 export { PostgresGateAttestationIndex } from "./gate-attestation-index.js";

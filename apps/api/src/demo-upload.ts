@@ -11,7 +11,10 @@ import type {
 import { DEMO_UPLOAD_CONTRACT_VERSION } from "@reflo/contracts";
 import type {
   DemoUploadCreate,
+  DemoUploadGenerationClaim,
+  DemoUploadGenerationFailure,
   DemoUploadOutlineSnapshot,
+  DemoUploadProcessingWorkRecord,
   DemoUploadSnapshot,
 } from "@reflo/db";
 import type { ScopeAuthorizationContext } from "@reflo/retrieval";
@@ -42,14 +45,25 @@ export interface ApprovedDemoSource extends DemoSourceApproval {
 
 export interface DemoUploadPersistence {
   create(input: DemoUploadCreate): Promise<void>;
-  failCourseGeneration(
-    authorization: ScopeAuthorizationContext,
-    sourceDocumentId: string,
-  ): Promise<void>;
+  claimCourseGeneration(
+    work: DemoUploadProcessingWork,
+  ): Promise<DemoUploadGenerationClaim>;
+  completeCourseGeneration(work: DemoUploadProcessingWork): Promise<void>;
+  failCourseGenerationAttempt(
+    work: DemoUploadProcessingWork,
+    failure: DemoUploadGenerationFailure,
+  ): Promise<"failed" | "retry_scheduled">;
   get(
     authorization: ScopeAuthorizationContext,
     sourceDocumentId: string,
   ): Promise<DemoUploadSnapshot | null>;
+  getProcessingWork(
+    authorization: ScopeAuthorizationContext,
+    sourceDocumentId: string,
+  ): Promise<DemoUploadProcessingWorkRecord | null>;
+  listRecoverable(
+    authorization: ScopeAuthorizationContext,
+  ): Promise<readonly DemoUploadProcessingWorkRecord[]>;
   loadOutline(
     authorization: ScopeAuthorizationContext,
     sourceDocumentId: string,
@@ -60,6 +74,7 @@ export interface DemoUploadProcessingWork {
   readonly authorization: ScopeAuthorizationContext;
   readonly courseId: string;
   readonly expectedInputSha256: string;
+  readonly generationOperationId: string;
   readonly operationId: string;
   readonly sourceDocumentId: string;
 }
@@ -169,6 +184,7 @@ export class ApprovedDemoUploadService {
     }
     const courseId = this.#createId();
     const operationId = this.#createId();
+    const generationOperationId = this.#createId();
     const objectKey = `owners/${authorization.ownerScopeId}/sources/${uploadId}/versions/v1/original.${approval.extension}`;
     const stored = await this.#objects.putIfAbsent({
       bytes: input.bytes,
@@ -187,6 +203,7 @@ export class ApprovedDemoUploadService {
       byteSize: input.bytes.byteLength,
       checksum: actualSha256,
       courseId,
+      generationOperationId,
       mediaType: approval.mediaType,
       objectKey,
       operationId,
@@ -207,6 +224,7 @@ export class ApprovedDemoUploadService {
       authorization,
       courseId,
       expectedInputSha256: actualSha256,
+      generationOperationId,
       operationId,
       sourceDocumentId: uploadId,
     });
@@ -221,6 +239,13 @@ export class ApprovedDemoUploadService {
     const snapshot = await this.#repository.get(authorization, uploadId);
     if (snapshot === null) {
       return null;
+    }
+    const recoverable = await this.#repository.getProcessingWork(
+      authorization,
+      uploadId,
+    );
+    if (recoverable !== null) {
+      this.#processing?.schedule(recoverable);
     }
     const approval = [...this.#approvals.values()].find(
       (candidate) => candidate.sha256 === snapshot.checksum,
@@ -326,8 +351,9 @@ function uploadState(
     case "queued":
       return "queued";
     case "parsing":
-    case "parsed":
       return "parsing";
+    case "parsed":
+      return "generating_outline";
   }
 }
 
@@ -343,7 +369,6 @@ function mapFailure(value: string | null): DemoUploadFailureCode {
     case "invalid_output":
       return "malformed_document";
     case "malware_detected":
-    case "scan_db_stale":
       return "malware_detected";
     case "mime_mismatch":
       return "mime_mismatch";
@@ -353,6 +378,7 @@ function mapFailure(value: string | null): DemoUploadFailureCode {
     case "unsupported_type":
       return "unsupported_type";
     case "infrastructure_unavailable":
+    case "scan_db_stale":
       return "dependency_unavailable";
     case "curriculum_generation_failed":
       return "generation_failed";

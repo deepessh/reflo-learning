@@ -1284,6 +1284,24 @@ ALTER TABLE ONLY public.delivery_submission FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: demo_upload_generation_operation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.demo_upload_generation_operation (
+    operation_id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    requested_by_user_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    source_document_id uuid NOT NULL,
+    input_sha256 text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT demo_upload_generation_operation_input_sha256_check CHECK ((input_sha256 ~ '^[a-f0-9]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.demo_upload_generation_operation FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: fsrs_card_payload; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2555,6 +2573,30 @@ ALTER TABLE ONLY public.delivery_submission
 
 
 --
+-- Name: demo_upload_generation_operation demo_upload_generation_operatio_owner_scope_id_operation_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operatio_owner_scope_id_operation_id_key UNIQUE (owner_scope_id, operation_id);
+
+
+--
+-- Name: demo_upload_generation_operation demo_upload_generation_operation_owner_scope_id_course_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operation_owner_scope_id_course_id_key UNIQUE (owner_scope_id, course_id);
+
+
+--
+-- Name: demo_upload_generation_operation demo_upload_generation_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operation_pkey PRIMARY KEY (operation_id);
+
+
+--
 -- Name: attempt_concept_evidence evidence_unanswerable_reason_shape; Type: CHECK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3160,6 +3202,13 @@ CREATE UNIQUE INDEX concept_generation_key_idx ON public.concept USING btree (ow
 --
 
 CREATE INDEX delivery_override_projection_idx ON public.delivery_override USING btree (owner_scope_id, user_id, concept_id, created_at, id);
+
+
+--
+-- Name: demo_upload_generation_operation_source_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX demo_upload_generation_operation_source_idx ON public.demo_upload_generation_operation USING btree (owner_scope_id, source_document_id);
 
 
 --
@@ -4005,6 +4054,38 @@ ALTER TABLE ONLY public.delivery_submission
 
 
 --
+-- Name: demo_upload_generation_operation demo_upload_generation_operat_owner_scope_id_requested_by__fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operat_owner_scope_id_requested_by__fkey FOREIGN KEY (owner_scope_id, requested_by_user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
+
+
+--
+-- Name: demo_upload_generation_operation demo_upload_generation_operat_owner_scope_id_source_docume_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operat_owner_scope_id_source_docume_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
+
+
+--
+-- Name: demo_upload_generation_operation demo_upload_generation_operati_owner_scope_id_operation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operati_owner_scope_id_operation_id_fkey FOREIGN KEY (owner_scope_id, operation_id) REFERENCES public.async_operation(owner_scope_id, id);
+
+
+--
+-- Name: demo_upload_generation_operation demo_upload_generation_operation_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demo_upload_generation_operation
+    ADD CONSTRAINT demo_upload_generation_operation_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
 -- Name: attempt_concept_evidence evidence_attempt_provenance_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4795,6 +4876,19 @@ ALTER TABLE public.delivery_streak_day ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delivery_submission ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: demo_upload_generation_operation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.demo_upload_generation_operation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: demo_upload_generation_operation demo_upload_generation_operation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY demo_upload_generation_operation_active_membership ON public.demo_upload_generation_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: fsrs_card_payload; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -5329,4 +5423,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260723000200'),
     ('20260724000100'),
     ('20260724000200'),
-    ('20260724000300');
+    ('20260724000300'),
+    ('20260726000100');

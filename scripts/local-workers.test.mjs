@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -12,6 +20,7 @@ import {
   podmanVersionReportIsSupported,
   renderProfileEnvironment,
   unexpectedClamavDirectoryEntries,
+  validateClamavAdmission,
   validateLocalWorkersContract,
 } from "./local-workers.mjs";
 
@@ -153,7 +162,14 @@ describe("optional local worker profile", () => {
         "REFLO_LOCAL_PIPER_MODEL_PATH='/tmp/reflo workers/voice.onnx'",
       ),
     );
-    assert.ok(!keys.some((key) => /KEY|PASSWORD|SECRET|TOKEN/.test(key)));
+    assert.ok(
+      environment.includes(
+        "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE='verified-clamav-v1'",
+      ),
+    );
+    assert.ok(
+      !keys.some((key) => /PASSWORD|SECRET|TOKEN|PRIVATE_KEY/.test(key)),
+    );
     assert.equal(keys.length, new Set(keys).size);
   });
 
@@ -235,6 +251,78 @@ describe("optional local worker profile", () => {
     );
   });
 
+  it("verifies the exact KMS-signed ClamAV admission bundle", async () => {
+    const fixture = mkdtempSync(path.join(tmpdir(), "reflo-clamav-signed-"));
+    const databaseDirectory = path.join(fixture, "snapshot");
+    const { privateKey, publicKey } = generateKeyPairSync("ec", {
+      namedCurve: "prime256v1",
+    });
+    try {
+      mkdirSync(databaseDirectory);
+      const files = ["bytecode.cvd", "daily.cld", "main.cvd"].map(
+        (filename, index) => {
+          const bytes = Buffer.from(`signed-clamav-${index}`, "utf8");
+          writeFileSync(path.join(databaseDirectory, filename), bytes);
+          return {
+            byteLength: bytes.byteLength,
+            name: filename,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+          };
+        },
+      );
+      const publicKeyPath = path.join(fixture, "public.pem");
+      const spki = publicKey.export({ format: "der", type: "spki" });
+      const spkiSha256 = createHash("sha256").update(spki).digest("hex");
+      writeFileSync(
+        publicKeyPath,
+        publicKey.export({ format: "pem", type: "spki" }),
+      );
+      const manifest = Buffer.from(
+        JSON.stringify({
+          clamAvVersion: "1.4.5",
+          contractVersion: "snapshot-manifest-v1",
+          files,
+          kid: "local-test-kid",
+          publishedAt: new Date().toISOString(),
+          publicKeySpkiSha256: spkiSha256,
+          signatureProfile: "clamav-snapshot-signature-v1",
+          snapshotId: "local-test-snapshot",
+        }),
+      );
+      const manifestPath = path.join(databaseDirectory, "snapshot.json");
+      const signaturePath = path.join(databaseDirectory, "snapshot.sig");
+      writeFileSync(manifestPath, manifest);
+      writeFileSync(
+        signaturePath,
+        sign("sha256", manifest, privateKey).toString("base64"),
+      );
+
+      await assert.doesNotReject(
+        validateClamavAdmission(
+          contract,
+          {
+            files: files.map((file) => ({
+              byteLength: file.byteLength,
+              filename: file.name,
+              sha256: file.sha256,
+            })),
+          },
+          {
+            directory: databaseDirectory,
+            kid: "local-test-kid",
+            manifestPath,
+            publicKeyPath,
+            publicKeySpkiSha256: spkiSha256,
+            scannerImage: contract.clamav.updaterImage,
+            signaturePath,
+          },
+        ),
+      );
+    } finally {
+      rmSync(fixture, { force: true, recursive: true });
+    }
+  });
+
   it("rejects state-recorded Piper paths before execution", () => {
     const piperDirectory = "/tmp/reflo-workers/piper";
     const state = {
@@ -267,6 +355,15 @@ function profileState() {
       imageDigest: `sha256:${"a".repeat(64)}`,
     },
     clamav: { directory: "/tmp/reflo workers/clamav" },
+    clamavAdmission: {
+      directory: "/tmp/reflo workers/clamav-admission",
+      kid: "reflo-clamav-v1",
+      manifestPath: "/tmp/reflo workers/clamav-admission/snapshot.json",
+      publicKeyPath: "/tmp/reflo workers/clamav-public.pem",
+      publicKeySpkiSha256: "e".repeat(64),
+      scannerImage: `clamav@sha256:${"f".repeat(64)}`,
+      signaturePath: "/tmp/reflo workers/clamav-admission/snapshot.sig",
+    },
     tessdata: { directory: "/tmp/reflo workers/tessdata" },
     piper: {
       artifactRevision: "b".repeat(40),

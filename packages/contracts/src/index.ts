@@ -55,6 +55,7 @@ export interface DemoSourceApproval {
 export type DemoUploadState =
   | "accepted"
   | "failed"
+  | "generating_outline"
   | "large_document"
   | "ocr_required"
   | "outline_ready"

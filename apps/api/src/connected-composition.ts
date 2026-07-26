@@ -31,7 +31,7 @@ import {
   type DeliveryPreference,
 } from "@reflo/knowledge-model";
 import {
-  ROUTE_POLICY_V3,
+  ROUTE_POLICY_V4,
   ROUTE_POLICY_VERSION,
   buildPromptBundle,
   createModelRouter,
@@ -484,7 +484,7 @@ function gradingPolicy(
     readonly effectiveModelVersion: string;
   },
 ): FrozenGradingPolicy {
-  const route = ROUTE_POLICY_V3["assessment.grade-short-answer.v1"];
+  const route = ROUTE_POLICY_V4["assessment.grade-short-answer.v1"];
   const prompt = buildPromptBundle("assessment.grade-short-answer.v1", {
     answer: "",
     question: "",
@@ -508,7 +508,7 @@ function gradingPolicy(
       promptId: prompt.id,
       promptVersion: prompt.version,
       resultSchemaVersion: route.resultSchemaVersion,
-      routePolicyVersion: "route-policy-v3",
+      routePolicyVersion: "route-policy-v4",
     },
     gradingPolicyVersion: "grading-policy-v1",
     ratingMappingVersion: "rating-mapping-v1",

@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { Deployment } from "@reflo/config";
@@ -8,18 +8,18 @@ import {
   PostgresDemoUploadRepository,
   PostgresIngestionOperationStore,
 } from "@reflo/db";
+import { LocalSmokeObjectStore, artifactObjectKey } from "@reflo/dev-smoke";
 import {
-  LocalSmokeObjectStore,
-  TrustedFixtureAdmissionScanner,
-  artifactObjectKey,
-} from "@reflo/dev-smoke";
-import {
+  CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+  ClamAvScannerAdapter,
   IngestionSupervisor,
   NodeEphemeralWorkspace,
   NodeProcessRunner,
   NormalizedOutputFileReader,
   ObjectArtifactPublisher,
   PodmanDocumentWorker,
+  PinnedP256SnapshotSignatureVerifier,
+  type ProcessRunnerPort,
   QuarantineStagingAdapter,
   validateNormalizedDocument,
 } from "@reflo/ingestion";
@@ -38,16 +38,17 @@ import { DemoUploadProcessingService } from "./demo-upload-processing.js";
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
 const LOCAL_PROCESSOR_MODE = "local-isolated-v1";
+const VERIFIED_SCANNER_MODE = "verified-clamav-v1";
 
 export interface DemoUploadRuntime {
   readonly demoUploads?: ApprovedDemoUploadService;
   close(): Promise<void>;
 }
 
-export function createDemoUploadRuntime(
+export async function createDemoUploadRuntime(
   input: NodeJS.ProcessEnv,
   deployment: Deployment,
-): DemoUploadRuntime {
+): Promise<DemoUploadRuntime> {
   const mode = input.REFLO_CONNECTED_DEMO_MODE;
   if (mode === undefined || mode === "disabled") {
     return { close: async () => undefined };
@@ -76,6 +77,57 @@ export function createDemoUploadRuntime(
   );
   const vectorDatabaseUrl = required(input, "REFLO_VECTOR_DATABASE_URL");
   const operatorUserId = requiredUuid(input, "REFLO_DEMO_OPERATOR_USER_ID");
+  const operatorOwnerScopeId = requiredUuid(
+    input,
+    "REFLO_DEMO_OPERATOR_OWNER_SCOPE_ID",
+  );
+  if (
+    required(input, "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE") !==
+    VERIFIED_SCANNER_MODE
+  ) {
+    throw new Error("demo upload requires a verified malware scanner");
+  }
+  const clamDatabaseDirectory = requiredAbsolute(
+    input,
+    "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
+  );
+  const admissionDatabaseDirectory = requiredAbsolute(
+    input,
+    "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
+  );
+  const scannerRunner = new PodmanClamAvProcessRunner(
+    {
+      databaseDirectory: admissionDatabaseDirectory,
+      imageReference: requiredMatching(
+        input,
+        "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
+        /^.+@sha256:[a-f0-9]{64}$/,
+      ),
+    },
+    new NodeProcessRunner(),
+  );
+  const malwareScanner = new ClamAvScannerAdapter({
+    databaseDirectory: admissionDatabaseDirectory,
+    executable: "clamscan",
+    expectedSignatureProfile: CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+    manifestPath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_MANIFEST_PATH"),
+    runner: scannerRunner,
+    signaturePath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_SIGNATURE_PATH"),
+    signatureVerifier: new PinnedP256SnapshotSignatureVerifier([
+      {
+        kid: required(input, "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_KID"),
+        spkiPem: readFileSync(
+          requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_PATH"),
+          "utf8",
+        ),
+        spkiSha256: requiredMatching(
+          input,
+          "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_SPKI_SHA256",
+          /^[a-f0-9]{64}$/,
+        ),
+      },
+    ]),
+  });
   const scratchRoot = path.join(artifactRoot, ".ingestion-work");
   mkdirSync(scratchRoot, { mode: 0o700, recursive: true });
   const scratchStat = lstatSync(scratchRoot);
@@ -115,10 +167,7 @@ export function createDemoUploadRuntime(
   const workspaces = new NodeEphemeralWorkspace(scratchRoot);
   const worker = new PodmanDocumentWorker(
     {
-      clamDatabaseDirectory: requiredAbsolute(
-        input,
-        "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
-      ),
+      clamDatabaseDirectory,
       environment: deployment,
       executable: "podman",
       imageReference: required(input, "REFLO_LOCAL_INGESTION_IMAGE"),
@@ -152,9 +201,7 @@ export function createDemoUploadRuntime(
       execute(work: DemoUploadProcessingWork) {
         return new IngestionSupervisor({
           clock: { now: () => new Date() },
-          malwareScanner: new TrustedFixtureAdmissionScanner(
-            work.expectedInputSha256,
-          ),
+          malwareScanner,
           operations,
           publisher,
           quarantine: new QuarantineStagingAdapter(objects),
@@ -170,7 +217,7 @@ export function createDemoUploadRuntime(
     },
     repository,
   });
-  return {
+  const runtime = {
     demoUploads: new ApprovedDemoUploadService({
       approvals: [APPROVED_AGENTS_COURSE_SOURCE],
       objects,
@@ -190,7 +237,21 @@ export function createDemoUploadRuntime(
         throw new Error("demo upload runtime cleanup failed");
       }
     },
-  };
+  } satisfies DemoUploadRuntime;
+  try {
+    const recoverable = await repository.listRecoverable({
+      actorId: operatorUserId,
+      authorizationId: "demo-upload-startup-recovery-v1",
+      ownerScopeId: operatorOwnerScopeId,
+    });
+    for (const work of recoverable) {
+      processing.schedule(work);
+    }
+    return runtime;
+  } catch (error) {
+    await runtime.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 function required(input: NodeJS.ProcessEnv, name: string): string {
@@ -231,4 +292,94 @@ function requiredMatching(
     throw new Error(`${name} is invalid`);
   }
   return value;
+}
+
+export class PodmanClamAvProcessRunner implements ProcessRunnerPort {
+  constructor(
+    private readonly configuration: {
+      readonly databaseDirectory: string;
+      readonly imageReference: string;
+    },
+    private readonly runner: ProcessRunnerPort,
+  ) {}
+
+  run(
+    executable: string,
+    args: readonly string[],
+    options: { readonly maxOutputBytes: number; readonly timeoutMs: number },
+  ) {
+    if (executable !== "clamscan") {
+      return Promise.resolve(failedProcess());
+    }
+    if (args.length === 1 && args[0] === "--version") {
+      return this.runner.run(
+        "podman",
+        [
+          ...this.#baseArguments(),
+          "--entrypoint=/usr/bin/clamscan",
+          this.configuration.imageReference,
+          "--version",
+        ],
+        options,
+      );
+    }
+    const inputPath = args.at(-1);
+    const separatorIndex = args.lastIndexOf("--");
+    if (
+      inputPath === undefined ||
+      !path.isAbsolute(inputPath) ||
+      separatorIndex !== args.length - 2 ||
+      args[0] !== `--database=${this.configuration.databaseDirectory}` ||
+      args[1] !== "--no-summary" ||
+      args[2] !== "--stdout" ||
+      args[3] !== "--infected"
+    ) {
+      return Promise.resolve(failedProcess());
+    }
+    return this.runner.run(
+      "podman",
+      [
+        ...this.#baseArguments(),
+        `--mount=type=bind,src=${this.configuration.databaseDirectory},dst=/database,ro=true,relabel=private`,
+        `--mount=type=bind,src=${path.dirname(inputPath)},dst=/input,ro=true,relabel=private`,
+        "--entrypoint=/usr/bin/clamscan",
+        this.configuration.imageReference,
+        "--database=/database",
+        "--no-summary",
+        "--stdout",
+        "--infected",
+        "--",
+        `/input/${path.basename(inputPath)}`,
+      ],
+      options,
+    );
+  }
+
+  #baseArguments(): readonly string[] {
+    return [
+      "run",
+      "--rm",
+      "--pull=never",
+      "--network=none",
+      "--cap-drop=ALL",
+      "--security-opt=no-new-privileges",
+      "--read-only",
+      "--user=100:101",
+      "--userns=keep-id:uid=100,gid=101",
+      "--pids-limit=64",
+      "--memory=536870912",
+      "--cpus=1",
+      "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864",
+    ];
+  }
+}
+
+function failedProcess() {
+  return {
+    exitCode: 127,
+    signal: null,
+    stderr: "",
+    stdout: "",
+    timedOut: false,
+  };
 }

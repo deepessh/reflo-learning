@@ -96,6 +96,8 @@ function failureCopy(code: DemoUploadFailureCode | null): string {
       return "The malware gate rejected this source. No course was created.";
     case "dependency_unavailable":
       return "A required upload dependency is unavailable. No successful outcome was recorded; retry after recovery.";
+    case "generation_failed":
+      return "The source parsed safely, but the source-backed course outline could not be generated. No successful outline was recorded.";
     case "parser_failed":
       return "The isolated parser failed without producing an outline. No successful outcome was recorded.";
     case null:

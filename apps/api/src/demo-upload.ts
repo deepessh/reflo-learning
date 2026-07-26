@@ -42,6 +42,10 @@ export interface ApprovedDemoSource extends DemoSourceApproval {
 
 export interface DemoUploadPersistence {
   create(input: DemoUploadCreate): Promise<void>;
+  failCourseGeneration(
+    authorization: ScopeAuthorizationContext,
+    sourceDocumentId: string,
+  ): Promise<void>;
   get(
     authorization: ScopeAuthorizationContext,
     sourceDocumentId: string,
@@ -50,6 +54,18 @@ export interface DemoUploadPersistence {
     authorization: ScopeAuthorizationContext,
     sourceDocumentId: string,
   ): Promise<DemoUploadOutlineSnapshot | null>;
+}
+
+export interface DemoUploadProcessingWork {
+  readonly authorization: ScopeAuthorizationContext;
+  readonly courseId: string;
+  readonly expectedInputSha256: string;
+  readonly operationId: string;
+  readonly sourceDocumentId: string;
+}
+
+export interface DemoUploadProcessingQueue {
+  schedule(work: DemoUploadProcessingWork): void;
 }
 
 export interface DemoUploadObjectStore {
@@ -77,6 +93,7 @@ export class ApprovedDemoUploadService {
   readonly #createId: () => string;
   readonly #objects: DemoUploadObjectStore;
   readonly #operatorUserIds: ReadonlySet<string>;
+  readonly #processing: DemoUploadProcessingQueue | undefined;
   readonly #repository: DemoUploadPersistence;
 
   constructor(options: {
@@ -85,6 +102,7 @@ export class ApprovedDemoUploadService {
     readonly createId?: () => string;
     readonly objects: DemoUploadObjectStore;
     readonly operatorUserIds: readonly string[];
+    readonly processing?: DemoUploadProcessingQueue;
     readonly repository: DemoUploadPersistence;
   }) {
     this.#approvals = new Map(
@@ -97,6 +115,7 @@ export class ApprovedDemoUploadService {
     this.#createId = options.createId ?? randomUUID;
     this.#objects = options.objects;
     this.#operatorUserIds = new Set(options.operatorUserIds);
+    this.#processing = options.processing;
     this.#repository = options.repository;
     if (
       this.#approvals.size !== options.approvals.length ||
@@ -183,7 +202,15 @@ export class ApprovedDemoUploadService {
     ) {
       throw new Error("demo_upload_persistence_mismatch");
     }
-    return this.#project(snapshot, approval);
+    const view = this.#project(snapshot, approval);
+    this.#processing?.schedule({
+      authorization,
+      courseId,
+      expectedInputSha256: actualSha256,
+      operationId,
+      sourceDocumentId: uploadId,
+    });
+    return view;
   }
 
   async get(
@@ -327,6 +354,8 @@ function mapFailure(value: string | null): DemoUploadFailureCode {
       return "unsupported_type";
     case "infrastructure_unavailable":
       return "dependency_unavailable";
+    case "curriculum_generation_failed":
+      return "generation_failed";
     case "parse_timeout":
     case "parser_crash":
     case null:

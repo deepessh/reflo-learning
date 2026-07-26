@@ -43,6 +43,12 @@ describe("staff demo upload presentation", () => {
       poll: false,
       tone: "negative",
     });
+    expect(demoUploadPresentation("failed", "generation_failed")).toMatchObject(
+      {
+        poll: false,
+        tone: "negative",
+      },
+    );
     expect(
       demoUploadPresentation("failed", "source_not_approved").detail,
     ).toContain("human-approved rights-cleared");

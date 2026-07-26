@@ -117,6 +117,13 @@ describe("approved staff demo upload service", () => {
         sourceDocumentId: ids.upload,
       }),
     );
+    expect(fixture.processing.schedule).toHaveBeenCalledWith({
+      authorization,
+      courseId: ids.course,
+      expectedInputSha256: approval.sha256,
+      operationId: ids.operation,
+      sourceDocumentId: ids.upload,
+    });
   });
 
   it("projects asynchronous, failure, and owner-scoped outline states honestly", async () => {
@@ -143,6 +150,20 @@ describe("approved staff demo upload service", () => {
       fixture.service.get(authorization, ids.upload),
     ).resolves.toMatchObject({
       failure: { code: "dependency_unavailable", retryable: true },
+      state: "failed",
+    });
+
+    fixture.repository.snapshot = {
+      ...snapshot(),
+      courseStatus: "failed",
+      failureClass: "curriculum_generation_failed",
+      operationState: "succeeded",
+      parseStatus: "parsed",
+    };
+    await expect(
+      fixture.service.get(authorization, ids.upload),
+    ).resolves.toMatchObject({
+      failure: { code: "generation_failed", retryable: false },
       state: "failed",
     });
 
@@ -196,6 +217,7 @@ function createFixture() {
       sha256: input.sha256,
     })),
   };
+  const processing = { schedule: vi.fn() };
   const generatedIds = [ids.upload, ids.course, ids.operation];
   const service = new ApprovedDemoUploadService({
     approvals: [approval],
@@ -203,13 +225,15 @@ function createFixture() {
     createId: () => generatedIds.shift() ?? ids.operation,
     objects,
     operatorUserIds: [ids.user],
+    processing,
     repository,
   });
-  return { objects, repository, service };
+  return { objects, processing, repository, service };
 }
 
 class FakeRepository implements DemoUploadPersistence {
   readonly create = vi.fn(async (_input: DemoUploadCreate) => undefined);
+  readonly failCourseGeneration = vi.fn(async () => undefined);
   outline: DemoUploadOutlineSnapshot | null = null;
   snapshot: DemoUploadSnapshot | null = null;
 

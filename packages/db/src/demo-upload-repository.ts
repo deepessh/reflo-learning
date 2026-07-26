@@ -142,6 +142,37 @@ export class PostgresDemoUploadRepository {
     });
   }
 
+  async failCourseGeneration(
+    authorization: ScopeAuthorizationContext,
+    sourceDocumentId: string,
+  ): Promise<void> {
+    if (!isUuid(sourceDocumentId)) {
+      throw new Error("invalid demo upload source");
+    }
+    await this.#transaction(authorization, async (client) => {
+      const result = await client.query<{ id: string }>(
+        `UPDATE course
+         SET status = 'failed', updated_at = clock_timestamp()
+         WHERE owner_scope_id = $1
+           AND source_document_id = $2
+           AND status = 'generating'
+           AND EXISTS (
+             SELECT 1
+             FROM source_document AS source
+             WHERE source.owner_scope_id = course.owner_scope_id
+               AND source.id = course.source_document_id
+               AND source.retention_status = 'active'
+               AND source.parse_status = 'parsed'
+           )
+         RETURNING id`,
+        [authorization.ownerScopeId, sourceDocumentId],
+      );
+      if (result.rowCount !== 1) {
+        throw new Error("demo_upload_course_failure_not_recorded");
+      }
+    });
+  }
+
   async get(
     authorization: ScopeAuthorizationContext,
     sourceDocumentId: string,
@@ -157,7 +188,12 @@ export class PostgresDemoUploadRepository {
                 course.status AS course_status,
                 course.active_curriculum_generation_id,
                 operation.state AS operation_state,
-                operation.sanitized_failure->>'class' AS failure_class,
+                CASE
+                  WHEN course.status = 'failed'
+                    AND source.parse_status = 'parsed'
+                    THEN 'curriculum_generation_failed'
+                  ELSE operation.sanitized_failure->>'class'
+                END AS failure_class,
                 GREATEST(source.updated_at, course.updated_at,
                          operation.updated_at) AS updated_at
          FROM source_document AS source

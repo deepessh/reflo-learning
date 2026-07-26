@@ -67,6 +67,7 @@ export type DemoUploadFailureCode =
   | "archive_limit"
   | "dependency_unavailable"
   | "encrypted"
+  | "generation_failed"
   | "malformed_document"
   | "malware_detected"
   | "mime_mismatch"

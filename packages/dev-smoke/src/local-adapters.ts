@@ -38,6 +38,7 @@ export interface DevelopmentVideoArtifact {
 export class LocalSmokeObjectStore
   implements
     InternalArtifactObjectPort,
+    QuarantineDownloadPort,
     TextArtifactWriterPort,
     AudioArtifactWriterPort
 {
@@ -106,6 +107,22 @@ export class LocalSmokeObjectStore
 
   async read(objectKey: string): Promise<Uint8Array> {
     return readFile(this.#resolve(objectKey));
+  }
+
+  async getObject(input: {
+    readonly maximumBytes: number;
+    readonly objectKey: string;
+  }): Promise<{ readonly bytes: Uint8Array; readonly objectKey: string }> {
+    if (!Number.isSafeInteger(input.maximumBytes) || input.maximumBytes < 1) {
+      throw new IngestionError("infrastructure_unavailable");
+    }
+    const bytes = await this.read(input.objectKey).catch(() => {
+      throw new IngestionError("infrastructure_unavailable");
+    });
+    if (bytes.byteLength < 1 || bytes.byteLength > input.maximumBytes) {
+      throw new IngestionError("page_limit");
+    }
+    return { bytes, objectKey: input.objectKey };
   }
 
   async exists(objectKey: string): Promise<boolean> {

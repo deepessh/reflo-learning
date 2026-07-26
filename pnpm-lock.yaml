@@ -50,6 +50,9 @@ importers:
       "@reflo/dev-smoke":
         specifier: workspace:*
         version: link:../../packages/dev-smoke
+      "@reflo/ingestion":
+        specifier: workspace:*
+        version: link:../../packages/ingestion
       "@reflo/knowledge-model":
         specifier: workspace:*
         version: link:../../packages/knowledge-model

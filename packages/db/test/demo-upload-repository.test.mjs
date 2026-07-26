@@ -86,6 +86,20 @@ test(
         title: "Approved Agents Course",
         updatedAt: (await repository.get(authorization, ids.source)).updatedAt,
       });
+      await client.query(
+        `UPDATE source_document
+         SET parse_status = 'parsed', page_count = 12,
+             updated_at = clock_timestamp()
+         WHERE id = $1`,
+        [ids.source],
+      );
+      await repository.failCourseGeneration(authorization, ids.source);
+      const generationFailed = await repository.get(authorization, ids.source);
+      assert.equal(generationFailed.courseStatus, "failed");
+      assert.equal(
+        generationFailed.failureClass,
+        "curriculum_generation_failed",
+      );
       assert.equal(
         await repository.get(
           {
@@ -98,6 +112,19 @@ test(
         null,
       );
 
+      await client.query(
+        `UPDATE course
+         SET status = 'generating', updated_at = clock_timestamp()
+         WHERE id = $1`,
+        [ids.course],
+      );
+      await client.query(
+        `UPDATE source_document
+         SET parse_status = 'quarantined', page_count = NULL,
+             updated_at = clock_timestamp()
+         WHERE id = $1`,
+        [ids.source],
+      );
       await client.query(
         `UPDATE async_operation
          SET state = 'failed_permanent',

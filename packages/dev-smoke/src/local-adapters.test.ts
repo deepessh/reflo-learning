@@ -134,6 +134,21 @@ describe("local smoke boundaries", () => {
       ),
     ).toBe(text);
     await expect(
+      store.getObject({
+        maximumBytes: Buffer.byteLength(text),
+        objectKey: "owners/test/assets/text.md",
+      }),
+    ).resolves.toEqual({
+      bytes: Buffer.from(text),
+      objectKey: "owners/test/assets/text.md",
+    });
+    await expect(
+      store.getObject({
+        maximumBytes: Buffer.byteLength(text) - 1,
+        objectKey: "owners/test/assets/text.md",
+      }),
+    ).rejects.toThrowError("page_limit");
+    await expect(
       store.putImmutable({
         content: "different",
         contentHash: digest(Buffer.from("different")),

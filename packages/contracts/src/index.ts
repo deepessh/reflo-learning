@@ -12,6 +12,7 @@ export const CONNECTED_DEMO_PREFLIGHT_VERSION =
   "connected-demo-preflight-v1" as const;
 export const CONNECTED_DEMO_BOUNDARY_VERSION =
   "connected-demo-boundary-v1" as const;
+export const DEMO_UPLOAD_CONTRACT_VERSION = "demo-upload-v1" as const;
 
 export type ConnectedDemoDependencyName =
   "delivery" | "model" | "postgres" | "storage" | "vector";
@@ -33,6 +34,77 @@ export interface ConnectedDemoPreflightView {
   readonly contractVersion: typeof CONNECTED_DEMO_PREFLIGHT_VERSION;
   readonly dependencies: readonly ConnectedDemoPreflightDependency[];
   readonly status: "ready" | "unavailable";
+}
+
+export type DemoUploadMediaType =
+  | "application/epub+zip"
+  | "application/pdf"
+  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export interface DemoSourceApproval {
+  readonly approvalId: string;
+  readonly attribution: string;
+  readonly contractVersion: typeof DEMO_UPLOAD_CONTRACT_VERSION;
+  readonly extension: "docx" | "epub" | "pdf";
+  readonly licenseLabel: string;
+  readonly mediaType: DemoUploadMediaType;
+  readonly sourceRevision: string;
+  readonly title: string;
+}
+
+export type DemoUploadState =
+  | "accepted"
+  | "failed"
+  | "large_document"
+  | "ocr_required"
+  | "outline_ready"
+  | "parsing"
+  | "queued"
+  | "validating";
+
+export type DemoUploadFailureCode =
+  | "active_content"
+  | "archive_limit"
+  | "dependency_unavailable"
+  | "encrypted"
+  | "malformed_document"
+  | "malware_detected"
+  | "mime_mismatch"
+  | "over_limit"
+  | "parser_failed"
+  | "source_not_approved"
+  | "unsupported_type";
+
+export interface DemoUploadView {
+  readonly approvalId: string;
+  readonly contractVersion: typeof DEMO_UPLOAD_CONTRACT_VERSION;
+  readonly courseId: string | null;
+  readonly failure: {
+    readonly code: DemoUploadFailureCode;
+    readonly retryable: boolean;
+  } | null;
+  readonly processingLane: "large" | "standard" | null;
+  readonly state: DemoUploadState;
+  readonly statusUpdatedAt: string;
+  readonly uploadId: string;
+}
+
+export interface DemoCourseOutline {
+  readonly chapters: readonly {
+    readonly chapterId: string;
+    readonly concepts: readonly {
+      readonly conceptId: string;
+      readonly name: string;
+      readonly sourceSpanCount: number;
+    }[];
+    readonly order: number;
+    readonly title: string;
+  }[];
+  readonly contractVersion: typeof DEMO_UPLOAD_CONTRACT_VERSION;
+  readonly courseId: string;
+  readonly generatedAt: string;
+  readonly title: string;
+  readonly uploadId: string;
 }
 
 export interface ConnectedStudyQuestion {

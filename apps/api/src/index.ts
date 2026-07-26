@@ -3,6 +3,7 @@ import { readServerEnvironment, type Deployment } from "@reflo/config";
 import { createAccountRuntime } from "./account-composition.js";
 import { createConnectedDemoRuntime } from "./connected-composition.js";
 import { createDeliveryRuntime } from "./delivery-composition.js";
+import { createDemoUploadRuntime } from "./demo-upload-composition.js";
 import { createApiServer } from "./server.js";
 
 const environment = readServerEnvironment(process.env, {
@@ -24,11 +25,16 @@ const connectedRuntime = createConnectedDemoRuntime(
   process.env,
   environment.deployment,
 );
+const demoUploadRuntime = createDemoUploadRuntime(
+  process.env,
+  environment.deployment,
+);
 const now = demoClock(process.env, environment.deployment);
 const server = createApiServer(environment, {
   accounts: accountRuntime.accounts,
   assessment: connectedRuntime.assessment,
   delivery: deliveryRuntime.delivery,
+  demoUploads: demoUploadRuntime.demoUploads,
   localAuthInbox: accountRuntime.localInbox,
   now,
   preflight: connectedRuntime.preflight,
@@ -51,6 +57,7 @@ function shutdown(signal: NodeJS.Signals) {
       accountRuntime.close(),
       connectedRuntime.close(),
       deliveryRuntime.close(),
+      demoUploadRuntime.close(),
     ]);
     if (cleanup.some((result) => result.status === "rejected")) {
       process.exitCode = 1;

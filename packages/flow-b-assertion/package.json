@@ -7,7 +7,8 @@
   "types": "dist/index.d.ts",
   "bin": {
     "reflo-flow-b-assert": "dist/cli.js",
-    "reflo-flow-b-local-run": "dist/local-run.js"
+    "reflo-flow-b-local-run": "dist/local-run.js",
+    "reflo-flow-b-rehearsal": "dist/rehearsal-cli.js"
   },
   "files": [
     "dist"

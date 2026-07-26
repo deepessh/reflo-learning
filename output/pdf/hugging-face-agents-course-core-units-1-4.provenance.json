@@ -1,0 +1,1987 @@
+{
+  "artifact": "hugging-face-agents-course-core-units-1-4.pdf",
+  "source": {
+    "repository": "https://github.com/huggingface/agents-course",
+    "revision": "8c0832eae634ebb34541c65265caa6da4c5d2c57",
+    "retrieved": "2026-07-25",
+    "language": "English"
+  },
+  "license": {
+    "name": "Apache License 2.0",
+    "source_file": "LICENSE",
+    "included_in_pdf": true,
+    "adaptation_notice_included": true
+  },
+  "scope": {
+    "included": [
+      "Unit 1 - Introduction to Agents",
+      "Unit 2 - Frameworks for AI Agents",
+      "Unit 2.1 - smolagents",
+      "Unit 2.2 - LlamaIndex",
+      "Unit 2.3 - LangGraph",
+      "Unit 3 - Agentic RAG",
+      "Unit 4 - Final Project"
+    ],
+    "excluded": [
+      "Unit 0 onboarding",
+      "live/community material",
+      "all bonus units",
+      "translations",
+      "repository tooling",
+      "remote images, videos, iframes, and third-party embeds",
+      "navigation-only README indexes not listed in units/en/_toctree.yml (units/en/unit1/README.md, units/en/unit2/llama-index/README.md, units/en/unit3/README.md); they duplicate section links and contain no core lesson prose"
+    ],
+    "source_file_count": 56,
+    "source_files": [
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Introduction",
+        "path": "units/en/unit1/introduction.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "What is an Agent?",
+        "path": "units/en/unit1/what-are-agents.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Quick Quiz 1",
+        "path": "units/en/unit1/quiz1.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "What are LLMs?",
+        "path": "units/en/unit1/what-are-llms.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Messages and Special Tokens",
+        "path": "units/en/unit1/messages-and-special-tokens.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "What are Tools?",
+        "path": "units/en/unit1/tools.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Quick Quiz 2",
+        "path": "units/en/unit1/quiz2.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Understanding AI Agents through the Thought-Action-Observation Cycle",
+        "path": "units/en/unit1/agent-steps-and-structure.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Thought, Internal Reasoning and the Re-Act Approach",
+        "path": "units/en/unit1/thoughts.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Actions, Enabling the Agent to Engage with Its Environment",
+        "path": "units/en/unit1/actions.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Observe, Integrating Feedback to Reflect and Adapt",
+        "path": "units/en/unit1/observations.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Dummy Agent Library",
+        "path": "units/en/unit1/dummy-agent-library.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Let’s Create Our First Agent Using smolagents",
+        "path": "units/en/unit1/tutorial.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Unit 1 Final Quiz",
+        "path": "units/en/unit1/final-quiz.mdx"
+      },
+      {
+        "group": "Unit 1. Introduction to Agents",
+        "title": "Conclusion",
+        "path": "units/en/unit1/conclusion.mdx"
+      },
+      {
+        "group": "Unit 2. Frameworks for AI Agents",
+        "title": "Frameworks for AI Agents",
+        "path": "units/en/unit2/introduction.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Introduction to smolagents",
+        "path": "units/en/unit2/smolagents/introduction.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Why use smolagents?",
+        "path": "units/en/unit2/smolagents/why_use_smolagents.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Quick Quiz 1",
+        "path": "units/en/unit2/smolagents/quiz1.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Building Agents That Use Code",
+        "path": "units/en/unit2/smolagents/code_agents.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Writing actions as code snippets or JSON blobs",
+        "path": "units/en/unit2/smolagents/tool_calling_agents.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Tools",
+        "path": "units/en/unit2/smolagents/tools.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Retrieval Agents",
+        "path": "units/en/unit2/smolagents/retrieval_agents.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Quick Quiz 2",
+        "path": "units/en/unit2/smolagents/quiz2.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Multi-Agent Systems",
+        "path": "units/en/unit2/smolagents/multi_agent_systems.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Vision and Browser agents",
+        "path": "units/en/unit2/smolagents/vision_agents.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Final Quiz",
+        "path": "units/en/unit2/smolagents/final_quiz.mdx"
+      },
+      {
+        "group": "Unit 2.1 The smolagents framework",
+        "title": "Conclusion",
+        "path": "units/en/unit2/smolagents/conclusion.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Introduction to LLamaIndex",
+        "path": "units/en/unit2/llama-index/introduction.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Introduction to LlamaHub",
+        "path": "units/en/unit2/llama-index/llama-hub.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "What are Components in LlamaIndex?",
+        "path": "units/en/unit2/llama-index/components.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Using Tools in LlamaIndex",
+        "path": "units/en/unit2/llama-index/tools.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Quick Quiz 1",
+        "path": "units/en/unit2/llama-index/quiz1.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Using Agents in LlamaIndex",
+        "path": "units/en/unit2/llama-index/agents.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Creating Agentic Workflows in LlamaIndex",
+        "path": "units/en/unit2/llama-index/workflows.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Quick Quiz 2",
+        "path": "units/en/unit2/llama-index/quiz2.mdx"
+      },
+      {
+        "group": "Unit 2.2 The LlamaIndex framework",
+        "title": "Conclusion",
+        "path": "units/en/unit2/llama-index/conclusion.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "Introduction to LangGraph",
+        "path": "units/en/unit2/langgraph/introduction.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "What is LangGraph?",
+        "path": "units/en/unit2/langgraph/when_to_use_langgraph.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "Building Blocks of LangGraph",
+        "path": "units/en/unit2/langgraph/building_blocks.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "Building Your First LangGraph",
+        "path": "units/en/unit2/langgraph/first_graph.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "Document Analysis Graph",
+        "path": "units/en/unit2/langgraph/document_analysis_agent.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "Quick Quiz 1",
+        "path": "units/en/unit2/langgraph/quiz1.mdx"
+      },
+      {
+        "group": "Unit 2.3 The LangGraph framework",
+        "title": "Conclusion",
+        "path": "units/en/unit2/langgraph/conclusion.mdx"
+      },
+      {
+        "group": "Unit 3. Use Case for Agentic RAG",
+        "title": "Introduction to Use Case for Agentic RAG",
+        "path": "units/en/unit3/agentic-rag/introduction.mdx"
+      },
+      {
+        "group": "Unit 3. Use Case for Agentic RAG",
+        "title": "Agentic Retrieval Augmented Generation (RAG)",
+        "path": "units/en/unit3/agentic-rag/agentic-rag.mdx"
+      },
+      {
+        "group": "Unit 3. Use Case for Agentic RAG",
+        "title": "Creating a RAG Tool for Guest Stories",
+        "path": "units/en/unit3/agentic-rag/invitees.mdx"
+      },
+      {
+        "group": "Unit 3. Use Case for Agentic RAG",
+        "title": "Building and Integrating Tools for Your Agent",
+        "path": "units/en/unit3/agentic-rag/tools.mdx"
+      },
+      {
+        "group": "Unit 3. Use Case for Agentic RAG",
+        "title": "Creating Your Gala Agent",
+        "path": "units/en/unit3/agentic-rag/agent.mdx"
+      },
+      {
+        "group": "Unit 3. Use Case for Agentic RAG",
+        "title": "Conclusion",
+        "path": "units/en/unit3/agentic-rag/conclusion.mdx"
+      },
+      {
+        "group": "Unit 4. Final Project - Create, Test, and Certify Your Agent",
+        "title": "Introduction to the Final Unit",
+        "path": "units/en/unit4/introduction.mdx"
+      },
+      {
+        "group": "Unit 4. Final Project - Create, Test, and Certify Your Agent",
+        "title": "What is GAIA?",
+        "path": "units/en/unit4/what-is-gaia.mdx"
+      },
+      {
+        "group": "Unit 4. Final Project - Create, Test, and Certify Your Agent",
+        "title": "The Final Hands-On",
+        "path": "units/en/unit4/hands-on.mdx"
+      },
+      {
+        "group": "Unit 4. Final Project - Create, Test, and Certify Your Agent",
+        "title": "Get Your Certificate Of Excellence",
+        "path": "units/en/unit4/get-your-certificate.mdx"
+      },
+      {
+        "group": "Unit 4. Final Project - Create, Test, and Certify Your Agent",
+        "title": "Conclusion of the Course",
+        "path": "units/en/unit4/conclusion.mdx"
+      },
+      {
+        "group": "Unit 4. Final Project - Create, Test, and Certify Your Agent",
+        "title": "What Should You Learn Now?",
+        "path": "units/en/unit4/additional-readings.mdx"
+      }
+    ],
+    "omitted_media_references": 96
+  },
+  "adaptation": {
+    "format": "digitally generated, text-first PDF",
+    "changes": [
+      "combined core English units into one document",
+      "removed site navigation and onboarding/community boilerplate",
+      "normalized Markdown and MDX into print layout",
+      "omitted remote media and embeds",
+      "retained instructional prose, examples, exercises, and core quizzes in source order"
+    ],
+    "generator": "tmp/pdfs/build_agents_course_pdf.py"
+  },
+  "artifact_metrics": {
+    "sha256": "0cf0a55563ecc7efb2bcb8dc04b942f31a4fb1ac482a664ff7bae3d0e15d7ca9",
+    "bytes": 478301,
+    "pages": 133,
+    "page_dimensions_points": [[612.0, 792.0]],
+    "within_reflo_standard_profile": true
+  },
+  "verification": {
+    "status": "passed",
+    "failures": [],
+    "rendered_with_poppler": true,
+    "automated": {
+      "pdf_reopened_with_pypdf": true,
+      "all_pages_checked_with_pdfplumber": true,
+      "all_pages_have_extractable_text": true,
+      "uniform_us_letter_dimensions": true,
+      "all_text_within_safe_page_bounds": true,
+      "no_replacement_or_tofu_characters": true,
+      "complete_source_license_verified_in_appendix": true,
+      "source_listing_paths_unique_and_present": true,
+      "source_revision_verified": true,
+      "page_and_byte_limits_passed": true
+    },
+    "rendering": {
+      "renderer": "pdftoppm version 26.01.0",
+      "command": "XDG_CACHE_HOME=/tmp/codex-font-cache /usr/local/bin/pdftoppm -r 110 -png <pdf> tmp/pdfs/rendered/page",
+      "dpi": 110,
+      "directory": "tmp/pdfs/rendered",
+      "rendered_page_count": 133,
+      "render_dimensions_pixels": [[935, 1210]],
+      "all_renders_nontrivial": true
+    },
+    "visual_review": {
+      "status": "passed",
+      "pages": [1, 2, 3, 4, 28, 39, 41, 75, 92, 108, 127, 132, 133],
+      "coverage": [
+        "cover and prominent adaptation notice",
+        "contents and source-file listing",
+        "representative prose and remote-media omission notes",
+        "code block legibility and wrapping",
+        "Unit 2, smolagents, LlamaIndex, LangGraph, Unit 3, and Unit 4 transitions",
+        "complete-license appendix opening",
+        "final license page and footer"
+      ],
+      "result": "No clipping, overlap, blank pages, broken glyphs, unreadable code, or inconsistent headers/footers observed in the final render."
+    },
+    "page_statistics": [
+      {
+        "page": 1,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 971,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 555.0399762399999,
+          "min_top": 120.88212840000006,
+          "max_bottom": 461.74150376
+        }
+      },
+      {
+        "page": 2,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2405,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399504999999,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 3,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1914,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399504999999,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 4,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2034,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399504999999,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 5,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2583,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399670400002,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 6,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3201,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399665200001,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 7,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2948,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399504999999,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 8,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2508,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399766200007,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 9,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2550,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.0399721400009,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 10,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2543,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 11,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3206,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 12,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3450,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 13,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3364,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 14,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2880,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 15,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3198,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 16,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2801,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 17,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2903,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 18,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3133,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 19,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2139,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 20,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2432,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 21,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2255,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 22,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1744,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 23,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2247,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 24,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2460,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 25,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3083,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 26,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2186,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 27,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2668,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 28,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3259,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 29,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2571,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 30,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2970,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 31,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2890,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 32,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2649,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 33,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2976,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 34,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2821,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 35,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2841,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 36,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2520,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 37,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2404,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 38,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 479,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 39,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1856,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 40,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 847,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 41,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3213,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 42,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3511,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 43,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2608,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 44,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3123,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 45,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2822,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 46,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2925,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 47,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2861,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 48,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3264,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 49,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3634,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 50,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2208,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 51,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3548,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 52,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3245,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 53,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2768,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 54,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2570,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 55,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2881,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 56,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2628,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 57,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2960,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 58,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2901,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 59,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3012,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 60,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2462,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 61,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3033,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 62,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2951,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 63,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2814,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 64,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2029,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 65,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2462,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 66,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3248,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 67,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2356,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 68,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2617,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 69,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2623,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 70,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3150,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 71,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3604,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 72,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3627,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 73,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2431,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 74,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 79,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 75,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2993,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 76,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2747,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 77,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3913,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 78,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3039,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 79,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3120,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 80,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2910,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 81,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3170,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 82,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2756,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 83,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2101,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 84,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3062,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 85,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2863,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 86,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2412,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 87,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2416,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 88,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2714,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 89,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2349,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 90,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1820,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 91,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1860,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 92,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2232,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 93,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3161,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 94,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2168,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 95,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1824,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 96,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2143,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 97,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2403,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 98,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2237,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 99,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2536,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.03999275,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 100,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2925,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 101,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2249,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 102,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1410,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 103,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2396,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 104,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2392,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 105,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2573,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 106,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2543,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 107,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 457,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 108,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3186,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 109,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2876,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 110,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2485,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 111,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2255,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 112,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2871,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 113,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2819,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 114,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2633,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 115,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2737,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 116,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2774,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 117,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2604,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 118,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2600,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 119,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2805,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 120,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2478,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 121,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2434,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 122,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3234,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 123,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3100,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 124,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3885,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 125,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2575,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 126,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 606,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 127,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2459,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 128,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2828,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 129,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3188,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 130,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 2297,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 131,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 1387,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 132,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 6611,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      },
+      {
+        "page": 133,
+        "width_points": 612.0,
+        "height_points": 792.0,
+        "extracted_characters": 3825,
+        "text_bounds_points": {
+          "min_x": 48.96,
+          "max_x": 563.040035,
+          "min_top": 18.55836899999997,
+          "max_bottom": 769.098369
+        }
+      }
+    ]
+  },
+  "generation": {
+    "date": "2026-07-25",
+    "generator": "tmp/pdfs/build_agents_course_pdf.py",
+    "engine": "ReportLab",
+    "python_executable": "/Users/deepeshchaudhary/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+    "page_size": "US Letter (612 x 792 points)",
+    "source_order": "units/en/_toctree.yml",
+    "target_limits": {
+      "pages": 200,
+      "bytes": 20971520
+    }
+  }
+}

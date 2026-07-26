@@ -1,7 +1,8 @@
 # Reflo — Product Requirements Document
 
-**Version:** 2.1 · **Date:** July 24, 2026 · **Status:** Approved for build sprint
-**Changelog:** v2.1 — narrowed Demo Day to the connected online application; removed the offline bundle, service-worker fallback, and online/offline Flow B parity requirements while retaining the seeded online Flow B, separate upload demonstration, honest labeling, rehearsed failure handling, and demo-only safety boundary
+**Version:** 2.2 · **Date:** July 25, 2026 · **Status:** Approved for build sprint
+**Changelog:** v2.2 — selected the attributed Apache-2.0 Hugging Face Agents Course core Units 1–4 as the human-approved seeded Demo Day source; made Alibaba Cloud ACA a future strategic source rather than a Demo Day dependency; retained the rights-cleared, demo-only, and honest-labeling boundaries
+v2.1 — narrowed Demo Day to the connected online application; removed the offline bundle, service-worker fallback, and online/offline Flow B parity requirements while retaining the seeded online Flow B, separate upload demonstration, honest labeling, rehearsed failure handling, and demo-only safety boundary
 v2.0 — made the hackathon demo-only through Demo Day; removed external pilot recruitment, activation gates, cohort metrics, and experimentation from the sprint; moved the real-user pilot and its consent, privacy, content-rights attestation, authorization, opt-out, deletion/export, provider-verification, and rollout requirements post-hackathon
 v1.9 — separated product requirements from architecture authority; retained product behavior, priorities, safety/privacy outcomes, SLOs, pilot gates, offline behavior, and honest labeling while moving providers, topology, storage, schema catalogs, algorithms, and implementation mechanisms to accepted ADRs
 v1.8 — narrowed the sprint video scope to one source-backed nominal 15-second Wan prototype; deferred production 60–120 second composition and full-course video generation to fast-follow
@@ -208,7 +209,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 ## 13. Sprint Plan (July 17 – Aug 7)
 
-**Pre-sprint Builder Day (Jul 16).** The planned asks were: (1) media and audio capacity approval, (2) model rate limits raised for batch generation, (3) advisory validation of the sprint vector-store decision, (4) a named contact for the accelerator benchmark track, and (5) openly licensed Alibaba Cloud ACA study materials (resolves §15 Q1). At kickoff on Jul 17, record each outcome and owner in GitHub; carry forward unresolved quota, content, or benchmark actions rather than describing Jul 16 work as current.
+**Pre-sprint Builder Day (Jul 16).** The planned asks were: (1) media and audio capacity approval, (2) model rate limits raised for batch generation, (3) advisory validation of the sprint vector-store decision, (4) a named contact for the accelerator benchmark track, and (5) openly licensed Alibaba Cloud ACA study materials. At kickoff on Jul 17, record each outcome and owner in GitHub; carry forward unresolved quota, content, or benchmark actions rather than describing Jul 16 work as current. The ACA-materials ask did not produce a rights-cleared source. On Jul 25, the human product owner resolved §15 Q1 by approving the attributed Apache-2.0 Hugging Face Agents Course core Units 1–4 as the seeded Demo Day source; this is an AI-agent learning demo and must not be described as ACA certification content or Alibaba-provided material.
 
 **Week 1 (Jul 17–23) — Pipeline & skeleton.** Secure ingestion end-to-end with source spans, primary + fallback audio generation, authorized private-asset delivery, demo identity + library UI, quiz generation v1, and one nominal 15-second source-backed video prototype behind the P1 video flag. Freeze the rights-cleared seeded demo source and synthetic/test identities. *Exit: the core pipeline works with the seeded course; benchmark and evaluation results are recorded honestly without becoming pilot-activation gates.*
 
@@ -239,7 +240,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 ---
 
 ## 15. Open Questions
-1. Demo certification: Alibaba Cloud ACA is the strategic pick — record the Jul 16 Builder Day licensing answer; fallback: an openly licensed cloud/PM guide. A human owner must approve content-rights claims before public demo use.
+1. ~~Demo source~~ — resolved for Demo Day: use the attributed Apache-2.0 Hugging Face Agents Course core Units 1–4, pinned to upstream revision `8c0832eae634ebb34541c65265caa6da4c5d2c57`, with the human approval and rights evidence recorded in GitHub issue #36. The seeded artifact excludes onboarding, live/community material, bonus units, translations, repository tooling, and remote media. Present it as an AI-agent learning course, not ACA certification content or Alibaba-provided material. Alibaba Cloud ACA remains a future strategic source only and is not a Demo Day dependency.
 2. Post-hackathon pilot design: cohort size, free versus paid terms, consent/privacy readiness, eligible sources, and activation timing require a new human decision after Demo Day.
 3. ~~Placement quiz length~~ — resolved for the sprint: 10 questions to protect activation. Revisit a 10-vs-20 experiment post-demo only if activation and evidence-quality data justify it.
 4. ~~Voice tutoring live or clip~~ — resolved in F5: recorded clip unless ahead of schedule after Week 2

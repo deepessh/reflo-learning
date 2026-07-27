@@ -11,12 +11,12 @@ ownership:
   implementation_owner: "Owner of issue #182"
 authorization:
   decider: "@deepessh, repository owner and founding-team product and architecture authority"
-  approval_basis: "Owner-authorized preservation of the unchanged PRD v2.2 F1 120-second target while replacing the demonstrated non-compliant monolithic curriculum call, as stated in the exact verdict comment."
+  approval_basis: "This preserves PRD v2.2 F1’s unchanged standard-profile 120-second target while replacing the demonstrated non-compliant monolithic curriculum call. It preserves ADRs 0009, 0012, 0024, and 0034 and authorizes ADR 0010 to be extended or partially superseded only for curriculum orchestration."
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/181
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/181#issuecomment-5087796292
-  record_pr: https://github.com/deepessh/reflo-learning/pull/0
+  record_pr: https://github.com/deepessh/reflo-learning/pull/185
 supersedes: []
 superseded_by: null
 deprecation: null

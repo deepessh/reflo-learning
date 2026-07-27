@@ -29,6 +29,7 @@ test("toolchain policy reports Turbo environment drift", () => {
       ".nvmrc",
       ".github/workflows/ci.yml",
       "package.json",
+      ".env.example",
       "turbo.json",
       "scripts/toolchain-versions.sh",
       "scripts/requirements-governance.txt",
@@ -40,6 +41,10 @@ test("toolchain policy reports Turbo environment drift", () => {
       "packages/db/scripts/dump-schema-from-container.sh",
       "packages/db/scripts/pg-dump-from-container.sh",
       "packages/db/test/schema.test.mjs",
+      "packages/ingestion/package.json",
+      "packages/ingestion/src/index.ts",
+      "apps/api/src/demo-upload-composition.ts",
+      "scripts/local-workers.mjs",
     ]) {
       const target = path.join(fixture, relative);
       mkdirSync(path.dirname(target), { recursive: true });
@@ -74,6 +79,19 @@ test("toolchain policy reports Turbo environment drift", () => {
     assert.match(
       checkToolchainPolicy(fixture).join("\n"),
       /turbo dev env must pass REFLO_DEMO_UPLOAD_PROCESSOR_MODE/,
+    );
+
+    const ingestionIndexPath = path.join(
+      fixture,
+      "packages/ingestion/src/index.ts",
+    );
+    writeFileSync(
+      ingestionIndexPath,
+      `${readFileSync(ingestionIndexPath, "utf8")}\nexport * from "./adapters/alibaba-kms.js";\n`,
+    );
+    assert.match(
+      checkToolchainPolicy(fixture).join("\n"),
+      /must not retain a KMS signer, key pin, or detached Reflo signature/,
     );
 
     const packagePath = path.join(fixture, "package.json");

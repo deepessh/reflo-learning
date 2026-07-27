@@ -10,50 +10,50 @@ import {
 } from "../contracts.js";
 import { IngestionError } from "../errors.js";
 import type { MalwareScannerPort, ProcessRunnerPort } from "../ports.js";
-import {
-  CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
-  decodeStrictPaddedBase64P256Der,
-} from "./clamav-signature.js";
 
-export const CLAMAV_SNAPSHOT_MANIFEST_CONTRACT = "snapshot-manifest-v1";
+export const CLAMAV_UPSTREAM_SNAPSHOT_PROFILE =
+  "upstream-clamav-cloud-demo-v1" as const;
+export const CLAMAV_UPSTREAM_SNAPSHOT_MANIFEST_CONTRACT =
+  "upstream-clamav-snapshot-manifest-v1" as const;
+
 const MAX_MANIFEST_BYTES = 256 * 1_024;
 const MAX_DIAGNOSTIC_BYTES = 8 * 1_024;
+const MAX_SNAPSHOT_AGE_MS = 24 * 60 * 60_000;
+const MAX_FUTURE_SKEW_MS = 5 * 60_000;
+const SNAPSHOT_ID_PATTERN = /^cvd-[a-f0-9]{32}$/;
 
-interface SnapshotFile {
+export interface UpstreamClamAvSnapshotFile {
+  readonly buildTime: string;
   readonly byteLength: number;
+  readonly databaseVersion: number;
   readonly name: string;
   readonly sha256: string;
 }
 
-interface SnapshotManifest {
-  readonly clamAvVersion: string;
-  readonly contractVersion: typeof CLAMAV_SNAPSHOT_MANIFEST_CONTRACT;
-  readonly files: readonly SnapshotFile[];
-  readonly kid: string;
-  readonly publishedAt: string;
-  readonly publicKeySpkiSha256: string;
-  readonly signatureProfile: typeof CLAMAV_SNAPSHOT_SIGNATURE_PROFILE;
-  readonly snapshotId: string;
+export interface UpstreamClamAvToolchainIdentity {
+  readonly freshClamImageDigest: string;
+  readonly sigtoolVersion: string;
 }
 
-export interface SnapshotSignatureVerifierPort {
-  verify(input: {
-    readonly kid: string;
-    readonly payload: Uint8Array;
-    readonly profile: string;
-    readonly publicKeySpkiSha256: string;
-    readonly signature: Uint8Array;
-  }): Promise<boolean>;
+export interface UpstreamClamAvSnapshotManifest {
+  readonly clamAvVersion: string;
+  readonly contractVersion: typeof CLAMAV_UPSTREAM_SNAPSHOT_MANIFEST_CONTRACT;
+  readonly files: readonly UpstreamClamAvSnapshotFile[];
+  readonly profile: typeof CLAMAV_UPSTREAM_SNAPSHOT_PROFILE;
+  readonly publishedAt: string;
+  readonly snapshotId: string;
+  readonly toolchain: UpstreamClamAvToolchainIdentity;
 }
 
 export interface ClamAvScannerOptions {
+  readonly clock?: { now(): Date };
   readonly databaseDirectory: string;
   readonly executable: "clamscan";
-  readonly expectedSignatureProfile: string;
+  readonly expectedFreshClamImageDigest: string;
+  readonly expectedProfile: typeof CLAMAV_UPSTREAM_SNAPSHOT_PROFILE;
+  readonly expectedSnapshotId: string;
   readonly manifestPath: string;
   readonly runner: ProcessRunnerPort;
-  readonly signaturePath: string;
-  readonly signatureVerifier: SnapshotSignatureVerifierPort;
 }
 
 export class ClamAvScannerAdapter implements MalwareScannerPort {
@@ -65,10 +65,11 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
       options.executable !== "clamscan" ||
       !path.isAbsolute(options.databaseDirectory) ||
       !path.isAbsolute(options.manifestPath) ||
-      !path.isAbsolute(options.signaturePath) ||
       path.dirname(options.manifestPath) !== options.databaseDirectory ||
-      path.dirname(options.signaturePath) !== options.databaseDirectory ||
-      !/^[a-z0-9._-]{1,128}$/.test(options.expectedSignatureProfile)
+      path.basename(options.databaseDirectory) !== options.expectedSnapshotId ||
+      !SNAPSHOT_ID_PATTERN.test(options.expectedSnapshotId) ||
+      !/^sha256:[a-f0-9]{64}$/.test(options.expectedFreshClamImageDigest) ||
+      options.expectedProfile !== CLAMAV_UPSTREAM_SNAPSHOT_PROFILE
     ) {
       throw new IngestionError("infrastructure_unavailable");
     }
@@ -81,41 +82,57 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
         this.#options.manifestPath,
         MAX_MANIFEST_BYTES,
       );
-      const signatureText = (
-        await readRegularFile(this.#options.signaturePath, 16 * 1_024)
-      ).toString("ascii");
-      const signature = decodeStrictPaddedBase64P256Der(signatureText);
-      const manifest = parseManifest(manifestBytes);
+      const manifest = parseUpstreamClamAvManifest(manifestBytes);
       if (
-        signature === null ||
-        !(await this.#options.signatureVerifier.verify({
-          kid: manifest.kid,
-          payload: manifestBytes,
-          profile: this.#options.expectedSignatureProfile,
-          publicKeySpkiSha256: manifest.publicKeySpkiSha256,
-          signature,
-        }))
+        manifest.profile !== this.#options.expectedProfile ||
+        manifest.snapshotId !== this.#options.expectedSnapshotId ||
+        manifest.toolchain.freshClamImageDigest !==
+          this.#options.expectedFreshClamImageDigest ||
+        upstreamClamAvSnapshotId(manifest) !== manifest.snapshotId
       ) {
         return null;
       }
+      const now = this.#options.clock?.now() ?? new Date();
+      if (!snapshotIsFresh(manifest, now)) {
+        return null;
+      }
+      const version = await this.#options.runner.run("sigtool", ["--version"], {
+        maxOutputBytes: MAX_DIAGNOSTIC_BYTES,
+        timeoutMs: 5_000,
+      });
       if (
-        manifest.signatureProfile !== this.#options.expectedSignatureProfile ||
-        manifest.signatureProfile !== CLAMAV_SNAPSHOT_SIGNATURE_PROFILE
+        version.timedOut ||
+        version.exitCode !== 0 ||
+        version.stdout.trim() !== manifest.toolchain.sigtoolVersion ||
+        !new RegExp(
+          `^ClamAV ${escapeRegex(INGESTION_COMPONENTS.clamAv)}(?:/|\\s|$)`,
+        ).test(version.stdout)
       ) {
         return null;
       }
       await verifySnapshotFiles(
         this.#options.databaseDirectory,
         manifest.files,
-        [
-          path.basename(this.#options.manifestPath),
-          path.basename(this.#options.signaturePath),
-        ],
+        [path.basename(this.#options.manifestPath)],
       );
-      const publishedAt = new Date(manifest.publishedAt);
-      if (!Number.isFinite(publishedAt.getTime())) {
-        return null;
+      for (const file of manifest.files) {
+        const result = await this.#options.runner.run(
+          "sigtool",
+          ["--info", path.join(this.#options.databaseDirectory, file.name)],
+          { maxOutputBytes: MAX_DIAGNOSTIC_BYTES, timeoutMs: 60_000 },
+        );
+        if (result.timedOut || result.exitCode !== 0) {
+          return null;
+        }
+        const verified = parseSigtoolDatabaseInfo(result.stdout);
+        if (
+          verified.buildTime !== file.buildTime ||
+          verified.databaseVersion !== file.databaseVersion
+        ) {
+          return null;
+        }
       }
+      const publishedAt = new Date(manifest.publishedAt);
       this.#verifiedSnapshotIdentity = snapshotIdentity(
         publishedAt,
         manifest.snapshotId,
@@ -180,50 +197,102 @@ export class ClamAvScannerAdapter implements MalwareScannerPort {
   }
 }
 
-function parseManifest(bytes: Buffer): SnapshotManifest {
-  const value: unknown = JSON.parse(bytes.toString("utf8"));
+export function upstreamClamAvSnapshotId(
+  input: Omit<UpstreamClamAvSnapshotManifest, "snapshotId">,
+): string {
+  const identity = Buffer.from(
+    JSON.stringify({
+      clamAvVersion: input.clamAvVersion,
+      contractVersion: input.contractVersion,
+      files: input.files,
+      profile: input.profile,
+      publishedAt: input.publishedAt,
+      toolchain: input.toolchain,
+    }),
+    "utf8",
+  );
+  return `cvd-${createHash("sha256").update(identity).digest("hex").slice(0, 32)}`;
+}
+
+export function parseSigtoolDatabaseInfo(output: string): {
+  readonly buildTime: string;
+  readonly databaseVersion: number;
+} {
+  if (!/^Verification OK\.$/m.test(output)) {
+    throw new Error("upstream signature verification failed");
+  }
+  const buildTime = new Date(output.match(/^Build time: (.+)$/m)?.[1] ?? "");
+  const databaseVersion = Number(output.match(/^Version: ([0-9]+)$/m)?.[1]);
+  if (
+    !Number.isFinite(buildTime.getTime()) ||
+    !Number.isSafeInteger(databaseVersion) ||
+    databaseVersion < 1
+  ) {
+    throw new Error("invalid upstream database metadata");
+  }
+  return {
+    buildTime: buildTime.toISOString(),
+    databaseVersion,
+  };
+}
+
+export function parseUpstreamClamAvManifest(
+  bytes: Uint8Array,
+): UpstreamClamAvSnapshotManifest {
+  const value: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
       "clamAvVersion",
       "contractVersion",
       "files",
-      "kid",
+      "profile",
       "publishedAt",
-      "publicKeySpkiSha256",
-      "signatureProfile",
       "snapshotId",
-    ])
-  ) {
-    throw new Error("invalid snapshot manifest");
-  }
-  if (
-    value.contractVersion !== CLAMAV_SNAPSHOT_MANIFEST_CONTRACT ||
+      "toolchain",
+    ]) ||
+    value.contractVersion !== CLAMAV_UPSTREAM_SNAPSHOT_MANIFEST_CONTRACT ||
+    value.profile !== CLAMAV_UPSTREAM_SNAPSHOT_PROFILE ||
     value.clamAvVersion !== INGESTION_COMPONENTS.clamAv ||
-    value.signatureProfile !== CLAMAV_SNAPSHOT_SIGNATURE_PROFILE ||
-    typeof value.kid !== "string" ||
-    !/^[A-Za-z0-9._-]{1,128}$/.test(value.kid) ||
-    typeof value.publicKeySpkiSha256 !== "string" ||
-    !/^[a-f0-9]{64}$/.test(value.publicKeySpkiSha256) ||
     typeof value.publishedAt !== "string" ||
     typeof value.snapshotId !== "string" ||
-    !/^[A-Za-z0-9._-]{1,128}$/.test(value.snapshotId) ||
-    !Array.isArray(value.files) ||
-    value.files.length < 1 ||
-    value.files.length > 128
+    !SNAPSHOT_ID_PATTERN.test(value.snapshotId) ||
+    !isRecord(value.toolchain) ||
+    !hasExactKeys(value.toolchain, [
+      "freshClamImageDigest",
+      "sigtoolVersion",
+    ]) ||
+    typeof value.toolchain.freshClamImageDigest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/.test(value.toolchain.freshClamImageDigest) ||
+    typeof value.toolchain.sigtoolVersion !== "string" ||
+    !new RegExp(
+      `^ClamAV ${escapeRegex(INGESTION_COMPONENTS.clamAv)}(?:/|\\s|$)`,
+    ).test(value.toolchain.sigtoolVersion) ||
+    !Array.isArray(value.files)
   ) {
     throw new Error("invalid snapshot manifest");
   }
+  const files = value.files as unknown[];
   const names = new Set<string>();
-  for (const file of value.files) {
+  for (const file of files) {
     if (
       !isRecord(file) ||
-      !hasExactKeys(file, ["byteLength", "name", "sha256"]) ||
-      typeof file.name !== "string" ||
-      !/^[A-Za-z0-9._-]{1,128}$/.test(file.name) ||
-      names.has(file.name) ||
+      !hasExactKeys(file, [
+        "buildTime",
+        "byteLength",
+        "databaseVersion",
+        "name",
+        "sha256",
+      ]) ||
+      typeof file.buildTime !== "string" ||
+      !Number.isFinite(new Date(file.buildTime).getTime()) ||
       !Number.isSafeInteger(file.byteLength) ||
       (file.byteLength as number) < 1 ||
+      !Number.isSafeInteger(file.databaseVersion) ||
+      (file.databaseVersion as number) < 1 ||
+      typeof file.name !== "string" ||
+      !/^(?:bytecode|daily|main)\.(?:cld|cvd)$/.test(file.name) ||
+      names.has(file.name) ||
       typeof file.sha256 !== "string" ||
       !/^[a-f0-9]{64}$/.test(file.sha256)
     ) {
@@ -231,12 +300,51 @@ function parseManifest(bytes: Buffer): SnapshotManifest {
     }
     names.add(file.name);
   }
-  return value as unknown as SnapshotManifest;
+  assertClosedDatabaseSet([...names]);
+  if (
+    files.some(
+      (file, index) =>
+        (file as { readonly name: string }).name !== [...names].sort()[index],
+    )
+  ) {
+    throw new Error("invalid snapshot manifest");
+  }
+  return value as unknown as UpstreamClamAvSnapshotManifest;
+}
+
+function snapshotIsFresh(
+  manifest: UpstreamClamAvSnapshotManifest,
+  now: Date,
+): boolean {
+  const publishedAt = new Date(manifest.publishedAt).getTime();
+  const daily = manifest.files.find((file) => file.name.startsWith("daily."));
+  const dailyBuildTime = new Date(daily?.buildTime ?? "").getTime();
+  return (
+    Number.isFinite(now.getTime()) &&
+    Number.isFinite(publishedAt) &&
+    Number.isFinite(dailyBuildTime) &&
+    publishedAt <= now.getTime() + MAX_FUTURE_SKEW_MS &&
+    dailyBuildTime <= now.getTime() + MAX_FUTURE_SKEW_MS &&
+    now.getTime() - publishedAt <= MAX_SNAPSHOT_AGE_MS &&
+    now.getTime() - dailyBuildTime <= MAX_SNAPSHOT_AGE_MS
+  );
+}
+
+function assertClosedDatabaseSet(names: readonly string[]): void {
+  const groups = ["main.", "daily.", "bytecode."];
+  if (
+    names.length !== groups.length ||
+    groups.some(
+      (prefix) => names.filter((name) => name.startsWith(prefix)).length !== 1,
+    )
+  ) {
+    throw new Error("invalid snapshot database set");
+  }
 }
 
 async function verifySnapshotFiles(
   databaseDirectory: string,
-  files: readonly SnapshotFile[],
+  files: readonly UpstreamClamAvSnapshotFile[],
   controlFiles: readonly string[],
 ): Promise<void> {
   const expectedNames = new Set([

@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readFileSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 import type { Deployment } from "@reflo/config";
@@ -10,7 +10,7 @@ import {
 } from "@reflo/db";
 import { LocalSmokeObjectStore, artifactObjectKey } from "@reflo/dev-smoke";
 import {
-  CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+  CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
   ClamAvScannerAdapter,
   IngestionSupervisor,
   NodeEphemeralWorkspace,
@@ -18,7 +18,6 @@ import {
   NormalizedOutputFileReader,
   ObjectArtifactPublisher,
   PodmanDocumentWorker,
-  PinnedP256SnapshotSignatureVerifier,
   type ProcessRunnerPort,
   QuarantineStagingAdapter,
   validateNormalizedDocument,
@@ -38,7 +37,7 @@ import { DemoUploadProcessingService } from "./demo-upload-processing.js";
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
 const LOCAL_PROCESSOR_MODE = "local-isolated-v1";
-const VERIFIED_SCANNER_MODE = "verified-clamav-v1";
+const CLAMAV_SCANNER_MEMORY_BYTES = 1_024 * 1_024 * 1_024;
 
 export interface DemoUploadRuntime {
   readonly demoUploads?: ApprovedDemoUploadService;
@@ -83,7 +82,7 @@ export async function createDemoUploadRuntime(
   );
   if (
     required(input, "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE") !==
-    VERIFIED_SCANNER_MODE
+    CLAMAV_UPSTREAM_SNAPSHOT_PROFILE
   ) {
     throw new Error("demo upload requires a verified malware scanner");
   }
@@ -95,38 +94,32 @@ export async function createDemoUploadRuntime(
     input,
     "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
   );
+  const scannerImage = requiredMatching(
+    input,
+    "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
+    /^.+@sha256:[a-f0-9]{64}$/,
+  );
   const scannerRunner = new PodmanClamAvProcessRunner(
     {
       databaseDirectory: admissionDatabaseDirectory,
-      imageReference: requiredMatching(
-        input,
-        "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
-        /^.+@sha256:[a-f0-9]{64}$/,
-      ),
+      imageReference: scannerImage,
     },
     new NodeProcessRunner(),
   );
   const malwareScanner = new ClamAvScannerAdapter({
     databaseDirectory: admissionDatabaseDirectory,
     executable: "clamscan",
-    expectedSignatureProfile: CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
+    expectedFreshClamImageDigest: scannerImage.slice(
+      scannerImage.lastIndexOf("@") + 1,
+    ),
+    expectedProfile: CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
+    expectedSnapshotId: requiredMatching(
+      input,
+      "REFLO_LOCAL_CLAMAV_SNAPSHOT_ID",
+      /^cvd-[a-f0-9]{32}$/,
+    ),
     manifestPath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_MANIFEST_PATH"),
     runner: scannerRunner,
-    signaturePath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_SIGNATURE_PATH"),
-    signatureVerifier: new PinnedP256SnapshotSignatureVerifier([
-      {
-        kid: required(input, "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_KID"),
-        spkiPem: readFileSync(
-          requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_PATH"),
-          "utf8",
-        ),
-        spkiSha256: requiredMatching(
-          input,
-          "REFLO_LOCAL_CLAMAV_PUBLIC_KEY_SPKI_SHA256",
-          /^[a-f0-9]{64}$/,
-        ),
-      },
-    ]),
   });
   const scratchRoot = path.join(artifactRoot, ".ingestion-work");
   mkdirSync(scratchRoot, { mode: 0o700, recursive: true });
@@ -308,8 +301,46 @@ export class PodmanClamAvProcessRunner implements ProcessRunnerPort {
     args: readonly string[],
     options: { readonly maxOutputBytes: number; readonly timeoutMs: number },
   ) {
-    if (executable !== "clamscan") {
+    if (executable !== "clamscan" && executable !== "sigtool") {
       return Promise.resolve(failedProcess());
+    }
+    if (executable === "sigtool") {
+      if (args.length === 1 && args[0] === "--version") {
+        return this.runner.run(
+          "podman",
+          [
+            ...this.#baseArguments(),
+            "--entrypoint=/usr/bin/sigtool",
+            this.configuration.imageReference,
+            "--version",
+          ],
+          options,
+        );
+      }
+      const databasePath = args[1];
+      if (
+        args.length !== 2 ||
+        args[0] !== "--info" ||
+        databasePath === undefined ||
+        path.dirname(databasePath) !== this.configuration.databaseDirectory ||
+        !/^(?:bytecode|daily|main)\.(?:cld|cvd)$/.test(
+          path.basename(databasePath),
+        )
+      ) {
+        return Promise.resolve(failedProcess());
+      }
+      return this.runner.run(
+        "podman",
+        [
+          ...this.#baseArguments(),
+          `--mount=type=bind,src=${this.configuration.databaseDirectory},dst=/database,ro=true,relabel=private`,
+          "--entrypoint=/usr/bin/sigtool",
+          this.configuration.imageReference,
+          "--info",
+          `/database/${path.basename(databasePath)}`,
+        ],
+        options,
+      );
     }
     if (args.length === 1 && args[0] === "--version") {
       return this.runner.run(
@@ -367,7 +398,7 @@ export class PodmanClamAvProcessRunner implements ProcessRunnerPort {
       "--user=100:101",
       "--userns=keep-id:uid=100,gid=101",
       "--pids-limit=64",
-      "--memory=536870912",
+      `--memory=${CLAMAV_SCANNER_MEMORY_BYTES}`,
       "--cpus=1",
       "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864",
     ];

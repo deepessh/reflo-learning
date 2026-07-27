@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -15,6 +15,7 @@ import {
   hostPlatformKey,
   ingestionLaunchArguments,
   isSupportedPodmanVersion,
+  clamavSnapshotId,
   parsePodmanVersionReport,
   piperStatePathsMatch,
   podmanVersionReportIsSupported,
@@ -164,7 +165,7 @@ describe("optional local worker profile", () => {
     );
     assert.ok(
       environment.includes(
-        "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE='verified-clamav-v1'",
+        "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE='upstream-clamav-cloud-demo-v1'",
       ),
     );
     assert.ok(
@@ -251,71 +252,65 @@ describe("optional local worker profile", () => {
     );
   });
 
-  it("verifies the exact KMS-signed ClamAV admission bundle", async () => {
-    const fixture = mkdtempSync(path.join(tmpdir(), "reflo-clamav-signed-"));
-    const databaseDirectory = path.join(fixture, "snapshot");
-    const { privateKey, publicKey } = generateKeyPairSync("ec", {
-      namedCurve: "prime256v1",
-    });
+  it("verifies the exact upstream-signed content-addressed ClamAV bundle", async () => {
+    const fixture = mkdtempSync(path.join(tmpdir(), "reflo-clamav-upstream-"));
     try {
-      mkdirSync(databaseDirectory);
       const files = ["bytecode.cvd", "daily.cld", "main.cvd"].map(
         (filename, index) => {
-          const bytes = Buffer.from(`signed-clamav-${index}`, "utf8");
-          writeFileSync(path.join(databaseDirectory, filename), bytes);
+          const bytes = Buffer.from(`upstream-clamav-${index}`, "utf8");
           return {
+            buildTime: "2026-07-26T18:00:00.000Z",
             byteLength: bytes.byteLength,
+            bytes,
+            databaseVersion: 27_100 + index,
             name: filename,
             sha256: createHash("sha256").update(bytes).digest("hex"),
           };
         },
       );
-      const publicKeyPath = path.join(fixture, "public.pem");
-      const spki = publicKey.export({ format: "der", type: "spki" });
-      const spkiSha256 = createHash("sha256").update(spki).digest("hex");
-      writeFileSync(
-        publicKeyPath,
-        publicKey.export({ format: "pem", type: "spki" }),
-      );
-      const manifest = Buffer.from(
-        JSON.stringify({
-          clamAvVersion: "1.4.5",
-          contractVersion: "snapshot-manifest-v1",
-          files,
-          kid: "local-test-kid",
-          publishedAt: new Date().toISOString(),
-          publicKeySpkiSha256: spkiSha256,
-          signatureProfile: "clamav-snapshot-signature-v1",
-          snapshotId: "local-test-snapshot",
-        }),
-      );
+      const identity = {
+        clamAvVersion: "1.4.5",
+        contractVersion: "upstream-clamav-snapshot-manifest-v1",
+        files: files.map(({ bytes: _bytes, ...file }) => file),
+        profile: "upstream-clamav-cloud-demo-v1",
+        publishedAt: "2026-07-26T18:10:00.000Z",
+        toolchain: {
+          freshClamImageDigest: contract.clamav.updaterImageDigest,
+          sigtoolVersion: "ClamAV 1.4.5",
+        },
+      };
+      const snapshotId = clamavSnapshotId(identity);
+      const databaseDirectory = path.join(fixture, snapshotId);
+      mkdirSync(databaseDirectory);
+      for (const file of files) {
+        writeFileSync(path.join(databaseDirectory, file.name), file.bytes);
+      }
+      const manifest = Buffer.from(JSON.stringify({ ...identity, snapshotId }));
       const manifestPath = path.join(databaseDirectory, "snapshot.json");
-      const signaturePath = path.join(databaseDirectory, "snapshot.sig");
       writeFileSync(manifestPath, manifest);
-      writeFileSync(
-        signaturePath,
-        sign("sha256", manifest, privateKey).toString("base64"),
-      );
 
       await assert.doesNotReject(
         validateClamavAdmission(
           contract,
           {
-            files: files.map((file) => ({
+            files: files.map(({ bytes: _bytes, ...file }) => ({
+              buildTime: file.buildTime,
               byteLength: file.byteLength,
+              databaseVersion: file.databaseVersion,
               filename: file.name,
               sha256: file.sha256,
             })),
+            toolchain: identity.toolchain,
           },
           {
             directory: databaseDirectory,
-            kid: "local-test-kid",
             manifestPath,
-            publicKeyPath,
-            publicKeySpkiSha256: spkiSha256,
+            manifestSha256: createHash("sha256").update(manifest).digest("hex"),
+            profile: identity.profile,
             scannerImage: contract.clamav.updaterImage,
-            signaturePath,
+            snapshotId,
           },
+          new Date("2026-07-26T18:30:00.000Z"),
         ),
       );
     } finally {
@@ -356,13 +351,12 @@ function profileState() {
     },
     clamav: { directory: "/tmp/reflo workers/clamav" },
     clamavAdmission: {
-      directory: "/tmp/reflo workers/clamav-admission",
-      kid: "reflo-clamav-v1",
-      manifestPath: "/tmp/reflo workers/clamav-admission/snapshot.json",
-      publicKeyPath: "/tmp/reflo workers/clamav-public.pem",
-      publicKeySpkiSha256: "e".repeat(64),
+      directory: `/tmp/reflo workers/clamav-admission/cvd-${"e".repeat(32)}`,
+      manifestPath: `/tmp/reflo workers/clamav-admission/cvd-${"e".repeat(32)}/snapshot.json`,
+      manifestSha256: "e".repeat(64),
+      profile: "upstream-clamav-cloud-demo-v1",
       scannerImage: `clamav@sha256:${"f".repeat(64)}`,
-      signaturePath: "/tmp/reflo workers/clamav-admission/snapshot.sig",
+      snapshotId: `cvd-${"e".repeat(32)}`,
     },
     tessdata: { directory: "/tmp/reflo workers/tessdata" },
     piper: {

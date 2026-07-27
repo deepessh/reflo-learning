@@ -1,7 +1,8 @@
 # Reflo — Product Requirements Document
 
-**Version:** 2.3 · **Date:** July 27, 2026 · **Status:** Approved for build sprint
-**Changelog:** v2.3 — doubled the standard-profile upload-to-outline SLO from two to four minutes after connected Qwen evidence cleared structural validation but exhausted the accepted child deadline; retained the standard profile, grounding, demo-only boundary, and all later activation SLOs
+**Version:** 2.4 · **Date:** July 27, 2026 · **Status:** Approved for build sprint
+**Changelog:** v2.4 — doubled the standard-profile upload-to-outline SLO again from four to eight minutes after all first-wave connected Qwen children exhausted the 60-second ceiling; retained the standard profile, grounding, demo-only boundary, and all later activation SLOs
+v2.3 — doubled the standard-profile upload-to-outline SLO from two to four minutes after connected Qwen evidence cleared structural validation but exhausted the accepted child deadline; retained the standard profile, grounding, demo-only boundary, and all later activation SLOs
 v2.2 — selected the attributed Apache-2.0 Hugging Face Agents Course core Units 1–4 as the human-approved seeded Demo Day source; made Alibaba Cloud ACA a future strategic source rather than a Demo Day dependency; retained the rights-cleared, demo-only, and honest-labeling boundaries
 v2.1 — narrowed Demo Day to the connected online application; removed the offline bundle, service-worker fallback, and online/offline Flow B parity requirements while retaining the seeded online Flow B, separate upload demonstration, honest labeling, rehearsed failure handling, and demo-only safety boundary
 v2.0 — made the hackathon demo-only through Demo Day; removed external pilot recruitment, activation gates, cohort metrics, and experimentation from the sprint; moved the real-user pilot and its consent, privacy, content-rights attestation, authorization, opt-out, deletion/export, provider-verification, and rollout requirements post-hackathon
@@ -40,7 +41,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 ## 3. Goals & Non-Goals
 
 ### Goals (sprint horizon)
-- **G1:** For a supported, digitally generated source within the standard-ingestion profile (PDF/EPUB/DOCX, ≤ 20 MB, ≤ 200 pages, no OCR), a learner receives a browsable curriculum outline at p95 ≤ 4 minutes, the first text micro-lesson plus placement quiz at p95 ≤ 5 minutes, and chapter 1 audio at p95 ≤ 10 minutes. Files up to the 50 MB/800-page product maximum remain supported but use an asynchronous large-document path with an estimate/status, as do OCR jobs; neither carries the 4-minute SLO. Remaining audio and quizzes generate progressively. Video is a P1 enhancement and never part of an activation SLO.
+- **G1:** For a supported, digitally generated source within the standard-ingestion profile (PDF/EPUB/DOCX, ≤ 20 MB, ≤ 200 pages, no OCR), a learner receives a browsable curriculum outline at p95 ≤ 8 minutes, the first text micro-lesson plus placement quiz at p95 ≤ 5 minutes, and chapter 1 audio at p95 ≤ 10 minutes. Files up to the 50 MB/800-page product maximum remain supported but use an asynchronous large-document path with an estimate/status, as do OCR jobs; neither carries the 8-minute SLO. Remaining audio and quizzes generate progressively. Video is a P1 enhancement and never part of an activation SLO.
 - **G2:** Every learning interaction is recorded as an event. Only confidently graded assessment evidence updates per-concept mastery and forgetting state; lesson/question/completion events update exposure, engagement, and modality state without directly changing mastery. The resulting state is visualized as a live knowledge map.
 - **G3:** The Tutor Agent autonomously closes the loop: detects a weak concept, regenerates a targeted micro-lesson in a different modality/approach, and verifies improvement.
 - **G4:** Spaced-repetition micro-quizzes delivered through Telegram (P0) or opted-in email fallback on a forgetting-curve schedule; WhatsApp is a P1 channel when Business approval lands.
@@ -84,7 +85,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 - Upload PDF, EPUB, DOCX (≤ 50 MB, ≤ 800 pages for MVP)
 - Standard-ingestion profile for activation SLOs: digitally generated files ≤ 20 MB and ≤ 200 pages that do not require OCR. Larger supported files use the asynchronous large-document path.
 - Secure ingestion produces cleaned, source-spanned content and a prerequisite-ordered chapter/concept curriculum; the governing architecture defines the pipeline and storage mechanisms
-- Output for the standard-ingestion profile: a course object with per-chapter concept lists visible at p95 ≤ 4 minutes; media generates progressively in the background. SLO measurement begins after upload completion and ends when the outline is usable.
+- Output for the standard-ingestion profile: a course object with per-chapter concept lists visible at p95 ≤ 8 minutes; media generates progressively in the background. SLO measurement begins after upload completion and ends when the outline is usable.
 - Scanned PDFs enter an asynchronous OCR path with visible progress and a time estimate. Malformed, encrypted, unsupported, or over-limit files fail with a clear reason and supported-format guidance.
 - Treat uploads as untrusted: verify declared type against file content, scan for malware, enforce compressed/uncompressed and page limits, and isolate parsing/OCR from ambient credentials and network access.
 
@@ -148,7 +149,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 
 ## 8. User Flows (primary)
 
-**Flow A — First course (demo activation):** Enter a labeled demo identity → select or operator-upload a rights-cleared standard-profile study guide → watch curriculum appear (p95 ≤ 4 min) → take the 10-question placement quiz → see the initial Knowledge Map → complete the 2–3 minute chapter 1 text micro-lesson → chapter quiz → map updates. *Target: upload complete → first text micro-lesson completed at p95 ≤ 15 minutes; OCR documents are excluded and show a separate estimate.*
+**Flow A — First course (demo activation):** Enter a labeled demo identity → select or operator-upload a rights-cleared standard-profile study guide → watch curriculum appear (p95 ≤ 8 min) → take the 10-question placement quiz → see the initial Knowledge Map → complete the 2–3 minute chapter 1 text micro-lesson → chapter quiz → map updates. *Target: upload complete → first text micro-lesson completed at p95 ≤ 15 minutes; OCR documents are excluded and show a separate estimate.*
 
 **Flow B — The adaptive loop (core retention loop):** Open app → agent proposes today's plan ("Review 2 fading concepts, then Chapter 4") → learner fails questions on Concept X → agent generates or selects an alternative micro-lesson for X → re-test → mastery rises only if the confidently graded evidence supports it → map reflects the result → session summary with a mastery delta (and readiness delta only for an exam-mapped course).
 
@@ -199,7 +200,7 @@ The core thesis: every existing learning tool measures **completion**; Reflo mea
 ## 12. Success Metrics
 
 **Demo Day proof points (Aug 15):**
-- Live adaptive loop on a pre-ingested seeded course: failed question → materially different micro-lesson → re-test → evidence-based map update (≤ 6 min). Demonstrate standard-profile upload → outline separately against the p95 ≤ 4-minute SLO; do not imply that full ingestion and media generation complete inside the 6-minute loop.
+- Live adaptive loop on a pre-ingested seeded course: failed question → materially different micro-lesson → re-test → evidence-based map update (≤ 6 min). Demonstrate standard-profile upload → outline separately against the p95 ≤ 8-minute SLO; do not imply that full ingestion and media generation complete inside the 6-minute loop.
 - Ten consecutive rehearsals complete the seeded online Flow B without an unrecovered failure; report the run count, failures, and fixes rather than implying production reliability.
 - Present only fixture-backed mastery deltas and non-learner evaluation results. Do not claim pilot retention, causal learning lift, certification outcomes, or real-user validation.
 - Architecture story told from accepted targets and evidence-backed implemented state; video is included only if the P1 flag shipped, otherwise shown as a labeled prototype/benchmark; the planned accelerator benchmark result is reported honestly

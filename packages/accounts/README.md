@@ -6,6 +6,12 @@ sessions; exact HTTPS callback origins; host-only cookie and CSRF contracts;
 recent-authentication enforcement; and the owner-scoped library,
 session-history, and course-progress read ports.
 
+Course progress applies the fixed-point `exam-readiness-profile-v1` contract:
+only generation-current reviewed mappings with sufficient eligible assessment
+evidence can produce a score. Ineligible courses remain labeled Course Mastery
+Estimate, while eligible readiness discloses mapping coverage and frozen
+calibration sample/error metadata without claiming a certification outcome.
+
 Composition roots must provide:
 
 - a database-owned `AccountRepository` (the PostgreSQL implementation lives in

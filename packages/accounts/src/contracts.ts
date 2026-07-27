@@ -90,20 +90,51 @@ export interface CourseMasteryEstimate {
 
 export type ReadinessIneligibilityReason =
   | "blueprint_missing"
-  | "calibration_unavailable"
-  | "evidence_minimum_not_met"
+  | "evidence_coverage_insufficient"
+  | "objective_evidence_missing"
+  | "objective_mapping_incomplete"
   | "reviewed_mappings_unavailable";
 
-export interface ExamReadinessDisclosure {
+export interface ExamReadinessCalibrationDisclosure {
+  readonly meanAbsoluteError: string | null;
+  readonly sampleSize: number | null;
+  readonly status: "adequate" | "inadequate" | "unavailable";
+  readonly version: string | null;
+}
+
+interface ExamReadinessDisclosureBase {
   readonly blueprintVersion: string | null;
+  readonly calibration: ExamReadinessCalibrationDisclosure;
+  readonly evidenceCoverage: string;
+  readonly evidenceEligibleConceptCount: number;
   readonly invalidatedConceptCount: number;
   readonly mappedConceptCount: number;
+  readonly mappingSetVersion: string | null;
+  readonly objectiveCount: number;
+  readonly objectiveEvidenceCount: number;
+  readonly objectiveMappedCount: number;
+  readonly profileVersion: "exam-readiness-profile-v1";
   readonly reasons: readonly ReadinessIneligibilityReason[];
-  readonly score: null;
-  readonly status: "unavailable";
   readonly targetBlueprintId: string | null;
   readonly unmappedConceptCount: number;
 }
+
+export interface UnavailableExamReadinessDisclosure extends ExamReadinessDisclosureBase {
+  readonly reasons: readonly ReadinessIneligibilityReason[];
+  readonly score: null;
+  readonly status: "unavailable";
+}
+
+export interface EligibleExamReadinessDisclosure extends ExamReadinessDisclosureBase {
+  readonly experimental: boolean;
+  readonly label: "Exam Readiness" | "Exam Readiness — Experimental";
+  readonly reasons: readonly [];
+  readonly score: string;
+  readonly status: "eligible";
+}
+
+export type ExamReadinessDisclosure =
+  EligibleExamReadinessDisclosure | UnavailableExamReadinessDisclosure;
 
 export interface CourseSessionMasteryDelta {
   readonly completedAt: Date;

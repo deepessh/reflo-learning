@@ -5,6 +5,7 @@ import {
   courseProgress,
   exactPercentLabel,
   masteryDeltaLabel,
+  readinessPresentation,
   sessionDuration,
 } from "./account-view";
 
@@ -95,5 +96,40 @@ describe("account shell presentation", () => {
     });
     expect(exactPercentLabel("0.28571")).toBe("28.571%");
     expect(masteryDeltaLabel("0.11904")).toBe("+11.904 pts");
+  });
+
+  it("discloses experimental readiness calibration without inventing it", () => {
+    expect(
+      readinessPresentation({
+        blueprintVersion: "blueprint-v1",
+        calibration: {
+          meanAbsoluteError: null,
+          sampleSize: null,
+          status: "unavailable",
+          version: null,
+        },
+        evidenceCoverage: "0.80000",
+        evidenceEligibleConceptCount: 3,
+        experimental: true,
+        invalidatedConceptCount: 0,
+        label: "Exam Readiness — Experimental",
+        mappedConceptCount: 4,
+        mappingSetVersion: "mapping-v1",
+        objectiveCount: 2,
+        objectiveEvidenceCount: 2,
+        objectiveMappedCount: 2,
+        profileVersion: "exam-readiness-profile-v1",
+        reasons: [],
+        score: "0.59000",
+        status: "eligible",
+        targetBlueprintId: "blueprint-v1",
+        unmappedConceptCount: 1,
+      }),
+    ).toEqual({
+      calibration: "Sample size: unavailable · error: unavailable",
+      copy: "Eligibility gates passed. This sprint policy score is experimental, not a certification prediction.",
+      label: "Exam Readiness — Experimental",
+      value: "59%",
+    });
   });
 });

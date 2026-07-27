@@ -1,5 +1,6 @@
 import type {
   CourseConceptProgress,
+  ExamReadinessDisclosure,
   LibraryCourse,
   SessionHistoryItem,
 } from "@reflo/accounts";
@@ -9,6 +10,13 @@ export interface ConceptProgressPresentation {
   readonly label: string;
   readonly masteryPercent: number | null;
   readonly tone: "developing" | "strong" | "unassessed" | "weak";
+}
+
+export interface ReadinessPresentation {
+  readonly calibration: string;
+  readonly copy: string;
+  readonly label: string;
+  readonly value: string;
 }
 
 export function courseProgress(course: LibraryCourse): {
@@ -87,6 +95,45 @@ export function conceptProgressPresentation(
     label: "Strong evidence",
     masteryPercent,
     tone: "strong",
+  };
+}
+
+export function readinessPresentation(
+  readiness: ExamReadinessDisclosure,
+): ReadinessPresentation {
+  const calibration =
+    readiness.calibration.status === "unavailable"
+      ? "Sample size: unavailable · error: unavailable"
+      : `Sample size: ${readiness.calibration.sampleSize} · MAE: ${exactPercentLabel(
+          readiness.calibration.meanAbsoluteError!,
+        )}`;
+  if (readiness.status === "eligible") {
+    return {
+      calibration,
+      copy: readiness.experimental
+        ? "Eligibility gates passed. This sprint policy score is experimental, not a certification prediction."
+        : "Representative calibration meets the frozen threshold. This score is not a certification guarantee.",
+      label: readiness.label,
+      value: `${fixedPercent(readiness.score)}%`,
+    };
+  }
+  const reasonCopy: Record<ExamReadinessDisclosure["reasons"][number], string> =
+    {
+      blueprint_missing: "No reviewed, versioned exam blueprint is connected.",
+      evidence_coverage_insufficient:
+        "Assessed mapping weight is below the 80% evidence minimum.",
+      objective_evidence_missing:
+        "At least one exam objective has no sufficiently assessed mapped concept.",
+      objective_mapping_incomplete:
+        "At least one exam objective has incomplete generation-current mappings.",
+      reviewed_mappings_unavailable:
+        "Reviewed, provenance-carrying concept mappings are unavailable.",
+    };
+  return {
+    calibration,
+    copy: readiness.reasons.map((reason) => reasonCopy[reason]).join(" "),
+    label: "Exam Readiness",
+    value: "Unavailable",
   };
 }
 

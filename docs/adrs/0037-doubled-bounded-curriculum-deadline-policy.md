@@ -10,8 +10,8 @@ ownership:
   decision_dri: "@deepessh"
   implementation_owner: "Owner of issue #182"
 authorization:
-  decider: "@deepessh, repository owner and founding-team product and architecture authority"
-  approval_basis: "After issue #182 eliminated the structural invalid-result failure but the configured Qwen route still exhausted four concurrent 30-second child ceilings, the owner explicitly directed that the curriculum time limits be doubled. The change preserves the approved standard profile, provider and model, partitioning, concurrency, grounding, persistence, demo-only boundary, and spending controls."
+  decider: "@deepessh, repository and product owner"
+  approval_basis: "after reviewing the #182 evidence that structural invalid_result was eliminated while the configured Qwen children still exhausted the 30-second ceiling, the owner explicitly directed in the active Codex task on 2026-07-27: “Let’s relax the limits - increase them to double.” This verdict records that instruction as 60-second children, a 240-second parent target, and a 24-second finalization reserve, with concurrency, partitioning, provider/model, capacity, grounding, persistence, and spending unchanged."
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/187

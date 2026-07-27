@@ -22,7 +22,7 @@ import {
 import { EMBEDDING_V1_DIMENSIONS } from "../validation.js";
 
 export const LITELLM_DEV_TEXT_ADAPTER_VERSION =
-  "litellm-openai-compatible-dev-text-v2" as const;
+  "litellm-openai-compatible-dev-text-v3" as const;
 export const LITELLM_DEV_EMBEDDING_ADAPTER_VERSION =
   "litellm-openai-compatible-dev-v1" as const;
 export const LITELLM_DEV_ADAPTER_VERSION = LITELLM_DEV_TEXT_ADAPTER_VERSION;
@@ -195,7 +195,10 @@ class LiteLlmHttpClient {
             content: JSON.stringify({
               learnerAnswer: prompt.learnerAnswer ?? null,
               sourceMaterial: prompt.sourceMaterial,
-              typedInput: withoutUntrustedPromptFields(invocation.input),
+              typedInput: withoutUntrustedPromptFields(
+                invocation.task,
+                invocation.input,
+              ),
             }),
             role: "user",
           },
@@ -211,7 +214,7 @@ class LiteLlmHttpClient {
     return {
       identity: providerIdentity(response, parsed.model),
       ...(parsed.usage === undefined ? {} : { usage: parsed.usage }),
-      value: parsed.value,
+      value: withoutDeterministicResultFields(invocation.task, parsed.value),
     };
   }
 
@@ -443,10 +446,34 @@ function allowedGenerationParameters(
     : {};
 }
 
-function withoutUntrustedPromptFields(value: object): Record<string, unknown> {
+function withoutUntrustedPromptFields(
+  task: ModelTaskId,
+  value: object,
+): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(
-      ([key]) => key !== "answer" && key !== "sourceSpans",
+      ([key]) =>
+        key !== "answer" &&
+        key !== "sourceSpans" &&
+        (task !== "curriculum.segment.v1" ||
+          (key !== "segmentId" && key !== "segmentOrdinal")),
+    ),
+  );
+}
+
+function withoutDeterministicResultFields(
+  task: ModelTaskId,
+  value: unknown,
+): unknown {
+  if (task !== "curriculum.segment.v1" || !isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([key]) =>
+        key !== "segmentId" &&
+        key !== "segmentOrdinal" &&
+        (value.kind !== "non_instructional" || key !== "sourceSpanIds"),
     ),
   );
 }

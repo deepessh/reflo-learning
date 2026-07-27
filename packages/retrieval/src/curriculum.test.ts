@@ -332,10 +332,10 @@ const provenance: ModelCallProvenance = {
   promptDefinitionDigest: "a".repeat(64),
   promptDigest: "b".repeat(64),
   promptId: "curriculum-segment",
-  promptVersion: "1",
+  promptVersion: "2",
   requestedSelector: "qwen.structured",
   resultSchemaVersion: "curriculum-segment-result-v1",
-  routePolicyVersion: "route-policy-v5",
+  routePolicyVersion: "route-policy-v6",
   task: "curriculum.segment.v1",
   validationOutcome: "passed",
 };

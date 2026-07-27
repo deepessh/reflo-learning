@@ -1,7 +1,7 @@
 import type { ModelTaskId } from "./contracts.js";
 import type { ModelCapability } from "./ports.js";
 
-export const ROUTE_POLICY_VERSION = "route-policy-v5" as const;
+export const ROUTE_POLICY_VERSION = "route-policy-v6" as const;
 
 export interface RouteDefinition {
   readonly capability: ModelCapability;
@@ -18,7 +18,7 @@ export interface RouteDefinition {
   readonly textType?: "document" | "query";
 }
 
-export const ROUTE_POLICY_V5 = Object.freeze({
+export const ROUTE_POLICY_V6 = Object.freeze({
   "assessment.grade-short-answer.v1": route({
     capability: "grading",
     fallback: null,
@@ -47,7 +47,7 @@ export const ROUTE_POLICY_V5 = Object.freeze({
     inputSchemaVersion: "curriculum-segment-input-v1",
     maxImmediateAttempts: 2,
     promptId: "curriculum-segment",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "qwen.structured",
     resultSchemaVersion: "curriculum-segment-result-v1",
     task: "curriculum.segment.v1",

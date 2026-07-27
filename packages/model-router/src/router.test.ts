@@ -55,7 +55,7 @@ describe("typed model router", () => {
       effectiveModel: "qwen-plus",
       promptId: "curriculum-structure",
       requestedSelector: "qwen.structured",
-      routePolicyVersion: "route-policy-v5",
+      routePolicyVersion: "route-policy-v6",
       validationOutcome: "passed",
     });
     expect(result.provenance.promptDigest).toMatch(/^[a-f0-9]{64}$/);
@@ -73,7 +73,7 @@ describe("typed model router", () => {
     expect(traces.traces[0]?.promptVersion).toBe("2");
   });
 
-  it("validates both closed curriculum segment variants and their identity", async () => {
+  it("attaches deterministic curriculum fields and rejects conflicting values", async () => {
     const baseInput = {
       courseTitle: "Course",
       sectionPath: ["Unit 1"],
@@ -90,7 +90,7 @@ describe("typed model router", () => {
         },
       ],
     } as const;
-    for (const value of [
+    for (const providerValue of [
       {
         chapters: [
           {
@@ -107,34 +107,33 @@ describe("typed model router", () => {
           },
         ],
         kind: "instructional",
-        segmentId: baseInput.segmentId,
-        segmentOrdinal: 0,
       },
       {
         kind: "non_instructional",
         reason: "front_matter",
-        segmentId: baseInput.segmentId,
-        segmentOrdinal: 0,
-        sourceSpanIds: ["span-1"],
       },
     ]) {
       const scripted = createScriptedAdapterRegistry({
-        "curriculum.segment.v1": [{ type: "result", value }],
+        "curriculum.segment.v1": [{ type: "result", value: providerValue }],
       });
-      await expect(
-        createModelRouter({
-          adapters: scripted.adapters,
-          traceSink: new InMemoryTraceSink(),
-        }).execute("curriculum.segment.v1", baseInput, { deadlineMs: 1_000 }),
-      ).resolves.toMatchObject({
+      const result = await createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }).execute("curriculum.segment.v1", baseInput, { deadlineMs: 1_000 });
+      expect(result).toMatchObject({
         provenance: {
           inputSchemaVersion: "curriculum-segment-input-v1",
           promptId: "curriculum-segment",
+          promptVersion: "2",
           resultSchemaVersion: "curriculum-segment-result-v1",
           task: "curriculum.segment.v1",
         },
-        value,
       });
+      expect(result.value.segmentId).toBe(baseInput.segmentId);
+      expect(result.value.segmentOrdinal).toBe(baseInput.segmentOrdinal);
+      if (result.value.kind === "non_instructional") {
+        expect(result.value.sourceSpanIds).toEqual(["span-1"]);
+      }
     }
 
     for (const value of [
@@ -724,7 +723,7 @@ describe("trace allowlist", () => {
           durationMs: 1,
           finishedAt: "2026-07-19T00:00:00.001Z",
           outcome: "success",
-          routePolicyVersion: "route-policy-v5",
+          routePolicyVersion: "route-policy-v6",
           startedAt: "2026-07-19T00:00:00.000Z",
           task: "curriculum.structure.v1",
           [field]: "secret",
@@ -741,7 +740,7 @@ describe("trace allowlist", () => {
         durationMs: 1,
         finishedAt: "2026-07-19T00:00:00.001Z",
         outcome: "success",
-        routePolicyVersion: "route-policy-v5",
+        routePolicyVersion: "route-policy-v6",
         startedAt: "2026-07-19T00:00:00.000Z",
         task: "curriculum.structure.v1",
       },
@@ -763,7 +762,7 @@ describe("trace allowlist", () => {
         durationMs: 1,
         finishedAt: "2026-07-19T00:00:00.001Z",
         outcome: "success",
-        routePolicyVersion: "route-policy-v5",
+        routePolicyVersion: "route-policy-v6",
         startedAt: "2026-07-19T00:00:00.000Z",
         task: "curriculum.structure.v1",
       },

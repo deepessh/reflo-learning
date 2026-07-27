@@ -172,11 +172,9 @@ function curriculumSegment(
 ): Record<string, unknown> {
   const typedInput = asRecord(user.typedInput);
   const sourceMaterial = user.sourceMaterial;
-  const segmentId = typedInput.segmentId;
-  const segmentOrdinal = typedInput.segmentOrdinal;
+  const sourceOrderStart = typedInput.sourceOrderStart;
   if (
-    typeof segmentId !== "string" ||
-    !Number.isSafeInteger(segmentOrdinal) ||
+    !Number.isSafeInteger(sourceOrderStart) ||
     !Array.isArray(sourceMaterial) ||
     sourceMaterial.length < 1
   ) {
@@ -189,25 +187,23 @@ function curriculumSegment(
     }
     return id;
   });
-  const displayOrdinal = Number(segmentOrdinal) + 1;
+  const displayOrder = Number(sourceOrderStart) + 1;
   return {
     chapters: [
       {
         concepts: [
           {
-            key: `segment_${displayOrdinal}_overview`,
-            name: `Segment ${displayOrdinal} overview`,
+            key: `source_${displayOrder}_overview`,
+            name: `Source ${displayOrder} overview`,
             prerequisiteKeys: [],
             sourceSpanIds,
           },
         ],
         sourceSpanIds,
-        title: `Segment ${displayOrdinal}`,
+        title: `Source ${displayOrder}`,
       },
     ],
     kind: "instructional",
-    segmentId,
-    segmentOrdinal,
   };
 }
 

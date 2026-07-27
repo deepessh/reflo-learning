@@ -420,7 +420,7 @@ function gradingFixture(results: readonly unknown[]) {
       promptId: "assessment-grade-short-answer",
       promptVersion: "3",
       resultSchemaVersion: "short-answer-judgment-result-v2",
-      routePolicyVersion: "route-policy-v5",
+      routePolicyVersion: "route-policy-v6",
     },
     gradingPolicyVersion: "grading-policy-v1",
     ratingMappingVersion: "rating-mapping-v1",

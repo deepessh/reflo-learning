@@ -266,7 +266,7 @@ function courseFixture(): AuthorizedAudioCourse {
     promptVersion: "1",
     requestedSelector: "qwen.grounded-generation",
     resultSchemaVersion: "audio-script-result-v1",
-    routePolicyVersion: "route-policy-v5",
+    routePolicyVersion: "route-policy-v6",
     task: "lesson.audio-script.v1",
     validationOutcome: "passed",
   } as const;

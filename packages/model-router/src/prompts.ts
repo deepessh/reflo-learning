@@ -64,8 +64,8 @@ const OUTPUT_CONTRACTS = Object.freeze({
     "Return at least one chapter with at least one concept. Concept keys must be unique across the document; every prerequisite key must reference a concept emitted earlier in the response.",
   ),
   "curriculum.segment.v1": exactOutputContract(
-    '{"kind":"instructional","segmentId":typed-segment-id,"segmentOrdinal":typed-segment-ordinal,"chapters":[{"concepts":[{"key":unique-local-lowercase-key,"name":string,"prerequisiteKeys":earlier-local-concept-key[],"sourceSpanIds":authorized-source-span-id[]}],"sourceSpanIds":authorized-source-span-id[],"title":string}]} | {"kind":"non_instructional","segmentId":typed-segment-id,"segmentOrdinal":typed-segment-ordinal,"reason":"front_matter"|"navigation"|"attribution_license"|"other_non_instructional","sourceSpanIds":all-authorized-source-span-ids-in-order}',
-    "Return exactly one variant. Instructional results require at least one chapter and concept. Non-instructional results must list every supplied source span exactly once in supplied order.",
+    '{"kind":"instructional","chapters":[{"concepts":[{"key":unique-local-lowercase-key,"name":string,"prerequisiteKeys":earlier-local-concept-key[],"sourceSpanIds":authorized-source-span-id[]}],"sourceSpanIds":authorized-source-span-id[],"title":string}]} | {"kind":"non_instructional","reason":"front_matter"|"navigation"|"attribution_license"|"other_non_instructional"}',
+    "Return exactly one variant. Instructional results require at least one chapter and concept. Segment identity, ordinal, and complete non-instructional provenance are attached deterministically by the caller and must not be returned.",
   ),
   "lesson.audio-script.v1": exactOutputContract(
     '{"script":string,"sourceSpanIds":authorized-source-span-id[]}',
@@ -136,16 +136,16 @@ const definitions = {
       "Classify the complete segment as instructional or non-instructional.",
       "For instructional material, structure local chapters and concepts without adding absent material.",
       "Give every concept a unique local lowercase key, source spans, and prerequisites that reference only earlier local concept keys.",
-      "For non-instructional material, return every supplied source-span identifier in its original order and one closed reason.",
-      "Copy the typed segment identity and ordinal exactly.",
+      "For non-instructional material, return one closed reason.",
+      "Do not return segment identity, segment ordinal, or non-instructional source-span identifiers; the caller attaches those fields deterministically.",
     ],
     generationParameters: { temperature: 0.1 },
     generationParametersVersion: "curriculum-segment-generation-parameters-v1",
     id: "curriculum-segment",
     outputContract: OUTPUT_CONTRACTS["curriculum.segment.v1"],
-    outputSchemaId: "curriculum-segment-result-v1",
+    outputSchemaId: "curriculum-segment-provider-result-v2",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "lesson.audio-script.v1": definePrompt({
     fixedInstructions: [

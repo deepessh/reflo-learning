@@ -235,7 +235,7 @@ function completion(segment, attemptCount) {
       inputSchemaVersion: "curriculum-segment-input-v1",
       requestedSelector: "configured/test-model",
       resultSchemaVersion: "curriculum-segment-result-v1",
-      routePolicyVersion: "route-policy-v5",
+      routePolicyVersion: "route-policy-v6",
       task: "curriculum.segment.v1",
       validationOutcome: "passed",
     },

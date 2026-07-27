@@ -11,7 +11,16 @@ ownership:
   implementation_owner: "Owner of issue #100 and owners of release-gate corpus, runner, publisher, index, promotion-consumer, and upload-boundary work"
 authorization:
   decider: "@deepessh, repository owner and named human decider"
-  approval_basis: "The decider explicitly approved PDF-only ingestion for Demo Day, deferred EPUB/DOCX to fast-follow, directed the PRD and needed ADRs to be updated, and authorized the coordinated v2 release-gate contract family in the exact linked verdict comment."
+  approval_basis: >-
+    the decider explicitly approved “PDF-only ingestion for Demo Day” with
+    EPUB/DOCX deferred to fast-follow, then directed the agent to update the
+    PRD and record ADRs as needed. This verdict records the minimum
+    architecture consequence required to make that approved product boundary
+    honest: preserve v1 evidence as history; make v2 the only current contract
+    and attestation family; bind the PDF-only performance corpus and explicit
+    DOCX/EPUB rejection routes; prevent cross-version aggregation; and retain
+    every other rights, privacy, scoring, execution, immutability, and
+    fail-closed rule from ADR 0015.
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/196

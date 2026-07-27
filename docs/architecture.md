@@ -50,6 +50,7 @@ Detailed rules live in the linked records.
 | [ADR 0034](adrs/0034-connected-online-demo-day-scope.md) | Connected online Demo Day scope | `D-GH-19` | ADR |
 | [ADR 0035](adrs/0035-upstream-signed-clamav-cloud-demo-snapshot-admission.md) | Upstream-signed ClamAV cloud-demo snapshot admission | `D-GH-176` | ADR |
 | [ADR 0039](adrs/0039-third-doubling-of-bounded-curriculum-deadlines.md) | Third doubling of bounded curriculum deadlines | `D-GH-191` | ADR |
+| [ADR 0040](adrs/0040-versioned-exam-readiness-scoring-and-eligibility-profile.md) | Versioned exam-readiness scoring and eligibility profile | `D-GH-174` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -82,7 +83,8 @@ Detailed rules live in the linked records.
   [ADR 0030](adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md),
   [ADR 0031](adrs/0031-versioned-privacy-lifecycle-and-deletion-control-plane.md),
   [ADR 0033](adrs/0033-pinned-fsrs6-scheduler-profile-and-deterministic-replay.md),
-  and [ADR 0034](adrs/0034-connected-online-demo-day-scope.md).
+  [ADR 0034](adrs/0034-connected-online-demo-day-scope.md),
+  and [ADR 0040](adrs/0040-versioned-exam-readiness-scoring-and-eligibility-profile.md).
 - Decision and contributor governance:
   [ADR 0017](adrs/0017-worktree-based-issue-pickup-and-claim-labels.md),
   [ADR 0018](adrs/0018-reproducible-agent-toolchain-and-required-check-recovery-policy.md),

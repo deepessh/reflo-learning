@@ -36,7 +36,6 @@ Detailed rules live in the linked records.
 | [ADR 0018](adrs/0018-reproducible-agent-toolchain-and-required-check-recovery-policy.md) | Reproducible agent toolchain and required-check recovery policy | `D-GH-81` | ADR |
 | [ADR 0019](adrs/0019-evidence-backed-contributor-agent-improvement-loop.md) | Evidence-backed contributor-agent improvement loop | `D-GH-83` | ADR |
 | [ADR 0020](adrs/0020-java-25-base-family-for-the-isolated-ingestion-worker.md) | Java 25 base family for the isolated-ingestion worker | `D-GH-95` | ADR |
-| [ADR 0021](adrs/0021-kms-backed-clamav-snapshot-signing-profile.md) | KMS-backed ClamAV snapshot signing profile | `D-GH-96` | ADR |
 | [ADR 0022](adrs/0022-single-segment-wan-sprint-prototype-and-long-form-deferral.md) | Single-segment Wan sprint prototype and long-form deferral | `D-GH-120` | ADR |
 | [ADR 0023](adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md) | AnalyticDB for PostgreSQL sprint vector store | `M-001` | ADR |
 | [ADR 0024](adrs/0024-shared-traced-model-routing-module.md) | Shared traced model-routing module | `M-002` | ADR |
@@ -49,6 +48,7 @@ Detailed rules live in the linked records.
 | [ADR 0031](adrs/0031-versioned-privacy-lifecycle-and-deletion-control-plane.md) | Versioned privacy lifecycle and deletion control plane | `D-GH-18` | ADR |
 | [ADR 0033](adrs/0033-pinned-fsrs6-scheduler-profile-and-deterministic-replay.md) | Pinned FSRS-6 scheduler profile and deterministic replay | `D-GH-152` | ADR |
 | [ADR 0034](adrs/0034-connected-online-demo-day-scope.md) | Connected online Demo Day scope | `D-GH-19` | ADR |
+| [ADR 0035](adrs/0035-upstream-signed-clamav-cloud-demo-snapshot-admission.md) | Upstream-signed ClamAV cloud-demo snapshot admission | `D-GH-176` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -64,7 +64,8 @@ Detailed rules live in the linked records.
   [ADR 0008](adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md),
   [ADR 0009](adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md),
   [ADR 0013](adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md),
-  and [ADR 0023](adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md).
+  [ADR 0023](adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md),
+  and [ADR 0035](adrs/0035-upstream-signed-clamav-cloud-demo-snapshot-admission.md).
 - Model and media capabilities:
   [ADR 0004](adrs/0004-provider-capability-ports-and-adapter-rollout.md),
   [ADR 0010](adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md),

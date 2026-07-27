@@ -87,3 +87,4 @@ parsers, model providers, storage systems, and delivery mechanisms change.
 - [ADR 0008 — isolated local document parsing, scanning, and OCR](../adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md)
 - [ADR 0009 — versioned source-span embedding and vector namespace contract](../adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md)
 - [ADR 0013 — private OSS delivery, CDN signing, expiry, and invalidation](../adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md)
+- [ADR 0035 — upstream-signed ClamAV cloud-demo snapshot admission](../adrs/0035-upstream-signed-clamav-cloud-demo-snapshot-admission.md)

@@ -1,7 +1,7 @@
 ---
 id: "0021"
 title: "KMS-backed ClamAV snapshot signing profile"
-status: Accepted
+status: Superseded
 date: "2026-07-21"
 aliases: [D-GH-96]
 prd_references: "`prds/reflo-prd.md` §6 F1, §9, §11, and §13; D-GH-5 and D-GH-8"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/96#issuecomment-5037326529
   record_pr: https://github.com/deepessh/reflo-learning/pull/98
 supersedes: []
-superseded_by: null
+superseded_by: "0035"
 deprecation: null
 maintenance: []
 ---

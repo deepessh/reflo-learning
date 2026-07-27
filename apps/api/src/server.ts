@@ -737,6 +737,15 @@ export function createApiServer(
           sendJson(response, 413, { error: "upload_too_large" });
           return;
         }
+        if (error instanceof DemoUploadFormatError) {
+          sendJson(response, 415, {
+            detail:
+              "Demo Day uploads accept only an approved digitally generated PDF.",
+            error: "unsupported_demo_upload_format",
+            supportedMediaType: "application/pdf",
+          });
+          return;
+        }
         if (
           error instanceof AccountInputError ||
           error instanceof JsonBodyError
@@ -945,13 +954,8 @@ function demoUploadOutlineRoute(pathname: string): string | null {
 }
 
 function demoUploadMediaType(value: string | undefined): DemoUploadMediaType {
-  if (
-    value !== "application/pdf" &&
-    value !== "application/epub+zip" &&
-    value !==
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  ) {
-    throw new JsonBodyError();
+  if (value !== "application/pdf") {
+    throw new DemoUploadFormatError();
   }
   return value;
 }
@@ -1002,4 +1006,5 @@ function singleHeader(
 }
 
 class JsonBodyError extends Error {}
+class DemoUploadFormatError extends Error {}
 class RequestBodyTooLargeError extends Error {}

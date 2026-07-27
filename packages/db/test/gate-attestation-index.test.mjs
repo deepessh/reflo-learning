@@ -91,8 +91,8 @@ test(
 
 function attestation(digestCharacter, publishedAt, status) {
   return {
-    attestationVersion: "gate-attestation-v1",
-    contractVersion: "evaluation-contract-v1",
+    attestationVersion: "gate-attestation-v2",
+    contractVersion: "evaluation-contract-v2",
     dependencyFingerprints: { schema: "d".repeat(64) },
     deployableArtifactDigest: `sha256:${"e".repeat(64)}`,
     environment: "staging",

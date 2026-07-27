@@ -8,9 +8,11 @@ import type {
   DemoUploadView,
 } from "@reflo/contracts";
 
+import {
+  DEMO_UPLOAD_FILE_ACCEPT,
+  isDemoPdfSelection,
+} from "./demo-upload-file";
 import { demoUploadPresentation } from "./demo-upload-view";
-
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 type ApprovalScreen = "error" | "hidden" | "loading" | "ready";
 type SubmissionScreen = "idle" | "submitting" | "tracking";
@@ -127,14 +129,9 @@ export function DemoUploadPanel({
       setLocalError("Choose an approved source and its exact local artifact.");
       return;
     }
-    if (
-      file.size < 1 ||
-      file.size > MAX_UPLOAD_BYTES ||
-      fileExtension(file.name) !== approval.extension ||
-      (file.type !== "" && file.type !== approval.mediaType)
-    ) {
+    if (!isDemoPdfSelection(file)) {
       setLocalError(
-        "The selected file does not match the approved type or 50 MB limit.",
+        "Choose the exact approved PDF artifact within the 50 MB limit. EPUB and DOCX are post–Demo Day.",
       );
       return;
     }
@@ -163,7 +160,9 @@ export function DemoUploadPanel({
       setLocalError(
         response?.status === 413
           ? "The selected file exceeds the 50 MB product maximum."
-          : "The upload was not accepted. No successful outcome was recorded.",
+          : response?.status === 415
+            ? "Demo Day uploads accept only the approved digitally generated PDF. EPUB and DOCX are post–Demo Day."
+            : "The upload was not accepted. No successful outcome was recorded.",
       );
       return;
     }
@@ -185,11 +184,11 @@ export function DemoUploadPanel({
       <div className="panel-heading demo-upload-heading">
         <div>
           <p className="eyebrow">Staff operator · separate SLO proof</p>
-          <h2 id="demo-upload-title">Approved source to course outline</h2>
+          <h2 id="demo-upload-title">Approved PDF to course outline</h2>
           <p>
-            This surface accepts only configured, human-approved demo sources.
-            It demonstrates upload to outline; lessons, quizzes, and media
-            generate separately.
+            This surface accepts only the configured, human-approved PDF. EPUB
+            and DOCX are post–Demo Day. It demonstrates upload to outline;
+            lessons, quizzes, and media generate separately.
           </p>
         </div>
         <span className="demo-boundary">No public or learner uploads</span>
@@ -226,7 +225,7 @@ export function DemoUploadPanel({
       {approvalScreen === "ready" && approvals.length > 0 ? (
         <>
           <form className="demo-upload-form" onSubmit={submit}>
-            <label htmlFor="demo-source-approval">Approved source</label>
+            <label htmlFor="demo-source-approval">Approved PDF</label>
             <select
               id="demo-source-approval"
               onChange={(event) => {
@@ -250,9 +249,11 @@ export function DemoUploadPanel({
                 {approval.extension.toUpperCase()}
               </p>
             )}
-            <label htmlFor="demo-source-file">Exact approved artifact</label>
+            <label htmlFor="demo-source-file">
+              Exact approved PDF artifact
+            </label>
             <input
-              accept={approval?.mediaType}
+              accept={DEMO_UPLOAD_FILE_ACCEPT}
               id="demo-source-file"
               key={selectedApprovalId}
               onChange={(event) =>
@@ -316,9 +317,4 @@ export function DemoUploadPanel({
       ) : null}
     </section>
   );
-}
-
-function fileExtension(name: string): string {
-  const match = /\.([^.]+)$/.exec(name.trim().toLowerCase());
-  return match?.[1] ?? "";
 }

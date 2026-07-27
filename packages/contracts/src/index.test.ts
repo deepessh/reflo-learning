@@ -16,6 +16,6 @@ describe("health contract", () => {
       "connected-demo-preflight-v1",
     );
     expect(CONNECTED_STUDY_VIEW_VERSION).toBe("connected-study-view-v1");
-    expect(DEMO_UPLOAD_CONTRACT_VERSION).toBe("demo-upload-v1");
+    expect(DEMO_UPLOAD_CONTRACT_VERSION).toBe("demo-upload-v2");
   });
 });

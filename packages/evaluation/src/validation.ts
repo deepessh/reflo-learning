@@ -224,10 +224,10 @@ function validateItem(
       !Number.isSafeInteger(item.byteLength) ||
       item.byteLength < 512 * 1_024 ||
       item.byteLength > 20 * 1_024 * 1_024 ||
-      (item.pageCount !== null &&
-        (!Number.isSafeInteger(item.pageCount) ||
-          item.pageCount < 5 ||
-          item.pageCount > 200)) ||
+      item.format !== "pdf" ||
+      !Number.isSafeInteger(item.pageCount) ||
+      item.pageCount < 5 ||
+      item.pageCount > 200 ||
       !safeReference(item.standardProfileEligibilityReference)
     ) {
       reasons.push("standard_document_profile_invalid");
@@ -238,7 +238,7 @@ function validateItem(
       ...(item.hasImages ? ["content:images"] : []),
       ...(item.hasTables ? ["content:tables"] : []),
       sizeStratum(item.byteLength),
-      ...(item.pageCount === null ? [] : [pageStratum(item.pageCount)]),
+      pageStratum(item.pageCount),
     ];
     if (expectedStrata.some((stratum) => !item.strata.includes(stratum))) {
       reasons.push("document_strata_mismatch");

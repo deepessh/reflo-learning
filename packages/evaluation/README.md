@@ -1,11 +1,17 @@
 # Reflo release-gate evaluation
 
-`@reflo/evaluation` implements the repository-owned `evaluation-contract-v1`
+`@reflo/evaluation` implements the repository-owned `evaluation-contract-v2`
 defined by D-GH-15. It validates immutable dataset manifests, enforces the exact
 Week 1 execution profiles, deterministically scores performance, dual-TTS,
 upload-security, and adversarial runs, emits content-addressed evidence bundles,
 and publishes fail-closed environment-scoped attestations through an authorized
 index port.
+
+The Demo Day performance contract is PDF-only: every standard-profile
+performance item is a 5–200 page PDF between 0.5 and 20 MiB. Passing this gate
+does not provide EPUB or DOCX support, performance, or SLO evidence. Upload
+security still requires explicit fail-closed rejection coverage for EPUB and
+DOCX at the PDF-only Demo Day boundary.
 
 CI may validate schemas, fixtures, determinism, and fail-closed behavior. It
 cannot pass the performance or audio gates. Those require target-production

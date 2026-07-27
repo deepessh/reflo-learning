@@ -70,8 +70,6 @@ export const GATE_CONTRACTS: Readonly<
     ],
     requiredMutableEvidenceKinds: ["capacity", "quota", "rights"],
     requiredStrata: [
-      "format:docx",
-      "format:epub",
       "format:pdf",
       "pages:5-49",
       "pages:50-149",
@@ -98,8 +96,6 @@ export const GATE_CONTRACTS: Readonly<
     ],
     requiredMutableEvidenceKinds: ["rights"],
     requiredStrata: [
-      "format:docx",
-      "format:epub",
       "format:pdf",
       "route:encrypted",
       "route:malformed",
@@ -111,6 +107,8 @@ export const GATE_CONTRACTS: Readonly<
       "security:cross-scope",
       "security:networkless",
       "security:no-ambient-credentials",
+      "route:unsupported-docx",
+      "route:unsupported-epub",
     ],
   }),
 });

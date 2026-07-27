@@ -53,5 +53,11 @@ describe("staff demo upload presentation", () => {
     expect(
       demoUploadPresentation("failed", "source_not_approved").detail,
     ).toContain("human-approved rights-cleared");
+    expect(
+      demoUploadPresentation("failed", "unsupported_type").detail,
+    ).toContain("exact approved PDF");
+    expect(
+      demoUploadPresentation("failed", "unsupported_type").detail,
+    ).toContain("post–Demo Day");
   });
 });

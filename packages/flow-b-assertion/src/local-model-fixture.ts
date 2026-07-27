@@ -107,6 +107,8 @@ const server = createServer(async (request, response) => {
       const value =
         task === "assessment.grade-short-answer.v1"
           ? grade(user)
+          : task === "curriculum.segment.v1"
+            ? curriculumSegment(user)
           : task === "lesson.reteach.v1"
             ? reteach(user)
             : null;
@@ -162,6 +164,50 @@ function grade(user: Record<string, unknown>): Record<string, unknown> {
       rubricBand: correct ? "correct" : "incorrect",
       score: correct ? 1 : 0,
     })),
+  };
+}
+
+function curriculumSegment(
+  user: Record<string, unknown>,
+): Record<string, unknown> {
+  const typedInput = asRecord(user.typedInput);
+  const sourceMaterial = user.sourceMaterial;
+  const segmentId = typedInput.segmentId;
+  const segmentOrdinal = typedInput.segmentOrdinal;
+  if (
+    typeof segmentId !== "string" ||
+    !Number.isSafeInteger(segmentOrdinal) ||
+    !Array.isArray(sourceMaterial) ||
+    sourceMaterial.length < 1
+  ) {
+    throw new Error("curriculum segment input is unavailable");
+  }
+  const sourceSpanIds = sourceMaterial.map((span) => {
+    const id = asRecord(span).id;
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error("curriculum segment source identity is unavailable");
+    }
+    return id;
+  });
+  const displayOrdinal = Number(segmentOrdinal) + 1;
+  return {
+    chapters: [
+      {
+        concepts: [
+          {
+            key: `segment_${displayOrdinal}_overview`,
+            name: `Segment ${displayOrdinal} overview`,
+            prerequisiteKeys: [],
+            sourceSpanIds,
+          },
+        ],
+        sourceSpanIds,
+        title: `Segment ${displayOrdinal}`,
+      },
+    ],
+    kind: "instructional",
+    segmentId,
+    segmentOrdinal,
   };
 }
 

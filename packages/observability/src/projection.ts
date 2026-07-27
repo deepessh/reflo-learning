@@ -96,6 +96,7 @@ function modelTaskHealth(task: ModelTaskId): {
 } {
   switch (task) {
     case "curriculum.structure.v1":
+    case "curriculum.segment.v1":
     case "embedding.document.v1":
     case "embedding.query.v1":
       return { operation: "curriculum_generation", stage: "ingestion" };

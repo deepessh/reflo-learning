@@ -1,5 +1,6 @@
 import type { NativeLocator, NormalizedDocument } from "@reflo/ingestion";
 import type {
+  CurriculumSegmentResult,
   CurriculumStructureResult,
   ModelCallProvenance,
 } from "@reflo/model-router";
@@ -11,6 +12,16 @@ export const EMBEDDING_PROFILE_VERSION = "embedding-v1" as const;
 export const EMBEDDING_INPUT_PROFILE_VERSION = "embedding-input-v1" as const;
 export const VECTOR_NAMESPACE_VERSION = "vector-namespace-v1" as const;
 export const CURRICULUM_GENERATION_VERSION = "curriculum-v1" as const;
+export const CURRICULUM_SEGMENT_GENERATION_VERSION = "curriculum-v2" as const;
+export const CURRICULUM_PARTITION_VERSION = "curriculum-partition-v1" as const;
+export const CURRICULUM_COMPOSITION_VERSION = "curriculum-compose-v1" as const;
+export const CURRICULUM_SEGMENT_TASK_VERSION = "curriculum.segment.v1" as const;
+export const CURRICULUM_SEGMENT_MAX_SPANS = 12 as const;
+export const CURRICULUM_SEGMENT_MAX_SOURCE_TOKENS = 8_000 as const;
+export const CURRICULUM_SEGMENT_MAX_CONCURRENCY = 4 as const;
+export const CURRICULUM_PARENT_DEADLINE_MS = 960_000 as const;
+export const CURRICULUM_SEGMENT_DEADLINE_MS = 240_000 as const;
+export const CURRICULUM_FINALIZATION_RESERVE_MS = 96_000 as const;
 export const EMBEDDING_DIMENSIONS = 1_024 as const;
 
 export interface ScopeAuthorizationContext {
@@ -99,12 +110,122 @@ export interface CurriculumGenerationRecord {
   readonly courseId: string;
   readonly embeddingGenerationId: string;
   readonly generationId: string;
-  readonly modelProvenance: ModelCallProvenance;
+  readonly modelProvenance:
+    ModelCallProvenance | readonly ModelCallProvenance[];
   readonly ownerScopeId: string;
   readonly resultHash: string;
   readonly sourceDocumentId: string;
-  readonly structure: CurriculumStructureResult;
-  readonly version: typeof CURRICULUM_GENERATION_VERSION;
+  readonly structure: CurriculumStructureResult | ComposedCurriculumResult;
+  readonly version:
+    | typeof CURRICULUM_GENERATION_VERSION
+    | typeof CURRICULUM_SEGMENT_GENERATION_VERSION;
+}
+
+export interface CurriculumSegmentManifestEntry {
+  readonly firstSourceOrder: number;
+  readonly id: string;
+  readonly inputHash: string;
+  readonly lastSourceOrder: number;
+  readonly ordinal: number;
+  readonly parentGenerationId: string;
+  readonly partitionVersion: typeof CURRICULUM_PARTITION_VERSION;
+  readonly sectionPath: readonly string[] | null;
+  readonly sourceSpanIds: readonly string[];
+  readonly sourceSpanInputHashes: readonly string[];
+  readonly sourceTokenCount: number;
+}
+
+export interface CurriculumPartitionManifest {
+  readonly compositionVersion: typeof CURRICULUM_COMPOSITION_VERSION;
+  readonly embeddingGenerationId: string;
+  readonly generationVersion: typeof CURRICULUM_SEGMENT_GENERATION_VERSION;
+  readonly manifestHash: string;
+  readonly ownerScopeId: string;
+  readonly parentGenerationId: string;
+  readonly partitionVersion: typeof CURRICULUM_PARTITION_VERSION;
+  readonly segments: readonly CurriculumSegmentManifestEntry[];
+  readonly sourceDocumentId: string;
+  readonly courseId: string;
+  readonly tokenizerVersion: typeof TOKENIZER_VERSION;
+}
+
+export interface PersistedCurriculumSegmentResult {
+  readonly attemptCount: number;
+  readonly inputHash: string;
+  readonly modelProvenance: ModelCallProvenance;
+  readonly result: CurriculumSegmentResult;
+  readonly resultHash: string;
+  readonly segmentId: string;
+}
+
+export type CurriculumSegmentClaim =
+  | {
+      readonly kind: "active";
+    }
+  | {
+      readonly attemptCount: number;
+      readonly kind: "claimed";
+    }
+  | {
+      readonly kind: "completed";
+      readonly persisted: PersistedCurriculumSegmentResult;
+    }
+  | {
+      readonly kind: "failed";
+    };
+
+export interface CurriculumSegmentCompletion {
+  readonly attemptCount: number;
+  readonly inputHash: string;
+  readonly modelProvenance: ModelCallProvenance;
+  readonly parentGenerationId: string;
+  readonly result: CurriculumSegmentResult;
+  readonly resultHash: string;
+  readonly segmentId: string;
+}
+
+export interface CurriculumSegmentFailure {
+  readonly attemptCount: number;
+  readonly failureClass: string;
+  readonly inputHash: string;
+  readonly parentGenerationId: string;
+  readonly retryable: boolean;
+  readonly segmentId: string;
+}
+
+export interface ComposedCurriculumResult {
+  readonly chapters: readonly {
+    readonly concepts: readonly {
+      readonly id: string;
+      readonly key: string;
+      readonly name: string;
+      readonly prerequisiteKeys: readonly string[];
+      readonly sourceSpanIds: readonly string[];
+    }[];
+    readonly id: string;
+    readonly sourceSpanIds: readonly string[];
+    readonly title: string;
+  }[];
+  readonly childResultHashes: readonly string[];
+  readonly compositionVersion: typeof CURRICULUM_COMPOSITION_VERSION;
+  readonly embeddingGenerationId: string;
+  readonly generationVersion: typeof CURRICULUM_SEGMENT_GENERATION_VERSION;
+  readonly partitionManifestHash: string;
+}
+
+export interface CurriculumOrchestrationMetrics {
+  readonly chapterCount: number;
+  readonly compositionFinalizationMs: number;
+  readonly conceptCount: number;
+  readonly finalizationReserveMs: number;
+  readonly parentDeadlineMs: number;
+  readonly retryCount: number;
+  readonly segmentAttemptCounts: readonly number[];
+  readonly segmentCount: number;
+  readonly segmentLatenciesMs: readonly number[];
+  readonly segmentQueueTimesMs: readonly number[];
+  readonly terminalReason: "outline_ready";
+  readonly totalLatencyMs: number;
 }
 
 export interface CurriculumOutline {
@@ -137,6 +258,7 @@ export interface BuildCurriculumCommand {
 
 export interface BuildCurriculumResult {
   readonly embeddingGeneration: EmbeddingGenerationRecord;
+  readonly orchestration: CurriculumOrchestrationMetrics;
   readonly outline: CurriculumOutline;
   readonly sourceSpans: readonly SourceSpanRecord[];
 }

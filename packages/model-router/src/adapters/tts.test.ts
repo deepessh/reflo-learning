@@ -232,7 +232,7 @@ describe("TTS provider adapters", () => {
       effectiveModel: QWEN_3_TTS_FLASH_MODEL,
       effectiveModelVersion: QWEN_3_TTS_FLASH_MODEL_VERSION,
       requestedSelector: "qwen-tts.primary",
-      routePolicyVersion: "route-policy-v4",
+      routePolicyVersion: "route-policy-v6",
       validationOutcome: "passed",
     });
     expect(traces.traces).toHaveLength(1);

@@ -136,20 +136,54 @@ export async function createDemoUploadRuntime(
     leaseDurationMs: 60_000,
     leaseOwner: "api_demo_upload_v1",
   });
-  const content = new PostgresContentRepository(databaseUrl);
+  const content = new PostgresContentRepository(databaseUrl, {
+    environment: deployment,
+  });
   const vectorPool = new PostgresAnalyticDbPool(vectorDatabaseUrl);
   const objects = new LocalSmokeObjectStore(artifactRoot);
   const liteLlm = createLiteLlmDevAdapters(input);
+  const tracing = createDemoTraceRuntime(input, {
+    component: "api-demo-upload",
+    deployment,
+  });
   const router = createModelRouter({
     adapters: liteLlm.adapters,
     deployment,
-    traceSink: createDemoTraceRuntime(input, {
-      component: "api-demo-upload",
-      deployment,
-    }).modelTraces,
+    traceSink: tracing.modelTraces,
   });
   const curriculum = new RetrievalService({
     models: router,
+    observeCurriculum: async (metrics) => {
+      const finishedAt = new Date().toISOString();
+      const latency = distribution(metrics.segmentLatenciesMs);
+      const queue = distribution(metrics.segmentQueueTimesMs);
+      await tracing.recordOperational({
+        attemptCount: Math.min(10, metrics.retryCount + 1),
+        chapterCount: metrics.chapterCount,
+        compositionFinalizationMs: metrics.compositionFinalizationMs,
+        conceptCount: metrics.conceptCount,
+        deadlineBudgetMs: metrics.parentDeadlineMs,
+        durationMs: metrics.totalLatencyMs,
+        finalizationReserveMs: metrics.finalizationReserveMs,
+        finishedAt,
+        operation: "curriculum_generation",
+        outcome: "success",
+        retryCount: metrics.retryCount,
+        segmentCount: metrics.segmentCount,
+        segmentLatencyMaxMs: latency.max,
+        segmentLatencyMinMs: latency.min,
+        segmentLatencyP50Ms: latency.p50,
+        segmentLatencyP95Ms: latency.p95,
+        segmentQueueMaxMs: queue.max,
+        segmentQueueMinMs: queue.min,
+        segmentQueueP50Ms: queue.p50,
+        segmentQueueP95Ms: queue.p95,
+        stage: "ingestion",
+        startedAt: new Date(
+          Date.parse(finishedAt) - metrics.totalLatencyMs,
+        ).toISOString(),
+      });
+    },
     repository: content,
     vectors: new DevelopmentPgVectorStore(
       vectorPool,
@@ -245,6 +279,23 @@ export async function createDemoUploadRuntime(
     await runtime.close().catch(() => undefined);
     throw error;
   }
+}
+
+function distribution(values: readonly number[]): {
+  readonly max: number;
+  readonly min: number;
+  readonly p50: number;
+  readonly p95: number;
+} {
+  const sorted = [...values].sort((left, right) => left - right);
+  const percentile = (quantile: number) =>
+    sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)] ?? 0;
+  return {
+    max: sorted.at(-1) ?? 0,
+    min: sorted[0] ?? 0,
+    p50: percentile(0.5),
+    p95: percentile(0.95),
+  };
 }
 
 function required(input: NodeJS.ProcessEnv, name: string): string {

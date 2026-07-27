@@ -31,7 +31,7 @@ import {
   type DeliveryPreference,
 } from "@reflo/knowledge-model";
 import {
-  ROUTE_POLICY_V4,
+  ROUTE_POLICY_V6,
   ROUTE_POLICY_VERSION,
   buildPromptBundle,
   createModelRouter,
@@ -154,7 +154,9 @@ export function createConnectedDemoRuntime(
     deployment,
     traceSink: tracing.modelTraces,
   });
-  const contentRepository = new PostgresContentRepository(databaseUrl);
+  const contentRepository = new PostgresContentRepository(databaseUrl, {
+    environment: deployment,
+  });
   const vectorPool = new PostgresAnalyticDbPool(vectorDatabaseUrl);
   const retrieval = new RetrievalService({
     models: router,
@@ -484,7 +486,7 @@ function gradingPolicy(
     readonly effectiveModelVersion: string;
   },
 ): FrozenGradingPolicy {
-  const route = ROUTE_POLICY_V4["assessment.grade-short-answer.v1"];
+  const route = ROUTE_POLICY_V6["assessment.grade-short-answer.v1"];
   const prompt = buildPromptBundle("assessment.grade-short-answer.v1", {
     answer: "",
     question: "",
@@ -508,7 +510,7 @@ function gradingPolicy(
       promptId: prompt.id,
       promptVersion: prompt.version,
       resultSchemaVersion: route.resultSchemaVersion,
-      routePolicyVersion: "route-policy-v4",
+      routePolicyVersion: "route-policy-v6",
     },
     gradingPolicyVersion: "grading-policy-v1",
     ratingMappingVersion: "rating-mapping-v1",

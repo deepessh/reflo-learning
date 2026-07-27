@@ -75,7 +75,7 @@ describe("demo upload processing queue", () => {
     expect(fixture.curriculum.buildCurriculum).toHaveBeenCalledWith({
       authorization: work.authorization,
       courseId: work.courseId,
-      deadlineMs: 120_000,
+      deadlineMs: 960_000,
       document,
       sourceDocumentId: work.sourceDocumentId,
     });
@@ -101,7 +101,7 @@ describe("demo upload processing queue", () => {
     const fixture = createFixture([parsed]);
     fixture.repository.claimCourseGeneration
       .mockResolvedValueOnce({ kind: "active" })
-      .mockResolvedValueOnce({ deadlineMs: 120_000, kind: "claimed" });
+      .mockResolvedValueOnce({ deadlineMs: 960_000, kind: "claimed" });
 
     fixture.service.schedule(work);
     await fixture.service.close();
@@ -237,7 +237,7 @@ function createFixture(
   const repository = {
     claimCourseGeneration: vi.fn(
       async (): Promise<DemoUploadGenerationClaim> => ({
-        deadlineMs: 120_000,
+        deadlineMs: 960_000,
         kind: "claimed",
       }),
     ),

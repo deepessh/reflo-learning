@@ -1,5 +1,5 @@
 import { normalizedDocument } from "@reflo/ingestion/testing";
-import { createModelRouter } from "@reflo/model-router";
+import { createModelRouter, type ModelTaskInput } from "@reflo/model-router";
 import {
   createScriptedAdapterRegistry,
   InMemoryTraceSink,
@@ -7,7 +7,14 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { chunkNormalizedDocument } from "./chunker.js";
-import { EMBEDDING_DIMENSIONS } from "./contracts.js";
+import {
+  CURRICULUM_FINALIZATION_RESERVE_MS,
+  CURRICULUM_PARENT_DEADLINE_MS,
+  CURRICULUM_SEGMENT_DEADLINE_MS,
+  EMBEDDING_DIMENSIONS,
+  type CurriculumOrchestrationMetrics,
+} from "./contracts.js";
+import { sha256 } from "./identity.js";
 import { RetrievalService } from "./service.js";
 import { InMemoryContentRepository, InMemoryVectorStore } from "./testing.js";
 
@@ -39,31 +46,44 @@ describe("retrieval vertical slice", () => {
     const repository = new InMemoryContentRepository(access);
     const vectors = new InMemoryVectorStore();
     const scripted = createScriptedAdapterRegistry({
-      "curriculum.structure.v1": [
+      "curriculum.segment.v1": [
         {
-          type: "result",
-          value: {
-            chapters: [
-              {
-                concepts: [
+          handle(invocation) {
+            const input =
+              invocation.input as ModelTaskInput<"curriculum.segment.v1">;
+            const sourceSpanId = input.sourceSpans[0]?.id;
+            if (sourceSpanId === undefined) {
+              throw new Error("segment source span missing");
+            }
+            return {
+              value: {
+                chapters: [
                   {
-                    key: "virtual-networks",
-                    name: "Virtual networks",
-                    prerequisiteKeys: [],
-                    sourceSpanIds: [fixtureSpan.id],
-                  },
-                  {
-                    key: "subnets",
-                    name: "Subnets",
-                    prerequisiteKeys: ["virtual-networks"],
-                    sourceSpanIds: [fixtureSpan.id],
+                    concepts: [
+                      {
+                        key: "virtual-networks",
+                        name: "Virtual networks",
+                        prerequisiteKeys: [],
+                        sourceSpanIds: [sourceSpanId],
+                      },
+                      {
+                        key: "subnets",
+                        name: "Subnets",
+                        prerequisiteKeys: ["virtual-networks"],
+                        sourceSpanIds: [sourceSpanId],
+                      },
+                    ],
+                    sourceSpanIds: [sourceSpanId],
+                    title: "Networking",
                   },
                 ],
-                sourceSpanIds: [fixtureSpan.id],
-                title: "Networking",
+                kind: "instructional",
+                segmentId: input.segmentId,
+                segmentOrdinal: input.segmentOrdinal,
               },
-            ],
+            };
           },
+          type: "handler",
         },
       ],
       "embedding.document.v1": [
@@ -97,7 +117,7 @@ describe("retrieval vertical slice", () => {
     const result = await service.buildCurriculum({
       authorization,
       courseId: access.courseId,
-      deadlineMs: 5_000,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
       document,
       sourceDocumentId: access.sourceDocumentId,
     });
@@ -119,6 +139,26 @@ describe("retrieval vertical slice", () => {
     expect(repository.activeGeneration?.generationId).toBe(
       result.embeddingGeneration.generationId,
     );
+
+    const replay = await service.buildCurriculum({
+      authorization,
+      courseId: access.courseId,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
+      document,
+      sourceDocumentId: access.sourceDocumentId,
+    });
+    expect(replay.outline).toEqual(result.outline);
+    expect(repository.curriculumGenerations).toHaveLength(1);
+    expect(
+      scripted.invocations.filter(
+        (invocation) => invocation.task === "embedding.document.v1",
+      ),
+    ).toHaveLength(1);
+    expect(
+      scripted.invocations.filter(
+        (invocation) => invocation.task === "curriculum.segment.v1",
+      ),
+    ).toHaveLength(1);
 
     await expect(
       service.search({
@@ -165,6 +205,182 @@ describe("retrieval vertical slice", () => {
     ).rejects.toMatchObject({ code: "authorization_denied" });
     expect(scripted.invocations).toHaveLength(0);
     expect(vectors.records).toHaveLength(0);
+  });
+
+  it("bounds segment calls at four-way concurrency", async () => {
+    const repository = new InMemoryContentRepository(access);
+    const vectors = new InMemoryVectorStore();
+    const observed: CurriculumOrchestrationMetrics[] = [];
+    let active = 0;
+    let maximumActive = 0;
+    const segmentActions = Array.from({ length: 8 }, () => ({
+      async handle(invocation: {
+        readonly input: unknown;
+      }): Promise<{ readonly value: unknown }> {
+        const input =
+          invocation.input as ModelTaskInput<"curriculum.segment.v1">;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { value: instructionalSegment(input) };
+      },
+      type: "handler" as const,
+    }));
+    const scripted = createScriptedAdapterRegistry({
+      "curriculum.segment.v1": segmentActions,
+      "embedding.document.v1": [
+        {
+          type: "result",
+          value: {
+            metadata: embeddingMetadata("document", "document-request-many"),
+            vectors: Array.from({ length: 8 }, () => vector(0.1)),
+          },
+        },
+      ],
+    });
+    const service = new RetrievalService({
+      models: createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }),
+      observeCurriculum(metrics) {
+        observed.push(metrics);
+      },
+      repository,
+      vectors,
+    });
+
+    const result = await service.buildCurriculum({
+      authorization,
+      courseId: access.courseId,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
+      document: multiSectionDocument(8),
+      sourceDocumentId: access.sourceDocumentId,
+    });
+
+    expect(maximumActive).toBe(4);
+    expect(result.orchestration.segmentCount).toBe(8);
+    expect(CURRICULUM_SEGMENT_DEADLINE_MS).toBe(240_000);
+    expect(result.orchestration.finalizationReserveMs).toBe(96_000);
+    expect(result.orchestration.parentDeadlineMs).toBe(960_000);
+    expect(result.orchestration.segmentAttemptCounts).toEqual(
+      Array.from({ length: 8 }, () => 1),
+    );
+    expect(result.orchestration.segmentQueueTimesMs).toHaveLength(8);
+    expect(observed).toEqual([result.orchestration]);
+    expect(result.outline.chapters).toHaveLength(8);
+  });
+
+  it("preserves the finalization reserve and refuses a late child retry", async () => {
+    const repository = new InMemoryContentRepository(access);
+    const vectors = new InMemoryVectorStore();
+    const scripted = createScriptedAdapterRegistry({
+      "curriculum.segment.v1": [
+        {
+          safeCode: "rate_limited",
+          transient: true,
+          type: "failure",
+        },
+        {
+          safeCode: "rate_limited",
+          transient: true,
+          type: "failure",
+        },
+        {
+          handle(invocation) {
+            return {
+              value: instructionalSegment(
+                invocation.input as ModelTaskInput<"curriculum.segment.v1">,
+              ),
+            };
+          },
+          type: "handler",
+        },
+      ],
+      "embedding.document.v1": [
+        {
+          type: "result",
+          value: {
+            metadata: embeddingMetadata("document", "document-request-retry"),
+            vectors: [vector(0.1)],
+          },
+        },
+      ],
+    });
+    const service = new RetrievalService({
+      models: createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }),
+      repository,
+      vectors,
+    });
+    const command = {
+      authorization,
+      courseId: access.courseId,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
+      document,
+      sourceDocumentId: access.sourceDocumentId,
+    } as const;
+
+    await expect(service.buildCurriculum(command)).rejects.toMatchObject({
+      code: "provider_failure",
+    });
+    await expect(
+      service.buildCurriculum({ ...command, deadlineMs: 41_000 }),
+    ).rejects.toMatchObject({ code: "deadline_exceeded" });
+
+    expect(
+      scripted.invocations.filter(
+        (invocation) => invocation.task === "embedding.document.v1",
+      ),
+    ).toHaveLength(1);
+    expect(
+      scripted.invocations.filter(
+        (invocation) => invocation.task === "curriculum.segment.v1",
+      ),
+    ).toHaveLength(2);
+    expect(repository.curriculumGenerations).toHaveLength(0);
+  });
+
+  it("does not launch segment work inside the ninety-six-second reserve", async () => {
+    const repository = new InMemoryContentRepository(access);
+    const vectors = new InMemoryVectorStore();
+    const scripted = createScriptedAdapterRegistry({
+      "embedding.document.v1": [
+        {
+          type: "result",
+          value: {
+            metadata: embeddingMetadata("document", "document-request-reserve"),
+            vectors: [vector(0.1)],
+          },
+        },
+      ],
+    });
+    const service = new RetrievalService({
+      models: createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }),
+      repository,
+      vectors,
+    });
+
+    await expect(
+      service.buildCurriculum({
+        authorization,
+        courseId: access.courseId,
+        deadlineMs: CURRICULUM_FINALIZATION_RESERVE_MS,
+        document,
+        sourceDocumentId: access.sourceDocumentId,
+      }),
+    ).rejects.toMatchObject({ code: "deadline_exceeded" });
+    expect(
+      scripted.invocations.some(
+        (invocation) => invocation.task === "curriculum.segment.v1",
+      ),
+    ).toBe(false);
   });
 
   it("rejects a contaminated cross-scope vector result before resolving text", async () => {
@@ -317,4 +533,56 @@ function embeddingMetadata(
     providerRequestId,
     region: "fixture-region-1",
   } as const;
+}
+
+function instructionalSegment(input: ModelTaskInput<"curriculum.segment.v1">) {
+  const sourceSpanId = input.sourceSpans[0]?.id;
+  if (sourceSpanId === undefined) {
+    throw new Error("segment source span missing");
+  }
+  return {
+    chapters: [
+      {
+        concepts: [
+          {
+            key: `concept-${input.segmentOrdinal}`,
+            name: `Concept ${input.segmentOrdinal}`,
+            prerequisiteKeys: [],
+            sourceSpanIds: [sourceSpanId],
+          },
+        ],
+        sourceSpanIds: input.sourceSpans.map((span) => span.id),
+        title: `Section ${input.segmentOrdinal}`,
+      },
+    ],
+    kind: "instructional" as const,
+    segmentId: input.segmentId,
+    segmentOrdinal: input.segmentOrdinal,
+  };
+}
+
+function multiSectionDocument(count: number) {
+  let canonicalStart = 0;
+  return {
+    ...document,
+    blocks: Array.from({ length: count }, (_, index) => {
+      const text = `Grounded section ${index}`;
+      const block = {
+        canonicalEnd: canonicalStart + text.length,
+        canonicalStart,
+        kind: "paragraph" as const,
+        locator: {
+          kind: "pdf" as const,
+          page: index + 1,
+          sectionPath: [`Section ${index}`],
+        },
+        order: index,
+        text,
+        textSha256: sha256(text),
+      };
+      canonicalStart = block.canonicalEnd + 1;
+      return block;
+    }),
+    pageCount: count,
+  };
 }

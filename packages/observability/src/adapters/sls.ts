@@ -98,6 +98,39 @@ function operationalAttributes(trace: DemoOperationalTrace) {
     { key: "reflo_outcome", value: trace.outcome },
     { key: "reflo_schema_version", value: trace.schemaVersion },
     { key: "reflo_stage", value: trace.stage },
+    ...optionalMetric("reflo_chapter_count", trace.chapterCount),
+    ...optionalMetric(
+      "reflo_composition_finalization_ms",
+      trace.compositionFinalizationMs,
+    ),
+    ...optionalMetric("reflo_concept_count", trace.conceptCount),
+    ...optionalMetric("reflo_deadline_budget_ms", trace.deadlineBudgetMs),
+    ...optionalMetric(
+      "reflo_finalization_reserve_ms",
+      trace.finalizationReserveMs,
+    ),
+    ...optionalMetric("reflo_retry_count", trace.retryCount),
+    ...optionalMetric("reflo_segment_count", trace.segmentCount),
+    ...optionalMetric(
+      "reflo_segment_latency_max_ms",
+      trace.segmentLatencyMaxMs,
+    ),
+    ...optionalMetric(
+      "reflo_segment_latency_min_ms",
+      trace.segmentLatencyMinMs,
+    ),
+    ...optionalMetric(
+      "reflo_segment_latency_p50_ms",
+      trace.segmentLatencyP50Ms,
+    ),
+    ...optionalMetric(
+      "reflo_segment_latency_p95_ms",
+      trace.segmentLatencyP95Ms,
+    ),
+    ...optionalMetric("reflo_segment_queue_max_ms", trace.segmentQueueMaxMs),
+    ...optionalMetric("reflo_segment_queue_min_ms", trace.segmentQueueMinMs),
+    ...optionalMetric("reflo_segment_queue_p50_ms", trace.segmentQueueP50Ms),
+    ...optionalMetric("reflo_segment_queue_p95_ms", trace.segmentQueueP95Ms),
     ...(trace.model === undefined
       ? []
       : [{ key: "reflo_model", value: trace.model }]),
@@ -130,6 +163,10 @@ function operationalAttributes(trace: DemoOperationalTrace) {
           },
         ]),
   ];
+}
+
+function optionalMetric(key: string, value: number | undefined) {
+  return value === undefined ? [] : [{ key, value }];
 }
 
 function credential(value: string): boolean {

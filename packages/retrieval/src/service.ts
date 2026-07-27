@@ -1,5 +1,5 @@
+import { ModelRouterError } from "@reflo/model-router";
 import type {
-  CurriculumStructureResult,
   EmbeddingResult,
   ModelCallProvenance,
   RoutedModelResult,
@@ -7,21 +7,33 @@ import type {
 
 import { chunkNormalizedDocument } from "./chunker.js";
 import {
-  CURRICULUM_GENERATION_VERSION,
+  CURRICULUM_FINALIZATION_RESERVE_MS,
+  CURRICULUM_PARENT_DEADLINE_MS,
+  CURRICULUM_SEGMENT_DEADLINE_MS,
+  CURRICULUM_SEGMENT_GENERATION_VERSION,
+  CURRICULUM_SEGMENT_MAX_CONCURRENCY,
   EMBEDDING_DIMENSIONS,
   EMBEDDING_PROFILE_VERSION,
   type AuthorizedSourceAccess,
   type BuildCurriculumCommand,
   type BuildCurriculumResult,
   type CurriculumGenerationRecord,
+  type ComposedCurriculumResult,
+  type CurriculumOrchestrationMetrics,
   type CurriculumOutline,
   type EmbeddingGenerationRecord,
+  type PersistedCurriculumSegmentResult,
   type RetrievedSourceSpan,
   type ScopeAuthorizationContext,
   type SearchCommand,
   type SourceSpanRecord,
   type VectorRecord,
 } from "./contracts.js";
+import {
+  composeCurriculum,
+  curriculumSegmentInput,
+  partitionCurriculumSource,
+} from "./curriculum.js";
 import { RetrievalError } from "./errors.js";
 import { canonicalJson, sha256, stableUuid } from "./identity.js";
 import type {
@@ -32,18 +44,33 @@ import type {
 
 export interface RetrievalServiceDependencies {
   readonly models: RetrievalModelRouterPort;
+  readonly now?: () => number;
+  readonly observeCurriculum?: (
+    metrics: CurriculumOrchestrationMetrics,
+  ) => Promise<void> | void;
   readonly repository: ContentRepositoryPort;
   readonly vectors: VectorStorePort;
 }
 
 export class RetrievalService {
-  constructor(private readonly dependencies: RetrievalServiceDependencies) {}
+  readonly #now: () => number;
+
+  constructor(private readonly dependencies: RetrievalServiceDependencies) {
+    this.#now = dependencies.now ?? Date.now;
+  }
 
   async buildCurriculum(
     command: BuildCurriculumCommand,
   ): Promise<BuildCurriculumResult> {
     validateDeadline(command.deadlineMs);
-    const deadlineAt = Date.now() + command.deadlineMs;
+    if (command.deadlineMs > CURRICULUM_PARENT_DEADLINE_MS) {
+      throw new RetrievalError(
+        "invalid_configuration",
+        "curriculum deadline exceeds the shipped policy",
+      );
+    }
+    const startedAt = this.#now();
+    const deadlineAt = startedAt + command.deadlineMs;
     const access = await this.#authorize(
       command.authorization,
       command.sourceDocumentId,
@@ -65,75 +92,84 @@ export class RetrievalService {
     });
     await this.dependencies.repository.persistSourceSpans(access, sourceSpans);
 
-    const embeddingBatches = await this.#embedDocuments(
-      sourceSpans.map((span) => span.embeddingInput),
-      deadlineAt,
-    );
-    const embeddedVectors = embeddingBatches.flatMap(
-      (batch) => batch.value.vectors,
-    );
-    const embeddingGeneration = buildEmbeddingGeneration(
+    const embeddingGeneration = await this.#ensureEmbeddingGeneration(
       access,
       sourceSpans,
-      embeddingBatches,
+      deadlineAt,
     );
-    const vectorRecords: readonly VectorRecord[] = sourceSpans.map(
-      (span, index) => ({
-        embedding: required(
-          embeddedVectors[index],
-          "missing document embedding",
-        ),
-        embeddingInputHash: span.embeddingInputHash,
-        generationId: embeddingGeneration.generationId,
-        ownerScopeId: access.ownerScopeId,
-        sourceDocumentId: access.sourceDocumentId,
-        sourceSpanId: span.id,
-      }),
-    );
-    await this.dependencies.repository.recordEmbeddingGeneration(
-      access,
-      embeddingGeneration,
-    );
-    await this.dependencies.vectors.writeGeneration(
-      access,
-      embeddingGeneration,
-      vectorRecords,
-    );
-    await this.dependencies.repository.activateEmbeddingGeneration(
+    const manifest = partitionCurriculumSource(
       access,
       embeddingGeneration.generationId,
+      sourceSpans,
     );
-
-    const structured = await this.dependencies.models.execute(
-      "curriculum.structure.v1",
-      {
-        courseTitle: access.courseTitle,
-        sourceSpans: sourceSpans.map((span) => ({
-          id: span.id,
-          text: span.canonicalText,
-        })),
-      },
-      { deadlineMs: remainingDeadline(deadlineAt) },
-    );
-    const curriculumGeneration = buildCurriculumGeneration(
+    await this.dependencies.repository.persistCurriculumPartition(
       access,
+      manifest,
+    );
+    const segmentExecutions = await this.#executeCurriculumSegments(
+      access,
+      manifest,
+      sourceSpans,
+      deadlineAt,
+    );
+    const compositionStartedAt = this.#now();
+    const composed = composeCurriculum(
+      manifest,
+      access.courseTitle,
+      sourceSpans,
+      segmentExecutions.map((entry) => entry.persisted),
+    );
+    const curriculumGeneration = buildComposedCurriculumGeneration(
+      access,
+      manifest.parentGenerationId,
       embeddingGeneration.generationId,
-      structured.value,
-      structured.provenance,
+      composed.result,
+      composed.modelProvenance,
     );
     const outline = await this.dependencies.repository.persistCurriculum(
       access,
       curriculumGeneration,
+      remainingDeadline(deadlineAt, this.#now),
     );
     assertOutline(access, curriculumGeneration, outline);
-    return { embeddingGeneration, outline, sourceSpans };
+    const finishedAt = this.#now();
+    if (finishedAt > deadlineAt) {
+      throw new RetrievalError(
+        "deadline_exceeded",
+        "curriculum finalized after the parent deadline",
+      );
+    }
+    const orchestration = {
+      chapterCount: outline.chapters.length,
+      compositionFinalizationMs: Math.max(0, finishedAt - compositionStartedAt),
+      conceptCount: outline.chapters.reduce(
+        (count, chapter) => count + chapter.concepts.length,
+        0,
+      ),
+      finalizationReserveMs: CURRICULUM_FINALIZATION_RESERVE_MS,
+      parentDeadlineMs: command.deadlineMs,
+      retryCount: segmentExecutions.reduce(
+        (count, entry) => count + Math.max(0, entry.persisted.attemptCount - 1),
+        0,
+      ),
+      segmentAttemptCounts: segmentExecutions.map(
+        (entry) => entry.persisted.attemptCount,
+      ),
+      segmentCount: manifest.segments.length,
+      segmentLatenciesMs: segmentExecutions.map((entry) => entry.latencyMs),
+      segmentQueueTimesMs: segmentExecutions.map((entry) => entry.queueTimeMs),
+      terminalReason: "outline_ready",
+      totalLatencyMs: Math.max(0, finishedAt - startedAt),
+    } satisfies CurriculumOrchestrationMetrics;
+    await this.dependencies.observeCurriculum?.(orchestration);
+    return { embeddingGeneration, orchestration, outline, sourceSpans };
   }
 
   async search(
     command: SearchCommand,
   ): Promise<readonly RetrievedSourceSpan[]> {
     validateDeadline(command.deadlineMs);
-    const deadlineAt = Date.now() + command.deadlineMs;
+    const deadlineAt = this.#now() + command.deadlineMs;
     if (
       command.query.trim().length === 0 ||
       !Number.isSafeInteger(command.limit) ||
@@ -161,7 +197,7 @@ export class RetrievalService {
     const embedded = await this.dependencies.models.execute(
       "embedding.query.v1",
       { texts: [command.query] },
-      { deadlineMs: remainingDeadline(deadlineAt) },
+      { deadlineMs: remainingDeadline(deadlineAt, this.#now) },
     );
     assertEmbeddingMetadata(embedded.value, "query");
     assertCompatibleActiveEmbeddingGeneration(activeGeneration, embedded);
@@ -252,7 +288,7 @@ export class RetrievalService {
       const batch = await this.dependencies.models.execute(
         "embedding.document.v1",
         { texts: texts.slice(index, index + 10) },
-        { deadlineMs: remainingDeadline(deadlineAt) },
+        { deadlineMs: remainingDeadline(deadlineAt, this.#now) },
       );
       assertEmbeddingMetadata(batch.value, "document");
       if (batches[0] !== undefined) {
@@ -265,6 +301,237 @@ export class RetrievalService {
     }
     return batches;
   }
+
+  async #ensureEmbeddingGeneration(
+    access: AuthorizedSourceAccess,
+    sourceSpans: readonly SourceSpanRecord[],
+    deadlineAt: number,
+  ): Promise<EmbeddingGenerationRecord> {
+    const active =
+      await this.dependencies.repository.activeEmbeddingGeneration(access);
+    if (
+      active !== null &&
+      active.ownerScopeId === access.ownerScopeId &&
+      active.sourceDocumentId === access.sourceDocumentId &&
+      active.spanIds.length === sourceSpans.length &&
+      active.spanIds.every((id, index) => id === sourceSpans[index]?.id)
+    ) {
+      return active;
+    }
+    const embeddingBatches = await this.#embedDocuments(
+      sourceSpans.map((span) => span.embeddingInput),
+      deadlineAt,
+    );
+    const embeddedVectors = embeddingBatches.flatMap(
+      (batch) => batch.value.vectors,
+    );
+    const embeddingGeneration = buildEmbeddingGeneration(
+      access,
+      sourceSpans,
+      embeddingBatches,
+    );
+    const vectorRecords: readonly VectorRecord[] = sourceSpans.map(
+      (span, index) => ({
+        embedding: required(
+          embeddedVectors[index],
+          "missing document embedding",
+        ),
+        embeddingInputHash: span.embeddingInputHash,
+        generationId: embeddingGeneration.generationId,
+        ownerScopeId: access.ownerScopeId,
+        sourceDocumentId: access.sourceDocumentId,
+        sourceSpanId: span.id,
+      }),
+    );
+    await this.dependencies.repository.recordEmbeddingGeneration(
+      access,
+      embeddingGeneration,
+    );
+    await this.dependencies.vectors.writeGeneration(
+      access,
+      embeddingGeneration,
+      vectorRecords,
+    );
+    await this.dependencies.repository.activateEmbeddingGeneration(
+      access,
+      embeddingGeneration.generationId,
+    );
+    return embeddingGeneration;
+  }
+
+  async #executeCurriculumSegments(
+    access: AuthorizedSourceAccess,
+    manifest: ReturnType<typeof partitionCurriculumSource>,
+    sourceSpans: readonly SourceSpanRecord[],
+    deadlineAt: number,
+  ): Promise<
+    readonly {
+      readonly latencyMs: number;
+      readonly persisted: PersistedCurriculumSegmentResult;
+      readonly queueTimeMs: number;
+    }[]
+  > {
+    const executionStartedAt = this.#now();
+    const completed = new Map<
+      string,
+      {
+        readonly latencyMs: number;
+        readonly persisted: PersistedCurriculumSegmentResult;
+        readonly queueTimeMs: number;
+      }
+    >();
+    let nextIndex = 0;
+    const executeNext = async (): Promise<void> => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const segment = manifest.segments[index];
+        if (segment === undefined) {
+          return;
+        }
+        const remaining = deadlineAt - this.#now();
+        if (remaining <= CURRICULUM_FINALIZATION_RESERVE_MS) {
+          throw new RetrievalError(
+            "deadline_exceeded",
+            "curriculum finalization reserve reached",
+          );
+        }
+        const claim = await this.dependencies.repository.claimCurriculumSegment(
+          access,
+          manifest.parentGenerationId,
+          segment,
+        );
+        if (claim.kind === "completed") {
+          completed.set(segment.id, {
+            latencyMs: 0,
+            persisted: claim.persisted,
+            queueTimeMs: 0,
+          });
+          continue;
+        }
+        if (claim.kind === "active") {
+          throw new RetrievalError(
+            "persistence_failure",
+            "curriculum segment already has an active lease",
+          );
+        }
+        if (claim.kind === "failed") {
+          throw new RetrievalError(
+            "invalid_model_result",
+            "curriculum segment is permanently failed",
+          );
+        }
+        if (
+          claim.attemptCount > 1 &&
+          remaining <
+            CURRICULUM_SEGMENT_DEADLINE_MS + CURRICULUM_FINALIZATION_RESERVE_MS
+        ) {
+          await this.dependencies.repository.failCurriculumSegment(access, {
+            attemptCount: claim.attemptCount,
+            failureClass: "generation_deadline_exceeded",
+            inputHash: segment.inputHash,
+            parentGenerationId: manifest.parentGenerationId,
+            retryable: false,
+            segmentId: segment.id,
+          });
+          throw new RetrievalError(
+            "deadline_exceeded",
+            "insufficient parent budget for a curriculum segment retry",
+          );
+        }
+        const callRemaining = deadlineAt - this.#now();
+        if (callRemaining <= CURRICULUM_FINALIZATION_RESERVE_MS) {
+          await this.dependencies.repository.failCurriculumSegment(access, {
+            attemptCount: claim.attemptCount,
+            failureClass: "generation_deadline_exceeded",
+            inputHash: segment.inputHash,
+            parentGenerationId: manifest.parentGenerationId,
+            retryable: false,
+            segmentId: segment.id,
+          });
+          throw new RetrievalError(
+            "deadline_exceeded",
+            "curriculum finalization reserve reached before child launch",
+          );
+        }
+        const input = curriculumSegmentInput(
+          access.courseTitle,
+          segment,
+          sourceSpans,
+        );
+        const callStartedAt = this.#now();
+        try {
+          const routed = await this.dependencies.models.execute(
+            "curriculum.segment.v1",
+            input,
+            {
+              deadlineMs: Math.min(
+                CURRICULUM_SEGMENT_DEADLINE_MS,
+                callRemaining - CURRICULUM_FINALIZATION_RESERVE_MS,
+              ),
+            },
+          );
+          const resultHash = sha256(canonicalJson(routed.value));
+          await this.dependencies.repository.completeCurriculumSegment(access, {
+            attemptCount: claim.attemptCount,
+            inputHash: segment.inputHash,
+            modelProvenance: routed.provenance,
+            parentGenerationId: manifest.parentGenerationId,
+            result: routed.value,
+            resultHash,
+            segmentId: segment.id,
+          });
+          completed.set(segment.id, {
+            latencyMs: Math.max(0, this.#now() - callStartedAt),
+            persisted: {
+              attemptCount: claim.attemptCount,
+              inputHash: segment.inputHash,
+              modelProvenance: routed.provenance,
+              result: routed.value,
+              resultHash,
+              segmentId: segment.id,
+            },
+            queueTimeMs: Math.max(0, callStartedAt - executionStartedAt),
+          });
+        } catch (error) {
+          await this.dependencies.repository
+            .failCurriculumSegment(access, {
+              attemptCount: claim.attemptCount,
+              failureClass: curriculumSegmentFailureClass(error),
+              inputHash: segment.inputHash,
+              parentGenerationId: manifest.parentGenerationId,
+              retryable: curriculumSegmentRetryable(error),
+              segmentId: segment.id,
+            })
+            .catch(() => undefined);
+          throw error;
+        }
+      }
+    };
+    const workers = await Promise.allSettled(
+      Array.from(
+        {
+          length: Math.min(
+            CURRICULUM_SEGMENT_MAX_CONCURRENCY,
+            manifest.segments.length,
+          ),
+        },
+        executeNext,
+      ),
+    );
+    const failedWorker = workers.find(
+      (worker): worker is PromiseRejectedResult => worker.status === "rejected",
+    );
+    if (failedWorker !== undefined) {
+      throw failedWorker.reason;
+    }
+    return manifest.segments.map((segment) =>
+      required(
+        completed.get(segment.id),
+        "missing completed curriculum segment",
+      ),
+    );
+  }
 }
 
 export function materializeCurriculumOutline(
@@ -276,11 +543,13 @@ export function materializeCurriculumOutline(
     for (const concept of chapter.concepts) {
       conceptIds.set(
         concept.key,
-        stableUuid({
-          conceptKey: concept.key,
-          courseId: access.courseId,
-          curriculumGenerationId: generation.generationId,
-        }),
+        "id" in concept
+          ? concept.id
+          : stableUuid({
+              conceptKey: concept.key,
+              courseId: access.courseId,
+              curriculumGenerationId: generation.generationId,
+            }),
       );
     }
   }
@@ -295,13 +564,16 @@ export function materializeCurriculumOutline(
         ),
         sourceSpanIds: concept.sourceSpanIds,
       })),
-      id: stableUuid({
-        chapterIndex,
-        courseId: access.courseId,
-        curriculumGenerationId: generation.generationId,
-        sourceSpanIds: chapter.sourceSpanIds,
-        title: chapter.title,
-      }),
+      id:
+        "id" in chapter
+          ? chapter.id
+          : stableUuid({
+              chapterIndex,
+              courseId: access.courseId,
+              curriculumGenerationId: generation.generationId,
+              sourceSpanIds: chapter.sourceSpanIds,
+              title: chapter.title,
+            }),
       sourceSpanIds: chapter.sourceSpanIds,
       title: chapter.title,
     })),
@@ -356,29 +628,24 @@ function buildEmbeddingGeneration(
   };
 }
 
-function buildCurriculumGeneration(
+function buildComposedCurriculumGeneration(
   access: AuthorizedSourceAccess,
+  generationId: string,
   embeddingGenerationId: string,
-  structure: CurriculumStructureResult,
-  provenance: ModelCallProvenance,
+  structure: ComposedCurriculumResult,
+  provenance: readonly ModelCallProvenance[],
 ): CurriculumGenerationRecord {
   const resultHash = sha256(canonicalJson(structure));
   return {
     courseId: access.courseId,
     embeddingGenerationId,
-    generationId: stableUuid({
-      courseId: access.courseId,
-      embeddingGenerationId,
-      modelProvenance: provenance,
-      resultHash,
-      version: CURRICULUM_GENERATION_VERSION,
-    }),
+    generationId,
     modelProvenance: provenance,
     ownerScopeId: access.ownerScopeId,
     resultHash,
     sourceDocumentId: access.sourceDocumentId,
     structure,
-    version: CURRICULUM_GENERATION_VERSION,
+    version: CURRICULUM_SEGMENT_GENERATION_VERSION,
   };
 }
 
@@ -475,12 +742,36 @@ function validateDeadline(value: number): void {
   }
 }
 
-function remainingDeadline(deadlineAt: number): number {
-  const remaining = deadlineAt - Date.now();
+function remainingDeadline(deadlineAt: number, now: () => number): number {
+  const remaining = deadlineAt - now();
   if (remaining <= 0) {
-    throw new RetrievalError("invalid_configuration", "model deadline elapsed");
+    throw new RetrievalError("deadline_exceeded", "model deadline elapsed");
   }
   return remaining;
+}
+
+function curriculumSegmentFailureClass(error: unknown): string {
+  if (error instanceof ModelRouterError) {
+    return `model_${error.code}`;
+  }
+  if (error instanceof RetrievalError) {
+    return `retrieval_${error.code}`;
+  }
+  return "generation_dependency_unavailable";
+}
+
+function curriculumSegmentRetryable(error: unknown): boolean {
+  if (error instanceof ModelRouterError) {
+    return (
+      error.code === "adapter_unavailable" ||
+      error.code === "trace_failure" ||
+      (error.code === "provider_failure" &&
+        error.providerFailure?.transient !== false)
+    );
+  }
+  return (
+    error instanceof RetrievalError && error.code === "persistence_failure"
+  );
 }
 
 function required<Value>(value: Value | undefined, message: string): Value {

@@ -11,6 +11,7 @@ import type {
 } from "./contracts.js";
 import {
   AUDIO_PAYLOAD_VERSION,
+  CURRICULUM_NON_INSTRUCTIONAL_REASONS,
   QUIZ_ITEM_TYPES,
   TTS_ALLOWED_SAMPLE_RATES,
 } from "./contracts.js";
@@ -29,6 +30,9 @@ export const RESULT_VALIDATORS: Readonly<Record<ModelTaskId, Validator>> = {
     ),
   "assessment.quiz.v1": validator<"assessment.quiz.v1">((value, input) =>
     isQuizGenerationResult(value, input),
+  ),
+  "curriculum.segment.v1": validator<"curriculum.segment.v1">((value, input) =>
+    isCurriculumSegmentResult(value, input),
   ),
   "curriculum.structure.v1": validator<"curriculum.structure.v1">(
     isCurriculumStructureResult,
@@ -204,6 +208,51 @@ function isCurriculumStructureResult(
     }
   }
   return true;
+}
+
+function isCurriculumSegmentResult(
+  value: unknown,
+  input: ModelTaskInput<"curriculum.segment.v1">,
+): boolean {
+  if (
+    !isRecord(value) ||
+    value.segmentId !== input.segmentId ||
+    value.segmentOrdinal !== input.segmentOrdinal
+  ) {
+    return false;
+  }
+  if (value.kind === "non_instructional") {
+    return (
+      hasExactKeys(value, [
+        "kind",
+        "reason",
+        "segmentId",
+        "segmentOrdinal",
+        "sourceSpanIds",
+      ]) &&
+      (CURRICULUM_NON_INSTRUCTIONAL_REASONS as readonly unknown[]).includes(
+        value.reason,
+      ) &&
+      Array.isArray(value.sourceSpanIds) &&
+      value.sourceSpanIds.length === input.sourceSpans.length &&
+      value.sourceSpanIds.every(
+        (id, index) => id === input.sourceSpans[index]?.id,
+      )
+    );
+  }
+  if (
+    value.kind !== "instructional" ||
+    !hasExactKeys(value, ["chapters", "kind", "segmentId", "segmentOrdinal"])
+  ) {
+    return false;
+  }
+  return isCurriculumStructureResult(
+    { chapters: value.chapters },
+    {
+      courseTitle: input.courseTitle,
+      sourceSpans: input.sourceSpans,
+    },
+  );
 }
 
 function isQuizGenerationResult(

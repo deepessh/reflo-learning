@@ -32,11 +32,16 @@ export type DemoOperationalOutcome =
 
 export interface DemoOperationalTrace {
   readonly attemptCount: number;
+  readonly chapterCount?: number;
   readonly component: string;
+  readonly compositionFinalizationMs?: number;
+  readonly conceptCount?: number;
+  readonly deadlineBudgetMs?: number;
   readonly demoRunId: string;
   readonly durationMs: number;
   readonly environment: "dev" | "pilot" | "staging";
   readonly eventId: string;
+  readonly finalizationReserveMs?: number;
   readonly finishedAt: string;
   readonly model?: string;
   readonly modelTask?: ModelTaskId;
@@ -45,8 +50,18 @@ export interface DemoOperationalTrace {
   readonly outcome: DemoOperationalOutcome;
   readonly promptId?: string;
   readonly promptVersion?: string;
+  readonly retryCount?: number;
   readonly routePolicyVersion?: string;
   readonly schemaVersion: typeof DEMO_TELEMETRY_SCHEMA_VERSION;
+  readonly segmentCount?: number;
+  readonly segmentLatencyMaxMs?: number;
+  readonly segmentLatencyMinMs?: number;
+  readonly segmentLatencyP50Ms?: number;
+  readonly segmentLatencyP95Ms?: number;
+  readonly segmentQueueMaxMs?: number;
+  readonly segmentQueueMinMs?: number;
+  readonly segmentQueueP50Ms?: number;
+  readonly segmentQueueP95Ms?: number;
   readonly stage: DemoPipelineStage;
   readonly startedAt: string;
   readonly validationStatus?: "failed" | "not_run" | "passed";
@@ -61,21 +76,41 @@ export interface DemoOperationalTraceSink {
 
 export interface DemoOperationalTraceInput {
   readonly attemptCount?: number;
+  readonly chapterCount?: number;
+  readonly compositionFinalizationMs?: number;
+  readonly conceptCount?: number;
+  readonly deadlineBudgetMs?: number;
   readonly durationMs: number;
+  readonly finalizationReserveMs?: number;
   readonly finishedAt: string;
   readonly operation: DemoOperationName;
   readonly outcome: DemoOperationalOutcome;
+  readonly retryCount?: number;
+  readonly segmentCount?: number;
+  readonly segmentLatencyMaxMs?: number;
+  readonly segmentLatencyMinMs?: number;
+  readonly segmentLatencyP50Ms?: number;
+  readonly segmentLatencyP95Ms?: number;
+  readonly segmentQueueMaxMs?: number;
+  readonly segmentQueueMinMs?: number;
+  readonly segmentQueueP50Ms?: number;
+  readonly segmentQueueP95Ms?: number;
   readonly stage: DemoPipelineStage;
   readonly startedAt: string;
 }
 
 const TRACE_KEYS = new Set([
   "attemptCount",
+  "chapterCount",
   "component",
+  "compositionFinalizationMs",
+  "conceptCount",
+  "deadlineBudgetMs",
   "demoRunId",
   "durationMs",
   "environment",
   "eventId",
+  "finalizationReserveMs",
   "finishedAt",
   "model",
   "modelTask",
@@ -84,8 +119,18 @@ const TRACE_KEYS = new Set([
   "outcome",
   "promptId",
   "promptVersion",
+  "retryCount",
   "routePolicyVersion",
   "schemaVersion",
+  "segmentCount",
+  "segmentLatencyMaxMs",
+  "segmentLatencyMinMs",
+  "segmentLatencyP50Ms",
+  "segmentLatencyP95Ms",
+  "segmentQueueMaxMs",
+  "segmentQueueMinMs",
+  "segmentQueueP50Ms",
+  "segmentQueueP95Ms",
   "stage",
   "startedAt",
   "validationStatus",
@@ -118,6 +163,21 @@ export function assertSafeDemoOperationalTrace(
     !Number.isSafeInteger(trace.attemptCount) ||
     trace.attemptCount < 0 ||
     trace.attemptCount > 10 ||
+    !boundedOptionalMetric(trace.chapterCount) ||
+    !boundedOptionalMetric(trace.compositionFinalizationMs) ||
+    !boundedOptionalMetric(trace.conceptCount) ||
+    !boundedOptionalMetric(trace.deadlineBudgetMs) ||
+    !boundedOptionalMetric(trace.finalizationReserveMs) ||
+    !boundedOptionalMetric(trace.retryCount) ||
+    !boundedOptionalMetric(trace.segmentCount) ||
+    !boundedOptionalMetric(trace.segmentLatencyMaxMs) ||
+    !boundedOptionalMetric(trace.segmentLatencyMinMs) ||
+    !boundedOptionalMetric(trace.segmentLatencyP50Ms) ||
+    !boundedOptionalMetric(trace.segmentLatencyP95Ms) ||
+    !boundedOptionalMetric(trace.segmentQueueMaxMs) ||
+    !boundedOptionalMetric(trace.segmentQueueMinMs) ||
+    !boundedOptionalMetric(trace.segmentQueueP50Ms) ||
+    !boundedOptionalMetric(trace.segmentQueueP95Ms) ||
     !boundedOptional(trace.model) ||
     !boundedOptional(trace.modelVersion) ||
     (trace.modelTask !== undefined &&
@@ -139,4 +199,11 @@ function validTimestamp(value: string): boolean {
 
 function boundedOptional(value: string | undefined): boolean {
   return value === undefined || SAFE_BOUNDED_VALUE.test(value);
+}
+
+function boundedOptionalMetric(value: number | undefined): boolean {
+  return (
+    value === undefined ||
+    (Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000)
+  );
 }

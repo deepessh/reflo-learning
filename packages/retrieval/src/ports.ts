@@ -2,8 +2,13 @@ import type { ModelTaskInput, RoutedModelResult } from "@reflo/model-router";
 
 import type {
   AuthorizedSourceAccess,
+  CurriculumPartitionManifest,
   CurriculumGenerationRecord,
   CurriculumOutline,
+  CurriculumSegmentClaim,
+  CurriculumSegmentCompletion,
+  CurriculumSegmentFailure,
+  CurriculumSegmentManifestEntry,
   EmbeddingGenerationRecord,
   RetrievedSourceSpan,
   ScopeAuthorizationContext,
@@ -13,7 +18,10 @@ import type {
 } from "./contracts.js";
 
 export type RetrievalModelTask =
-  "curriculum.structure.v1" | "embedding.document.v1" | "embedding.query.v1";
+  | "curriculum.segment.v1"
+  | "curriculum.structure.v1"
+  | "embedding.document.v1"
+  | "embedding.query.v1";
 
 export interface RetrievalModelRouterPort {
   execute<Task extends RetrievalModelTask>(
@@ -55,9 +63,31 @@ export interface ContentRepositoryPort {
     sourceSpanIds: readonly string[],
   ): Promise<readonly RetrievedSourceSpan[]>;
 
+  persistCurriculumPartition(
+    access: AuthorizedSourceAccess,
+    manifest: CurriculumPartitionManifest,
+  ): Promise<void>;
+
+  claimCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    parentGenerationId: string,
+    segment: CurriculumSegmentManifestEntry,
+  ): Promise<CurriculumSegmentClaim>;
+
+  completeCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    completion: CurriculumSegmentCompletion,
+  ): Promise<void>;
+
+  failCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    failure: CurriculumSegmentFailure,
+  ): Promise<void>;
+
   persistCurriculum(
     access: AuthorizedSourceAccess,
     generation: CurriculumGenerationRecord,
+    deadlineMs: number,
   ): Promise<CurriculumOutline>;
 }
 

@@ -1,5 +1,6 @@
 export type RetrievalErrorCode =
   | "authorization_denied"
+  | "deadline_exceeded"
   | "invalid_chunk"
   | "invalid_configuration"
   | "invalid_model_result"

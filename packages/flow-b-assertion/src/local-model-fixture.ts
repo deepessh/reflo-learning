@@ -107,9 +107,11 @@ const server = createServer(async (request, response) => {
       const value =
         task === "assessment.grade-short-answer.v1"
           ? grade(user)
-          : task === "lesson.reteach.v1"
-            ? reteach(user)
-            : null;
+          : task === "curriculum.segment.v1"
+            ? curriculumSegment(user)
+            : task === "lesson.reteach.v1"
+              ? reteach(user)
+              : null;
       if (value === null) {
         sendJson(response, 400, { error: "unsupported_fixture_task" });
         return;
@@ -162,6 +164,46 @@ function grade(user: Record<string, unknown>): Record<string, unknown> {
       rubricBand: correct ? "correct" : "incorrect",
       score: correct ? 1 : 0,
     })),
+  };
+}
+
+function curriculumSegment(
+  user: Record<string, unknown>,
+): Record<string, unknown> {
+  const typedInput = asRecord(user.typedInput);
+  const sourceMaterial = user.sourceMaterial;
+  const sourceOrderStart = typedInput.sourceOrderStart;
+  if (
+    !Number.isSafeInteger(sourceOrderStart) ||
+    !Array.isArray(sourceMaterial) ||
+    sourceMaterial.length < 1
+  ) {
+    throw new Error("curriculum segment input is unavailable");
+  }
+  const sourceSpanIds = sourceMaterial.map((span) => {
+    const id = asRecord(span).id;
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error("curriculum segment source identity is unavailable");
+    }
+    return id;
+  });
+  const displayOrder = Number(sourceOrderStart) + 1;
+  return {
+    chapters: [
+      {
+        concepts: [
+          {
+            key: `source_${displayOrder}_overview`,
+            name: `Source ${displayOrder} overview`,
+            prerequisiteKeys: [],
+            sourceSpanIds,
+          },
+        ],
+        sourceSpanIds,
+        title: `Source ${displayOrder}`,
+      },
+    ],
+    kind: "instructional",
   };
 }
 

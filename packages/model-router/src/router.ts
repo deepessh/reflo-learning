@@ -12,7 +12,7 @@ import type {
 } from "./ports.js";
 import { ModelAdapterError } from "./ports.js";
 import {
-  ROUTE_POLICY_V4,
+  ROUTE_POLICY_V6,
   ROUTE_POLICY_VERSION,
   type RouteDefinition,
 } from "./policy.js";
@@ -134,7 +134,7 @@ export function createModelRouter(options: ModelRouterOptions) {
 
     const logicalStartedAt = now();
     const deadlineAt = logicalStartedAt + executeOptions.deadlineMs;
-    const route: RouteDefinition = ROUTE_POLICY_V4[task];
+    const route: RouteDefinition = ROUTE_POLICY_V6[task];
     const featureFlag = route.featureFlag;
     if (featureFlag !== undefined) {
       const operationKind = executeOptions.videoOperationKind;
@@ -224,6 +224,11 @@ export function createModelRouter(options: ModelRouterOptions) {
             now,
             () => abortController.abort(),
           );
+          const normalizedValue = attachDeterministicResultFields(
+            task,
+            input,
+            response.value,
+          );
           const finishedAt = now();
           if (finishedAt > deadlineAt) {
             attempts.push(
@@ -244,7 +249,7 @@ export function createModelRouter(options: ModelRouterOptions) {
             break;
           }
 
-          if (!RESULT_VALIDATORS[task](response.value, input)) {
+          if (!RESULT_VALIDATORS[task](normalizedValue, input)) {
             attempts.push(
               attemptTrace(
                 adapter.descriptor,
@@ -334,7 +339,7 @@ export function createModelRouter(options: ModelRouterOptions) {
               task,
               validationOutcome: "passed",
             },
-            value: response.value as ModelTaskResult<Task>,
+            value: normalizedValue as ModelTaskResult<Task>,
           };
         } catch (error) {
           if (attempts.at(-1)?.outcome === "success") {
@@ -525,6 +530,43 @@ function buildPrompt<Task extends ModelTaskId>(
     return undefined;
   }
   return buildPromptBundle(task, input as never);
+}
+
+function attachDeterministicResultFields<Task extends ModelTaskId>(
+  task: Task,
+  input: ModelTaskInput<Task>,
+  value: unknown,
+): unknown {
+  if (
+    task !== "curriculum.segment.v1" ||
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+  const segmentInput = input as ModelTaskInput<"curriculum.segment.v1">;
+  const providerResult = value as Record<string, unknown>;
+  const identity = {
+    ...(Object.hasOwn(providerResult, "segmentId")
+      ? {}
+      : { segmentId: segmentInput.segmentId }),
+    ...(Object.hasOwn(providerResult, "segmentOrdinal")
+      ? {}
+      : { segmentOrdinal: segmentInput.segmentOrdinal }),
+  };
+  if (providerResult.kind !== "non_instructional") {
+    return { ...providerResult, ...identity };
+  }
+  return {
+    ...providerResult,
+    ...identity,
+    ...(Object.hasOwn(providerResult, "sourceSpanIds")
+      ? {}
+      : {
+          sourceSpanIds: segmentInput.sourceSpans.map((span) => span.id),
+        }),
+  };
 }
 
 function verifyPromptRoute(

@@ -73,7 +73,17 @@ describe("LiteLLM development adapters", () => {
         deadlineMs: 1_000,
       });
 
-      expect(result.value).toEqual(value);
+      expect(result.value).toEqual(
+        task === "curriculum.segment.v1"
+          ? {
+              ...(value as Record<string, unknown>),
+              segmentId: (input as ModelTaskInput<"curriculum.segment.v1">)
+                .segmentId,
+              segmentOrdinal: (input as ModelTaskInput<"curriculum.segment.v1">)
+                .segmentOrdinal,
+            }
+          : value,
+      );
       expect(result.provenance).toMatchObject({
         configuredModel: "local/test-text",
         effectiveModel: "resolved/local-text-v2",
@@ -90,7 +100,7 @@ describe("LiteLLM development adapters", () => {
         stream: false,
       });
       const responseFormat = requests[0]?.body.response_format;
-      if (task === "tutor.answer.v1") {
+      if (task === "curriculum.segment.v1" || task === "tutor.answer.v1") {
         expect(responseFormat).toEqual({ type: "json_object" });
       } else {
         expect(responseFormat).toMatchObject({
@@ -148,14 +158,60 @@ describe("LiteLLM development adapters", () => {
           },
         });
       }
+      if (task === "curriculum.segment.v1") {
+        expect(system.promptVersion).toBe("2");
+        expect(system.outputSchemaId).toBe(
+          "curriculum-segment-provider-result-v2",
+        );
+        expect(system.outputContract).not.toContain('"segmentId"');
+        expect(system.outputContract).not.toContain('"segmentOrdinal"');
+        expect(user.typedInput).not.toHaveProperty("segmentId");
+        expect(user.typedInput).not.toHaveProperty("segmentOrdinal");
+      }
       expect(system).not.toHaveProperty("sourceMaterial");
       expect(user.sourceMaterial).toEqual(
-        "sourceSpans" in input ? input.sourceSpans : [],
+        "sourceSpans" in input
+          ? input.sourceSpans.map((span) => ({ id: span.id, text: span.text }))
+          : [],
       );
       expect(user.typedInput).not.toHaveProperty("sourceSpans");
       expect(user.typedInput).not.toHaveProperty("answer");
     },
   );
+
+  it("replaces provider-echoed non-instructional segment metadata", async () => {
+    const fixture = textFixtures().find(
+      ({ task }) => task === "curriculum.segment.v1",
+    );
+    if (fixture === undefined) {
+      throw new Error("curriculum segment fixture is unavailable");
+    }
+    const input = fixture.input as ModelTaskInput<"curriculum.segment.v1">;
+    const adapters = createLiteLlmDevAdapters(environment, {
+      fetch: async () =>
+        chatResponse({
+          kind: "non_instructional",
+          reason: "front_matter",
+          segmentId: "provider-mutated-segment",
+          segmentOrdinal: 999,
+          sourceSpanIds: ["provider-mutated-span"],
+        }),
+    });
+
+    const result = await createModelRouter({
+      adapters: adapters.adapters,
+      deployment: "dev",
+      traceSink: new InMemoryTraceSink(),
+    }).execute("curriculum.segment.v1", input, { deadlineMs: 1_000 });
+
+    expect(result.value).toEqual({
+      kind: "non_instructional",
+      reason: "front_matter",
+      segmentId: input.segmentId,
+      segmentOrdinal: input.segmentOrdinal,
+      sourceSpanIds: input.sourceSpans.map((span) => span.id),
+    });
+  });
 
   it("lets the typed router reject malformed grading and unauthorized spans", async () => {
     for (const fixture of [
@@ -473,6 +529,45 @@ function textFixtures(): readonly {
             sourceSpanIds: ["span-1"],
           },
         ],
+      },
+    },
+    {
+      capability: "segmented curriculum generation",
+      input: {
+        courseTitle: "Cloud",
+        sectionPath: ["Networking"],
+        segmentId: "00000000-0000-5000-8000-000000000701",
+        segmentOrdinal: 0,
+        sourceOrderEnd: 0,
+        sourceOrderStart: 0,
+        sourceSpans: [
+          {
+            id: "span-1",
+            inputHash: "a".repeat(64),
+            sourceOrder: 0,
+            text: "A VPC is isolated.",
+          },
+        ],
+      },
+      task: "curriculum.segment.v1",
+      value: {
+        chapters: [
+          {
+            concepts: [
+              {
+                key: "vpc",
+                name: "VPC",
+                prerequisiteKeys: [],
+                sourceSpanIds: ["span-1"],
+              },
+            ],
+            sourceSpanIds: ["span-1"],
+            title: "Networking",
+          },
+        ],
+        kind: "instructional",
+        segmentId: "provider-mutated-segment",
+        segmentOrdinal: 999,
       },
     },
   ];

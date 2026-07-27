@@ -22,7 +22,7 @@ import {
 import { EMBEDDING_V1_DIMENSIONS } from "../validation.js";
 
 export const LITELLM_DEV_TEXT_ADAPTER_VERSION =
-  "litellm-openai-compatible-dev-text-v2" as const;
+  "litellm-openai-compatible-dev-text-v3" as const;
 export const LITELLM_DEV_EMBEDDING_ADAPTER_VERSION =
   "litellm-openai-compatible-dev-v1" as const;
 export const LITELLM_DEV_ADAPTER_VERSION = LITELLM_DEV_TEXT_ADAPTER_VERSION;
@@ -41,6 +41,7 @@ const TEXT_TASKS = {
   ]),
   structured: new Set<ModelTaskId>([
     "assessment.quiz.v1",
+    "curriculum.segment.v1",
     "curriculum.structure.v1",
   ]),
 } as const;
@@ -194,7 +195,10 @@ class LiteLlmHttpClient {
             content: JSON.stringify({
               learnerAnswer: prompt.learnerAnswer ?? null,
               sourceMaterial: prompt.sourceMaterial,
-              typedInput: withoutUntrustedPromptFields(invocation.input),
+              typedInput: withoutUntrustedPromptFields(
+                invocation.task,
+                invocation.input,
+              ),
             }),
             role: "user",
           },
@@ -210,7 +214,7 @@ class LiteLlmHttpClient {
     return {
       identity: providerIdentity(response, parsed.model),
       ...(parsed.usage === undefined ? {} : { usage: parsed.usage }),
-      value: parsed.value,
+      value: withoutDeterministicResultFields(invocation.task, parsed.value),
     };
   }
 
@@ -442,10 +446,34 @@ function allowedGenerationParameters(
     : {};
 }
 
-function withoutUntrustedPromptFields(value: object): Record<string, unknown> {
+function withoutUntrustedPromptFields(
+  task: ModelTaskId,
+  value: object,
+): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(
-      ([key]) => key !== "answer" && key !== "sourceSpans",
+      ([key]) =>
+        key !== "answer" &&
+        key !== "sourceSpans" &&
+        (task !== "curriculum.segment.v1" ||
+          (key !== "segmentId" && key !== "segmentOrdinal")),
+    ),
+  );
+}
+
+function withoutDeterministicResultFields(
+  task: ModelTaskId,
+  value: unknown,
+): unknown {
+  if (task !== "curriculum.segment.v1" || !isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([key]) =>
+        key !== "segmentId" &&
+        key !== "segmentOrdinal" &&
+        (value.kind !== "non_instructional" || key !== "sourceSpanIds"),
     ),
   );
 }
@@ -592,6 +620,11 @@ function outputJsonSchema(
       return curriculumJsonSchema(
         invocation.input as ModelTaskInput<"curriculum.structure.v1">,
       );
+    case "curriculum.segment.v1":
+      // The OpenAI-compatible strict schema dialect rejects a root union.
+      // Keep the closed segment union in JSON mode and enforce it in
+      // RESULT_VALIDATORS.
+      return undefined;
     case "lesson.audio-script.v1":
       return audioScriptJsonSchema(
         invocation.input as ModelTaskInput<"lesson.audio-script.v1">,
@@ -621,34 +654,38 @@ function curriculumJsonSchema(
     input.sourceSpans.map((span) => span.id),
   );
   return exactObject({
-    chapters: {
-      items: exactObject({
-        concepts: {
-          items: exactObject({
-            key: {
+    chapters: curriculumChaptersJsonSchema(sourceSpanId),
+  });
+}
+
+function curriculumChaptersJsonSchema(sourceSpanId: JsonSchema): JsonSchema {
+  return {
+    items: exactObject({
+      concepts: {
+        items: exactObject({
+          key: {
+            pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+            type: "string",
+          },
+          name: nonEmptyStringSchema(),
+          prerequisiteKeys: {
+            items: {
               pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
               type: "string",
             },
-            name: nonEmptyStringSchema(),
-            prerequisiteKeys: {
-              items: {
-                pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
-                type: "string",
-              },
-              type: "array",
-            },
-            sourceSpanIds: nonEmptyArray(sourceSpanId),
-          }),
-          minItems: 1,
-          type: "array",
-        },
-        sourceSpanIds: nonEmptyArray(sourceSpanId),
-        title: nonEmptyStringSchema(),
-      }),
-      minItems: 1,
-      type: "array",
-    },
-  });
+            type: "array",
+          },
+          sourceSpanIds: nonEmptyArray(sourceSpanId),
+        }),
+        minItems: 1,
+        type: "array",
+      },
+      sourceSpanIds: nonEmptyArray(sourceSpanId),
+      title: nonEmptyStringSchema(),
+    }),
+    minItems: 1,
+    type: "array",
+  };
 }
 
 function lessonJsonSchema(

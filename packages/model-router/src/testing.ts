@@ -11,6 +11,12 @@ import type { ModelLogicalCallTrace, ModelTraceSink } from "./trace.js";
 
 export type ScriptedAdapterAction =
   | {
+      readonly handle: (
+        invocation: AdapterInvocation,
+      ) => Promise<AdapterResponse> | AdapterResponse;
+      readonly type: "handler";
+    }
+  | {
       readonly type: "result";
       readonly usage?: AdapterResponse["usage"];
       readonly value: unknown;
@@ -60,6 +66,9 @@ export function createScriptedAdapterRegistry(
         submissionState: action.submissionState,
         transient: action.transient,
       });
+    }
+    if (action.type === "handler") {
+      return action.handle(invocation);
     }
     if (action.type === "pending") {
       return new Promise<AdapterResponse>((_resolve, reject) => {

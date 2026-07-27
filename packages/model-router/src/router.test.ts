@@ -55,7 +55,7 @@ describe("typed model router", () => {
       effectiveModel: "qwen-plus",
       promptId: "curriculum-structure",
       requestedSelector: "qwen.structured",
-      routePolicyVersion: "route-policy-v4",
+      routePolicyVersion: "route-policy-v6",
       validationOutcome: "passed",
     });
     expect(result.provenance.promptDigest).toMatch(/^[a-f0-9]{64}$/);
@@ -71,6 +71,104 @@ describe("typed model router", () => {
     expect(traces.traces).toHaveLength(1);
     expect(traces.traces[0]?.attempts).toHaveLength(1);
     expect(traces.traces[0]?.promptVersion).toBe("2");
+  });
+
+  it("attaches deterministic curriculum fields and rejects conflicting values", async () => {
+    const baseInput = {
+      courseTitle: "Course",
+      sectionPath: ["Unit 1"],
+      segmentId: "00000000-0000-5000-8000-000000000701",
+      segmentOrdinal: 0,
+      sourceOrderEnd: 0,
+      sourceOrderStart: 0,
+      sourceSpans: [
+        {
+          id: "span-1",
+          inputHash: "a".repeat(64),
+          sourceOrder: 0,
+          text: "Grounded source",
+        },
+      ],
+    } as const;
+    for (const providerValue of [
+      {
+        chapters: [
+          {
+            concepts: [
+              {
+                key: "concept",
+                name: "Concept",
+                prerequisiteKeys: [],
+                sourceSpanIds: ["span-1"],
+              },
+            ],
+            sourceSpanIds: ["span-1"],
+            title: "Unit 1",
+          },
+        ],
+        kind: "instructional",
+      },
+      {
+        kind: "non_instructional",
+        reason: "front_matter",
+      },
+    ]) {
+      const scripted = createScriptedAdapterRegistry({
+        "curriculum.segment.v1": [{ type: "result", value: providerValue }],
+      });
+      const result = await createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }).execute("curriculum.segment.v1", baseInput, { deadlineMs: 1_000 });
+      expect(result).toMatchObject({
+        provenance: {
+          inputSchemaVersion: "curriculum-segment-input-v1",
+          promptId: "curriculum-segment",
+          promptVersion: "2",
+          resultSchemaVersion: "curriculum-segment-result-v1",
+          task: "curriculum.segment.v1",
+        },
+      });
+      expect(result.value.segmentId).toBe(baseInput.segmentId);
+      expect(result.value.segmentOrdinal).toBe(baseInput.segmentOrdinal);
+      if (result.value.kind === "non_instructional") {
+        expect(result.value.sourceSpanIds).toEqual(["span-1"]);
+      }
+    }
+
+    for (const value of [
+      {
+        kind: "non_instructional",
+        reason: "front_matter",
+        segmentId: "foreign-segment",
+        segmentOrdinal: 0,
+        sourceSpanIds: ["span-1"],
+      },
+      {
+        kind: "non_instructional",
+        reason: "unknown",
+        segmentId: baseInput.segmentId,
+        segmentOrdinal: 0,
+        sourceSpanIds: ["span-1"],
+      },
+      {
+        kind: "non_instructional",
+        reason: "navigation",
+        segmentId: baseInput.segmentId,
+        segmentOrdinal: 0,
+        sourceSpanIds: [],
+      },
+    ]) {
+      const scripted = createScriptedAdapterRegistry({
+        "curriculum.segment.v1": [{ type: "result", value }],
+      });
+      await expect(
+        createModelRouter({
+          adapters: scripted.adapters,
+          traceSink: new InMemoryTraceSink(),
+        }).execute("curriculum.segment.v1", baseInput, { deadlineMs: 1_000 }),
+      ).rejects.toMatchObject({ code: "invalid_result" });
+    }
   });
 
   it("retries one normalized transient language failure without tracing diagnostics", async () => {
@@ -625,7 +723,7 @@ describe("trace allowlist", () => {
           durationMs: 1,
           finishedAt: "2026-07-19T00:00:00.001Z",
           outcome: "success",
-          routePolicyVersion: "route-policy-v4",
+          routePolicyVersion: "route-policy-v6",
           startedAt: "2026-07-19T00:00:00.000Z",
           task: "curriculum.structure.v1",
           [field]: "secret",
@@ -642,7 +740,7 @@ describe("trace allowlist", () => {
         durationMs: 1,
         finishedAt: "2026-07-19T00:00:00.001Z",
         outcome: "success",
-        routePolicyVersion: "route-policy-v4",
+        routePolicyVersion: "route-policy-v6",
         startedAt: "2026-07-19T00:00:00.000Z",
         task: "curriculum.structure.v1",
       },
@@ -664,7 +762,7 @@ describe("trace allowlist", () => {
         durationMs: 1,
         finishedAt: "2026-07-19T00:00:00.001Z",
         outcome: "success",
-        routePolicyVersion: "route-policy-v4",
+        routePolicyVersion: "route-policy-v6",
         startedAt: "2026-07-19T00:00:00.000Z",
         task: "curriculum.structure.v1",
       },

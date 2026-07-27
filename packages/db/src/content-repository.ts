@@ -1,10 +1,18 @@
 import {
+  CURRICULUM_SEGMENT_DEADLINE_MS,
   RetrievalError,
+  canonicalJson,
   materializeCurriculumOutline,
   type AuthorizedSourceAccess,
   type ContentRepositoryPort,
   type CurriculumGenerationRecord,
   type CurriculumOutline,
+  type CurriculumPartitionManifest,
+  type CurriculumSegmentClaim,
+  type CurriculumSegmentCompletion,
+  type CurriculumSegmentFailure,
+  type CurriculumSegmentManifestEntry,
+  type PersistedCurriculumSegmentResult,
   type EmbeddingGenerationRecord,
   type RetrievedSourceSpan,
   type ScopeAuthorizationContext,
@@ -13,6 +21,7 @@ import {
 import pg, { type PoolClient } from "pg";
 
 const { Pool } = pg;
+const CURRICULUM_SEGMENT_LEASE_MS = CURRICULUM_SEGMENT_DEADLINE_MS + 40_000;
 
 interface AuthorizedRow extends Record<string, unknown> {
   course_id: string;
@@ -42,13 +51,37 @@ interface EmbeddingGenerationRow extends Record<string, unknown> {
   span_ids: string[];
 }
 
+interface CurriculumSegmentRow extends Record<string, unknown> {
+  attempt_count: number;
+  input_hash: string;
+  lease_active: boolean;
+  model_provenance: unknown;
+  result: unknown;
+  result_hash: string | null;
+  state:
+    | "cancelled"
+    | "expired"
+    | "failed_permanent"
+    | "processing"
+    | "queued"
+    | "retry_scheduled"
+    | "succeeded";
+}
+
 export class PostgresContentRepository implements ContentRepositoryPort {
+  readonly #environment: "dev" | "pilot" | "staging";
   readonly #pool: InstanceType<typeof Pool>;
 
-  constructor(connectionString: string) {
+  constructor(
+    connectionString: string,
+    options: {
+      readonly environment?: "dev" | "pilot" | "staging";
+    } = {},
+  ) {
     if (connectionString.length === 0) {
       throw new RetrievalError("invalid_configuration");
     }
+    this.#environment = options.environment ?? "dev";
     this.#pool = new Pool({ connectionString });
   }
 
@@ -432,9 +465,293 @@ export class PostgresContentRepository implements ContentRepositoryPort {
     });
   }
 
+  async persistCurriculumPartition(
+    access: AuthorizedSourceAccess,
+    manifest: CurriculumPartitionManifest,
+  ): Promise<void> {
+    if (
+      manifest.ownerScopeId !== access.ownerScopeId ||
+      manifest.courseId !== access.courseId ||
+      manifest.sourceDocumentId !== access.sourceDocumentId ||
+      manifest.segments.length === 0
+    ) {
+      throw new RetrievalError("authorization_denied");
+    }
+    await this.#scopedTransaction(access, async (client) => {
+      const orderedSpanIds = manifest.segments.flatMap(
+        (segment) => segment.sourceSpanIds,
+      );
+      if (new Set(orderedSpanIds).size !== orderedSpanIds.length) {
+        throw new RetrievalError("invalid_chunk");
+      }
+      const authorized = await client.query<{ count: number }>(
+        `SELECT count(*)::integer AS count
+         FROM source_embedding_generation_span AS link
+         JOIN source_document AS source
+           ON source.owner_scope_id = link.owner_scope_id
+          AND source.id = $3
+          AND source.active_embedding_generation_id =
+              link.embedding_generation_id
+         WHERE link.owner_scope_id = $1
+           AND link.embedding_generation_id = $2
+           AND link.source_span_id = ANY($4::uuid[])`,
+        [
+          access.ownerScopeId,
+          manifest.embeddingGenerationId,
+          access.sourceDocumentId,
+          orderedSpanIds,
+        ],
+      );
+      if (authorized.rows[0]?.count !== orderedSpanIds.length) {
+        throw new RetrievalError("authorization_denied");
+      }
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO curriculum_partition_manifest
+           (id, owner_scope_id, course_id, source_document_id,
+            embedding_generation_id, partition_version, composition_version,
+            generation_version, tokenizer_version, manifest_hash, manifest)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+         ON CONFLICT (owner_scope_id, id) DO UPDATE SET id = EXCLUDED.id
+         WHERE curriculum_partition_manifest.course_id = EXCLUDED.course_id
+           AND curriculum_partition_manifest.source_document_id =
+               EXCLUDED.source_document_id
+           AND curriculum_partition_manifest.embedding_generation_id =
+               EXCLUDED.embedding_generation_id
+           AND curriculum_partition_manifest.partition_version =
+               EXCLUDED.partition_version
+           AND curriculum_partition_manifest.composition_version =
+               EXCLUDED.composition_version
+           AND curriculum_partition_manifest.generation_version =
+               EXCLUDED.generation_version
+           AND curriculum_partition_manifest.tokenizer_version =
+               EXCLUDED.tokenizer_version
+           AND curriculum_partition_manifest.manifest_hash =
+               EXCLUDED.manifest_hash
+           AND curriculum_partition_manifest.manifest = EXCLUDED.manifest
+         RETURNING id`,
+        [
+          manifest.parentGenerationId,
+          manifest.ownerScopeId,
+          manifest.courseId,
+          manifest.sourceDocumentId,
+          manifest.embeddingGenerationId,
+          manifest.partitionVersion,
+          manifest.compositionVersion,
+          manifest.generationVersion,
+          manifest.tokenizerVersion,
+          manifest.manifestHash,
+          JSON.stringify(manifest),
+        ],
+      );
+      if (inserted.rows[0]?.id !== manifest.parentGenerationId) {
+        throw new RetrievalError("persistence_failure");
+      }
+      for (const segment of manifest.segments) {
+        const idempotencyKey =
+          `${this.#environment}/curriculum.segment/v1/` +
+          `${manifest.parentGenerationId}/${segment.id}`;
+        const child = await client.query<{ segment_id: string }>(
+          `INSERT INTO curriculum_segment_operation
+             (owner_scope_id, parent_generation_id, segment_id,
+              segment_ordinal, idempotency_key, task_version,
+              input_schema_version, result_schema_version, input_hash,
+              ordered_source_span_ids, ordered_source_input_hashes, state)
+           VALUES ($1, $2, $3, $4, $5, 'curriculum.segment.v1',
+                   'curriculum-segment-input-v1',
+                   'curriculum-segment-result-v1', $6, $7::jsonb, $8::jsonb,
+                   'queued')
+           ON CONFLICT (owner_scope_id, parent_generation_id, segment_id)
+           DO UPDATE SET segment_id = EXCLUDED.segment_id
+           WHERE curriculum_segment_operation.segment_ordinal =
+                 EXCLUDED.segment_ordinal
+             AND curriculum_segment_operation.idempotency_key =
+                 EXCLUDED.idempotency_key
+             AND curriculum_segment_operation.task_version =
+                 EXCLUDED.task_version
+             AND curriculum_segment_operation.input_schema_version =
+                 EXCLUDED.input_schema_version
+             AND curriculum_segment_operation.result_schema_version =
+                 EXCLUDED.result_schema_version
+             AND curriculum_segment_operation.input_hash = EXCLUDED.input_hash
+             AND curriculum_segment_operation.ordered_source_span_ids =
+                 EXCLUDED.ordered_source_span_ids
+             AND curriculum_segment_operation.ordered_source_input_hashes =
+                 EXCLUDED.ordered_source_input_hashes
+           RETURNING segment_id`,
+          [
+            access.ownerScopeId,
+            manifest.parentGenerationId,
+            segment.id,
+            segment.ordinal,
+            idempotencyKey,
+            segment.inputHash,
+            JSON.stringify(segment.sourceSpanIds),
+            JSON.stringify(segment.sourceSpanInputHashes),
+          ],
+        );
+        if (child.rows[0]?.segment_id !== segment.id) {
+          throw new RetrievalError("persistence_failure");
+        }
+      }
+    });
+  }
+
+  async claimCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    parentGenerationId: string,
+    segment: CurriculumSegmentManifestEntry,
+  ): Promise<CurriculumSegmentClaim> {
+    validateUuid(parentGenerationId);
+    validateUuid(segment.id);
+    return this.#scopedTransaction(access, async (client) => {
+      const selected = await client.query<CurriculumSegmentRow>(
+        `SELECT state, attempt_count, input_hash, result_hash, result,
+                model_provenance,
+                lease_expires_at > clock_timestamp() AS lease_active
+         FROM curriculum_segment_operation
+         WHERE owner_scope_id = $1 AND parent_generation_id = $2
+           AND segment_id = $3 AND segment_ordinal = $4
+           AND input_hash = $5
+         FOR UPDATE`,
+        [
+          access.ownerScopeId,
+          parentGenerationId,
+          segment.id,
+          segment.ordinal,
+          segment.inputHash,
+        ],
+      );
+      const row = selected.rows[0];
+      if (row === undefined) {
+        throw new RetrievalError("persistence_failure");
+      }
+      if (row.state === "succeeded") {
+        return {
+          kind: "completed",
+          persisted: persistedSegment(row, segment.id),
+        };
+      }
+      if (row.state === "processing" && row.lease_active) {
+        return { kind: "active" };
+      }
+      if (
+        row.state === "failed_permanent" ||
+        row.state === "cancelled" ||
+        row.state === "expired"
+      ) {
+        return { kind: "failed" };
+      }
+      const claimed = await client.query<{ attempt_count: number }>(
+        `UPDATE curriculum_segment_operation
+         SET state = 'processing', attempt_count = attempt_count + 1,
+             lease_owner = 'content_curriculum_segment_v1',
+             lease_expires_at =
+               clock_timestamp() +
+                 ($4::bigint * interval '1 millisecond'),
+             sanitized_failure = NULL, updated_at = clock_timestamp()
+         WHERE owner_scope_id = $1 AND parent_generation_id = $2
+           AND segment_id = $3
+         RETURNING attempt_count`,
+        [
+          access.ownerScopeId,
+          parentGenerationId,
+          segment.id,
+          CURRICULUM_SEGMENT_LEASE_MS,
+        ],
+      );
+      const attemptCount = claimed.rows[0]?.attempt_count;
+      if (attemptCount === undefined) {
+        throw new RetrievalError("persistence_failure");
+      }
+      return { attemptCount, kind: "claimed" };
+    });
+  }
+
+  async completeCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    completion: CurriculumSegmentCompletion,
+  ): Promise<void> {
+    validateUuid(completion.parentGenerationId);
+    validateUuid(completion.segmentId);
+    await this.#scopedTransaction(access, async (client) => {
+      const completed = await client.query<{ segment_id: string }>(
+        `UPDATE curriculum_segment_operation
+         SET state = 'succeeded', lease_owner = NULL, lease_expires_at = NULL,
+             result_hash = $7, result = $8::jsonb,
+             model_provenance = $9::jsonb, sanitized_failure = NULL,
+             updated_at = clock_timestamp(), completed_at = clock_timestamp()
+         WHERE owner_scope_id = $1 AND parent_generation_id = $2
+           AND segment_id = $3 AND input_hash = $4
+           AND state = 'processing'
+           AND lease_owner = 'content_curriculum_segment_v1'
+           AND lease_expires_at > clock_timestamp()
+           AND attempt_count = $5
+           AND result IS NULL
+           AND model_provenance IS NULL
+           AND $6 = 'curriculum.segment.v1'
+         RETURNING segment_id`,
+        [
+          access.ownerScopeId,
+          completion.parentGenerationId,
+          completion.segmentId,
+          completion.inputHash,
+          completion.attemptCount,
+          completion.modelProvenance.task,
+          completion.resultHash,
+          JSON.stringify(completion.result),
+          JSON.stringify(completion.modelProvenance),
+        ],
+      );
+      if (completed.rows[0]?.segment_id !== completion.segmentId) {
+        throw new RetrievalError("persistence_failure");
+      }
+    });
+  }
+
+  async failCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    failure: CurriculumSegmentFailure,
+  ): Promise<void> {
+    validateUuid(failure.parentGenerationId);
+    validateUuid(failure.segmentId);
+    await this.#scopedTransaction(access, async (client) => {
+      const state =
+        failure.retryable && failure.attemptCount < 3
+          ? "retry_scheduled"
+          : "failed_permanent";
+      const failed = await client.query<{ segment_id: string }>(
+        `UPDATE curriculum_segment_operation
+         SET state = $6, lease_owner = NULL, lease_expires_at = NULL,
+             sanitized_failure = jsonb_build_object('class', $7::text),
+             updated_at = clock_timestamp(),
+             completed_at = CASE WHEN $6 = 'failed_permanent'
+               THEN clock_timestamp() ELSE NULL END
+         WHERE owner_scope_id = $1 AND parent_generation_id = $2
+           AND segment_id = $3 AND input_hash = $4
+           AND state = 'processing'
+           AND lease_owner = 'content_curriculum_segment_v1'
+           AND attempt_count = $5
+         RETURNING segment_id`,
+        [
+          access.ownerScopeId,
+          failure.parentGenerationId,
+          failure.segmentId,
+          failure.inputHash,
+          failure.attemptCount,
+          state,
+          failure.failureClass,
+        ],
+      );
+      if (failed.rows[0]?.segment_id !== failure.segmentId) {
+        throw new RetrievalError("persistence_failure");
+      }
+    });
+  }
+
   async persistCurriculum(
     access: AuthorizedSourceAccess,
     generation: CurriculumGenerationRecord,
+    deadlineMs: number,
   ): Promise<CurriculumOutline> {
     if (
       generation.ownerScopeId !== access.ownerScopeId ||
@@ -445,6 +762,66 @@ export class PostgresContentRepository implements ContentRepositoryPort {
     }
     const outline = materializeCurriculumOutline(access, generation);
     await this.#scopedTransaction(access, async (client) => {
+      if (!Number.isFinite(deadlineMs) || deadlineMs <= 0) {
+        throw new RetrievalError("deadline_exceeded");
+      }
+      await client.query("SELECT set_config('statement_timeout', $1, true)", [
+        `${Math.max(1, Math.floor(deadlineMs))}ms`,
+      ]);
+      if (generation.version === "curriculum-v2") {
+        if (!("partitionManifestHash" in generation.structure)) {
+          throw new RetrievalError("persistence_failure");
+        }
+        const complete = await client.query<{
+          manifest_hash: string;
+          model_provenance: unknown;
+          result_hashes: string[];
+          segment_count: number;
+          succeeded_count: number;
+        }>(
+          `SELECT manifest.manifest_hash,
+                  count(segment.segment_id)::integer AS segment_count,
+                  count(segment.segment_id) FILTER (
+                    WHERE segment.state = 'succeeded'
+                  )::integer AS succeeded_count,
+                  array_agg(segment.result_hash ORDER BY segment.segment_ordinal)
+                    AS result_hashes,
+                  jsonb_agg(segment.model_provenance
+                    ORDER BY segment.segment_ordinal) AS model_provenance
+           FROM curriculum_partition_manifest AS manifest
+           JOIN curriculum_segment_operation AS segment
+             ON segment.owner_scope_id = manifest.owner_scope_id
+            AND segment.parent_generation_id = manifest.id
+           WHERE manifest.owner_scope_id = $1 AND manifest.id = $2
+             AND manifest.course_id = $3
+             AND manifest.source_document_id = $4
+             AND manifest.embedding_generation_id = $5
+           GROUP BY manifest.manifest_hash`,
+          [
+            access.ownerScopeId,
+            generation.generationId,
+            access.courseId,
+            access.sourceDocumentId,
+            generation.embeddingGenerationId,
+          ],
+        );
+        const row = complete.rows[0];
+        if (
+          row === undefined ||
+          row.segment_count === 0 ||
+          row.succeeded_count !== row.segment_count ||
+          row.manifest_hash !== generation.structure.partitionManifestHash ||
+          canonicalJson(row.result_hashes) !==
+            canonicalJson(generation.structure.childResultHashes) ||
+          canonicalJson(row.model_provenance) !==
+            canonicalJson(generation.modelProvenance)
+        ) {
+          throw new RetrievalError(
+            "persistence_failure",
+            "curriculum child set is incomplete or inconsistent",
+          );
+        }
+      }
       const sourceSpanIds = [
         ...new Set(
           generation.structure.chapters.flatMap((chapter) => [
@@ -653,6 +1030,14 @@ export class PostgresContentRepository implements ContentRepositoryPort {
       return result;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "57014"
+      ) {
+        throw new RetrievalError("deadline_exceeded");
+      }
       throw error;
     } finally {
       client.release();
@@ -705,6 +1090,40 @@ function validateContext(context: ScopeAuthorizationContext): void {
   if (!/^[a-zA-Z0-9_-]{8,128}$/.test(context.authorizationId)) {
     throw new RetrievalError("authorization_denied");
   }
+}
+
+function persistedSegment(
+  row: CurriculumSegmentRow,
+  segmentId: string,
+): PersistedCurriculumSegmentResult {
+  if (
+    row.state !== "succeeded" ||
+    row.attempt_count < 1 ||
+    !/^[a-f0-9]{64}$/.test(row.input_hash) ||
+    row.result_hash === null ||
+    !/^[a-f0-9]{64}$/.test(row.result_hash) ||
+    row.result === null ||
+    typeof row.result !== "object" ||
+    Array.isArray(row.result) ||
+    row.model_provenance === null ||
+    typeof row.model_provenance !== "object" ||
+    Array.isArray(row.model_provenance) ||
+    (row.model_provenance as Record<string, unknown>).task !==
+      "curriculum.segment.v1" ||
+    (row.model_provenance as Record<string, unknown>).validationOutcome !==
+      "passed"
+  ) {
+    throw new RetrievalError("persistence_failure");
+  }
+  return {
+    attemptCount: row.attempt_count,
+    inputHash: row.input_hash,
+    modelProvenance:
+      row.model_provenance as PersistedCurriculumSegmentResult["modelProvenance"],
+    result: row.result as PersistedCurriculumSegmentResult["result"],
+    resultHash: row.result_hash,
+    segmentId,
+  };
 }
 
 function validateUuid(value: string): void {

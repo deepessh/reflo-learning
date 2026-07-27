@@ -1,5 +1,6 @@
 export const MODEL_TASK_IDS = [
   "curriculum.structure.v1",
+  "curriculum.segment.v1",
   "lesson.text.v1",
   "lesson.reteach.v1",
   "lesson.audio-script.v1",
@@ -22,6 +23,19 @@ export interface AuthorizedSourceSpan {
 export interface CurriculumStructureInput {
   readonly courseTitle: string;
   readonly sourceSpans: readonly AuthorizedSourceSpan[];
+}
+
+export interface CurriculumSegmentInput {
+  readonly courseTitle: string;
+  readonly sectionPath: readonly string[] | null;
+  readonly segmentId: string;
+  readonly segmentOrdinal: number;
+  readonly sourceOrderEnd: number;
+  readonly sourceOrderStart: number;
+  readonly sourceSpans: readonly (AuthorizedSourceSpan & {
+    readonly inputHash: string;
+    readonly sourceOrder: number;
+  })[];
 }
 
 export interface LessonInput {
@@ -116,6 +130,31 @@ export interface CurriculumStructureResult {
     readonly title: string;
   }[];
 }
+
+export const CURRICULUM_NON_INSTRUCTIONAL_REASONS = [
+  "front_matter",
+  "navigation",
+  "attribution_license",
+  "other_non_instructional",
+] as const;
+
+export type CurriculumNonInstructionalReason =
+  (typeof CURRICULUM_NON_INSTRUCTIONAL_REASONS)[number];
+
+export type CurriculumSegmentResult =
+  | {
+      readonly chapters: CurriculumStructureResult["chapters"];
+      readonly kind: "instructional";
+      readonly segmentId: string;
+      readonly segmentOrdinal: number;
+    }
+  | {
+      readonly kind: "non_instructional";
+      readonly reason: CurriculumNonInstructionalReason;
+      readonly segmentId: string;
+      readonly segmentOrdinal: number;
+      readonly sourceSpanIds: readonly string[];
+    };
 
 export interface LessonResult {
   readonly content: string;
@@ -220,6 +259,7 @@ export interface VideoAssetResult {
 export interface ModelTaskInputMap {
   readonly "assessment.grade-short-answer.v1": ShortAnswerGradingInput;
   readonly "assessment.quiz.v1": QuizGenerationInput;
+  readonly "curriculum.segment.v1": CurriculumSegmentInput;
   readonly "curriculum.structure.v1": CurriculumStructureInput;
   readonly "embedding.document.v1": EmbeddingInput;
   readonly "embedding.query.v1": EmbeddingInput;
@@ -234,6 +274,7 @@ export interface ModelTaskInputMap {
 export interface ModelTaskResultMap {
   readonly "assessment.grade-short-answer.v1": ShortAnswerGradingResult;
   readonly "assessment.quiz.v1": QuizGenerationResult;
+  readonly "curriculum.segment.v1": CurriculumSegmentResult;
   readonly "curriculum.structure.v1": CurriculumStructureResult;
   readonly "embedding.document.v1": EmbeddingResult;
   readonly "embedding.query.v1": EmbeddingResult;

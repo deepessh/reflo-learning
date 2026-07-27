@@ -91,7 +91,7 @@ export function createScriptedAdapterRegistry(
       "qwen.grounded-generation",
       "qwen-plus",
     ),
-    speech: descriptor("speech", "qwen-tts.primary", "qwen-tts", 1),
+    speech: descriptor("speech", "qwen-tts.primary", "qwen3-tts-flash", 1),
     structured: descriptor("structured", "qwen.structured", "qwen-plus"),
     video: descriptor("video", "wanx.video", "wanx-2.1", 1),
   };

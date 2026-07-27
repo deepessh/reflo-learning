@@ -11,12 +11,12 @@ ownership:
   implementation_owner: "Owner of issue #54 for implementation; agent:wt-71fc734b67931a75ae25 through issue #174 for this record"
 authorization:
   decider: "@deepessh, repository owner and founding-team authorized decider"
-  approval_basis: "Direct owner approval in the Codex task on 2026-07-27 accepted option 1 with the deterministic evidence-coverage and renormalization clarification, then directed Codex to proceed with the matching ADR and repository workflow."
+  approval_basis: "explicit owner approval recorded on July 27, 2026, directing the agent to proceed with the recommended profile and record the decision."
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/174
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/174#issuecomment-5095742874
-  record_pr: https://github.com/deepessh/reflo-learning/pull/0
+  record_pr: https://github.com/deepessh/reflo-learning/pull/193
 supersedes: []
 superseded_by: null
 deprecation: null

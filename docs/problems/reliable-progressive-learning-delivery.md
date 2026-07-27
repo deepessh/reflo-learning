@@ -91,3 +91,4 @@ for completed learner value.
 - [ADR 0012 — durable event idempotency, retry, DLQ, and finalization contract](../adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md)
 - [ADR 0014 — P1 feature flags and default-off enforcement](../adrs/0014-p1-feature-flags-and-default-off-enforcement.md)
 - [ADR 0015 — repository-owned release-gate evaluation evidence](../adrs/0015-repository-owned-release-gate-evaluation-evidence.md)
+- [ADR 0036 — bounded structure-aware curriculum segments and deterministic composition](../adrs/0036-bounded-structure-aware-curriculum-segments-and-deterministic-composition.md)

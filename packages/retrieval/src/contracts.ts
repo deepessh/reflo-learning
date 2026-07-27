@@ -19,9 +19,9 @@ export const CURRICULUM_SEGMENT_TASK_VERSION = "curriculum.segment.v1" as const;
 export const CURRICULUM_SEGMENT_MAX_SPANS = 12 as const;
 export const CURRICULUM_SEGMENT_MAX_SOURCE_TOKENS = 8_000 as const;
 export const CURRICULUM_SEGMENT_MAX_CONCURRENCY = 4 as const;
-export const CURRICULUM_PARENT_DEADLINE_MS = 480_000 as const;
-export const CURRICULUM_SEGMENT_DEADLINE_MS = 120_000 as const;
-export const CURRICULUM_FINALIZATION_RESERVE_MS = 48_000 as const;
+export const CURRICULUM_PARENT_DEADLINE_MS = 960_000 as const;
+export const CURRICULUM_SEGMENT_DEADLINE_MS = 240_000 as const;
+export const CURRICULUM_FINALIZATION_RESERVE_MS = 96_000 as const;
 export const EMBEDDING_DIMENSIONS = 1_024 as const;
 
 export interface ScopeAuthorizationContext {

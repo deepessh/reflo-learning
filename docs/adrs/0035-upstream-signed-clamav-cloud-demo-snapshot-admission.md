@@ -11,12 +11,12 @@ ownership:
   implementation_owner: "Owner of issue #55 and its implementation pull request"
 authorization:
   decider: "@deepessh, repository owner and founding-team decider named in issue #176"
-  approval_basis: "Owner-authorized replacement of the disproportionate, unapproved dedicated Alibaba Software KMS dependency for the bounded staff-controlled demo while preserving upstream signature verification, immutable identity, freshness, independent runtime verification, isolation, and fail-closed behavior."
+  approval_basis: "the dedicated Alibaba Software KMS cost is disproportionate and not justified for the bounded demo use case. The replacement must preserve verified official ClamAV signatures, exact immutable file identity, the 24-hour freshness ceiling, independent runtime verification, networkless and credential-free scanning, and fail-closed behavior. Public uploads, external learner data, pilot activation, and production-readiness claims remain prohibited."
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/176
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/176#issuecomment-5085999591
-  record_pr: https://github.com/deepessh/reflo-learning/pull/0
+  record_pr: https://github.com/deepessh/reflo-learning/pull/178
 supersedes: ["0021"]
 superseded_by: null
 deprecation: null

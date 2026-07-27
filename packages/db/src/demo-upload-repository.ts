@@ -6,7 +6,7 @@ import pg, { type PoolClient } from "pg";
 
 const { Pool } = pg;
 const GENERATION_LEASE_OWNER = "api_demo_upload_generation_v1";
-const GENERATION_LEASE_MS = 300_000;
+const GENERATION_LEASE_MS = 600_000;
 const MAX_GENERATION_DELIVERIES = 3;
 
 export interface DemoUploadCreate {

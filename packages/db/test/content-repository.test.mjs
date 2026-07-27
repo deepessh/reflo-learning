@@ -98,7 +98,7 @@ test(
            AND segment_id = $3`,
         [ids.scope, manifest.parentGenerationId, firstSegment.id],
       );
-      assert.equal(lease.rows[0]?.lease_ms, 70_000);
+      assert.equal(lease.rows[0]?.lease_ms, 140_000);
       assert.deepEqual(
         await repository.claimCurriculumSegment(
           access,

@@ -304,7 +304,7 @@ async function runSmoke(
       await retrieval.buildCurriculum({
         authorization: AUTHORIZATION,
         courseId: IDS.course,
-        deadlineMs: 240_000,
+        deadlineMs: 480_000,
         document: normalizedDocument,
         sourceDocumentId: IDS.source,
       });

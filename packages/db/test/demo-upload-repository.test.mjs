@@ -73,6 +73,15 @@ test(
         sourceDocumentId: ids.source,
         title: "Approved Agents Course",
       });
+      const parentTiming = await client.query(
+        `SELECT round(extract(epoch FROM
+                  (deadline_at - created_at)) * 1000)::integer AS deadline_ms
+         FROM async_operation
+         WHERE owner_scope_id = $1 AND id = $2`,
+        [ids.scope, ids.generationOperation],
+      );
+      assert.ok(parentTiming.rows[0]?.deadline_ms >= 479_900);
+      assert.ok(parentTiming.rows[0]?.deadline_ms <= 480_100);
 
       assert.deepEqual(await repository.get(authorization, ids.source), {
         activeCurriculumGenerationId: null,
@@ -111,10 +120,20 @@ test(
          WHERE id = $1`,
         [ids.operation],
       );
-      assert.equal(
-        (await repository.claimCourseGeneration(recoverable)).kind,
-        "claimed",
+      const firstGenerationClaim =
+        await repository.claimCourseGeneration(recoverable);
+      assert.equal(firstGenerationClaim.kind, "claimed");
+      assert.ok(firstGenerationClaim.deadlineMs >= 479_000);
+      assert.ok(firstGenerationClaim.deadlineMs <= 480_000);
+      const parentLease = await client.query(
+        `SELECT round(extract(epoch FROM
+                  (lease_expires_at - updated_at)) * 1000)::integer AS lease_ms
+         FROM async_operation
+         WHERE owner_scope_id = $1 AND id = $2`,
+        [ids.scope, ids.generationOperation],
       );
+      assert.ok(parentLease.rows[0]?.lease_ms >= 599_900);
+      assert.ok(parentLease.rows[0]?.lease_ms <= 600_100);
       assert.equal(
         await repository.failCourseGenerationAttempt(recoverable, {
           failureClass: "generation_dependency_unavailable",

@@ -261,9 +261,9 @@ describe("retrieval vertical slice", () => {
 
     expect(maximumActive).toBe(4);
     expect(result.orchestration.segmentCount).toBe(8);
-    expect(CURRICULUM_SEGMENT_DEADLINE_MS).toBe(60_000);
-    expect(result.orchestration.finalizationReserveMs).toBe(24_000);
-    expect(result.orchestration.parentDeadlineMs).toBe(240_000);
+    expect(CURRICULUM_SEGMENT_DEADLINE_MS).toBe(120_000);
+    expect(result.orchestration.finalizationReserveMs).toBe(48_000);
+    expect(result.orchestration.parentDeadlineMs).toBe(480_000);
     expect(result.orchestration.segmentAttemptCounts).toEqual(
       Array.from({ length: 8 }, () => 1),
     );
@@ -344,7 +344,7 @@ describe("retrieval vertical slice", () => {
     expect(repository.curriculumGenerations).toHaveLength(0);
   });
 
-  it("does not launch segment work inside the twenty-four-second reserve", async () => {
+  it("does not launch segment work inside the forty-eight-second reserve", async () => {
     const repository = new InMemoryContentRepository(access);
     const vectors = new InMemoryVectorStore();
     const scripted = createScriptedAdapterRegistry({

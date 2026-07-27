@@ -10,7 +10,7 @@ authoritative RDS repository before source text can enter model context.
 Curriculum generation partitions the complete ordered source into
 section-aware windows of at most 12 spans and 8,000 source tokens. It executes
 at most four traced `curriculum.segment.v1` calls concurrently under one
-240-second parent deadline, preserves a 24-second finalization reserve, durably
+480-second parent deadline, preserves a 48-second finalization reserve, durably
 replays completed child results, and composes `curriculum-v2` deterministically.
 Missing, foreign, stale, or malformed child results fail closed.
 

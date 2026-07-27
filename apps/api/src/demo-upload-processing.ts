@@ -14,7 +14,7 @@ import type {
 const MAX_INGESTION_DELIVERIES = 5;
 const DEFAULT_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000] as const;
 const DEFAULT_ACTIVE_POLL_DELAY_MS = 1_000;
-const DEFAULT_ACTIVE_POLL_LIMIT = 310;
+const DEFAULT_ACTIVE_POLL_LIMIT = 620;
 const DEFAULT_GENERATION_RETRY_DELAYS_MS = [500, 1_000] as const;
 
 export interface DemoUploadIngestionRunner {
@@ -94,7 +94,7 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
       this.#activePollDelayMs > 30_000 ||
       !Number.isSafeInteger(this.#activePollLimit) ||
       this.#activePollLimit < 1 ||
-      this.#activePollLimit > 600
+      this.#activePollLimit > 1_200
     ) {
       throw new Error("demo upload retry policy is invalid");
     }

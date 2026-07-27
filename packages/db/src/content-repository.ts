@@ -21,7 +21,7 @@ import {
 import pg, { type PoolClient } from "pg";
 
 const { Pool } = pg;
-const CURRICULUM_SEGMENT_LEASE_MS = CURRICULUM_SEGMENT_DEADLINE_MS + 10_000;
+const CURRICULUM_SEGMENT_LEASE_MS = CURRICULUM_SEGMENT_DEADLINE_MS + 20_000;
 
 interface AuthorizedRow extends Record<string, unknown> {
   course_id: string;

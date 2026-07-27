@@ -1,7 +1,7 @@
 ---
 id: "0036"
 title: "Bounded structure-aware curriculum segments and deterministic composition"
-status: Accepted
+status: Superseded
 date: "2026-07-26"
 aliases: [D-GH-181]
 prd_references: "`prds/reflo-prd.md` §6 F1, §8 Flow A, §9, §11, §12, and §13; ADR 0009; ADR 0010; ADR 0012; ADR 0024; ADR 0034"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/181#issuecomment-5087796292
   record_pr: https://github.com/deepessh/reflo-learning/pull/185
 supersedes: []
-superseded_by: null
+superseded_by: "0037"
 deprecation: null
 maintenance: []
 ---

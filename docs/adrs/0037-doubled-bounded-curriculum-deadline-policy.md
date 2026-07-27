@@ -10,7 +10,7 @@ ownership:
   decision_dri: "@deepessh"
   implementation_owner: "Owner of issue #182"
 authorization:
-  decider: "@deepessh, repository and product owner"
+  decider: "@deepessh"
   approval_basis: "after reviewing the #182 evidence that structural invalid_result was eliminated while the configured Qwen children still exhausted the 30-second ceiling, the owner explicitly directed in the active Codex task on 2026-07-27: “Let’s relax the limits - increase them to double.” This verdict records that instruction as 60-second children, a 240-second parent target, and a 24-second finalization reserve, with concurrency, partitioning, provider/model, capacity, grounding, persistence, and spending unchanged."
 provenance:
   kind: github-decision

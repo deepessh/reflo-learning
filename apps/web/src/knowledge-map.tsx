@@ -4,6 +4,7 @@ import {
   conceptProgressPresentation,
   fixedPercent,
   masteryDeltaLabel,
+  readinessPresentation,
 } from "./account-view";
 
 export function KnowledgeMap({
@@ -14,6 +15,7 @@ export function KnowledgeMap({
   readonly progress: CourseProgress;
 }) {
   const mastery = progress.mastery.value;
+  const readiness = readinessPresentation(progress.readiness);
   return (
     <section
       className="panel knowledge-panel"
@@ -54,13 +56,15 @@ export function KnowledgeMap({
           </small>
         </article>
         <article className="summary-card readiness-summary">
-          <span>Exam Readiness</span>
-          <strong>Unavailable</strong>
-          <p>{readinessCopy(progress)}</p>
+          <span>{readiness.label}</span>
+          <strong>{readiness.value}</strong>
+          <p>{readiness.copy}</p>
+          <p>{readiness.calibration}</p>
           <small>
             {progress.readiness.mappedConceptCount} mapped ·{" "}
             {progress.readiness.invalidatedConceptCount} invalidated ·{" "}
-            {progress.readiness.unmappedConceptCount} unmapped
+            {progress.readiness.unmappedConceptCount} unmapped ·{" "}
+            {fixedPercent(progress.readiness.evidenceCoverage)}% evidence
           </small>
         </article>
       </div>
@@ -170,12 +174,6 @@ export function KnowledgeMap({
       </section>
     </section>
   );
-}
-
-function readinessCopy(progress: CourseProgress): string {
-  return progress.readiness.targetBlueprintId === null
-    ? "No reviewed, versioned exam blueprint is connected. This course is not presented as exam-calibrated."
-    : "The target blueprint does not yet have reviewed versioned mappings, evidence coverage, and calibration evidence.";
 }
 
 function reviewLabel(state: "due" | "not_scheduled" | "scheduled"): string {

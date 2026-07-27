@@ -277,6 +277,25 @@ $$;
 
 
 --
+-- Name: reflo_protect_exam_readiness_scoped_record(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_protect_exam_readiness_scoped_record() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE'
+     AND reflo_learning_scope_delete_is_authorized(OLD.owner_scope_id)
+  THEN
+    RETURN OLD;
+  END IF;
+  RAISE EXCEPTION '% is immutable', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END
+$$;
+
+
+--
 -- Name: reflo_protect_grading_operation(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -428,6 +447,8 @@ BEGIN
     true
   );
 
+  DELETE FROM public.exam_readiness_score
+  WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.fsrs_replay_manifest
   WHERE owner_scope_id = p_owner_scope_id;
   DELETE FROM public.fsrs_transition_payload
@@ -512,6 +533,167 @@ CREATE FUNCTION public.reflo_resolve_ingestion_authorization(candidate_operation
     AND actor.status = 'active'
     AND membership.role = 'owner'
     AND membership.revoked_at IS NULL
+$$;
+
+
+--
+-- Name: reflo_validate_exam_blueprint_objective_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_validate_exam_blueprint_objective_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  actual_objective_count integer;
+  total_weight numeric;
+BEGIN
+  SELECT count(*), COALESCE(sum(weight), 0)
+  INTO actual_objective_count, total_weight
+  FROM exam_blueprint_objective
+  WHERE blueprint_id = NEW.id;
+
+  IF actual_objective_count <> NEW.objective_count
+     OR total_weight <> 1.00000
+  THEN
+    RAISE EXCEPTION
+      'exam blueprint objectives must match their immutable count and sum exactly to 1.00000'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+
+--
+-- Name: reflo_validate_exam_mapping_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_validate_exam_mapping_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  expected_mapping_count integer;
+  actual_mapping_count integer;
+BEGIN
+  SELECT mapping_set.mapping_count
+  INTO expected_mapping_count
+  FROM exam_readiness_mapping_set AS mapping_set
+  WHERE mapping_set.owner_scope_id = NEW.owner_scope_id
+    AND mapping_set.id = NEW.mapping_set_id;
+
+  SELECT count(*)
+  INTO actual_mapping_count
+  FROM exam_readiness_mapping
+  WHERE owner_scope_id = NEW.owner_scope_id
+    AND mapping_set_id = NEW.mapping_set_id;
+
+  IF actual_mapping_count <> expected_mapping_count THEN
+    RAISE EXCEPTION
+      'exam readiness mappings must match their immutable mapping-set count'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+
+--
+-- Name: reflo_validate_exam_mapping_set_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_validate_exam_mapping_set_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  actual_mapping_count integer;
+BEGIN
+  SELECT count(*)
+  INTO actual_mapping_count
+  FROM exam_readiness_mapping
+  WHERE owner_scope_id = NEW.owner_scope_id
+    AND mapping_set_id = NEW.id;
+
+  IF actual_mapping_count <> NEW.mapping_count THEN
+    RAISE EXCEPTION
+      'exam readiness mappings must match their immutable mapping-set count'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+
+--
+-- Name: reflo_validate_exam_mapping_weights(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_validate_exam_mapping_weights() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  affected_owner_scope_id uuid;
+  affected_mapping_set_id uuid;
+  affected_objective_id uuid;
+  mapping_count integer;
+  total_weight numeric;
+BEGIN
+  affected_owner_scope_id :=
+    CASE WHEN TG_OP = 'DELETE' THEN OLD.owner_scope_id ELSE NEW.owner_scope_id END;
+  affected_mapping_set_id :=
+    CASE WHEN TG_OP = 'DELETE' THEN OLD.mapping_set_id ELSE NEW.mapping_set_id END;
+  affected_objective_id :=
+    CASE WHEN TG_OP = 'DELETE' THEN OLD.objective_id ELSE NEW.objective_id END;
+
+  SELECT count(*), COALESCE(sum(mapping_weight), 0)
+  INTO mapping_count, total_weight
+  FROM exam_readiness_mapping
+  WHERE owner_scope_id = affected_owner_scope_id
+    AND mapping_set_id = affected_mapping_set_id
+    AND objective_id = affected_objective_id;
+
+  IF mapping_count = 0 OR total_weight <> 1.00000 THEN
+    RAISE EXCEPTION
+      'exam objective mapping weights must sum exactly to 1.00000'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+
+--
+-- Name: reflo_validate_exam_objective_weights(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_validate_exam_objective_weights() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  affected_blueprint_id uuid;
+  expected_objective_count integer;
+  objective_count integer;
+  total_weight numeric;
+BEGIN
+  affected_blueprint_id :=
+    CASE WHEN TG_OP = 'DELETE' THEN OLD.blueprint_id ELSE NEW.blueprint_id END;
+  SELECT blueprint.objective_count
+  INTO expected_objective_count
+  FROM exam_blueprint AS blueprint
+  WHERE blueprint.id = affected_blueprint_id;
+  SELECT count(*), COALESCE(sum(weight), 0)
+  INTO objective_count, total_weight
+  FROM exam_blueprint_objective
+  WHERE blueprint_id = affected_blueprint_id;
+
+  IF objective_count <> expected_objective_count
+     OR total_weight <> 1.00000
+  THEN
+    RAISE EXCEPTION
+      'exam blueprint objectives must match their immutable count and sum exactly to 1.00000'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END
 $$;
 
 
@@ -1370,6 +1552,168 @@ CREATE TABLE public.demo_upload_generation_operation (
 );
 
 ALTER TABLE ONLY public.demo_upload_generation_operation FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: exam_blueprint; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exam_blueprint (
+    id uuid NOT NULL,
+    version text NOT NULL,
+    name text NOT NULL,
+    objective_count integer NOT NULL,
+    source_provenance jsonb NOT NULL,
+    published_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT exam_blueprint_name_check CHECK (((length(name) >= 1) AND (length(name) <= 240))),
+    CONSTRAINT exam_blueprint_objective_count_check CHECK ((objective_count > 0)),
+    CONSTRAINT exam_blueprint_source_provenance_check CHECK (((jsonb_typeof(source_provenance) = 'object'::text) AND (source_provenance <> '{}'::jsonb))),
+    CONSTRAINT exam_blueprint_version_check CHECK (((length(version) >= 1) AND (length(version) <= 120)))
+);
+
+
+--
+-- Name: exam_blueprint_objective; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exam_blueprint_objective (
+    blueprint_id uuid NOT NULL,
+    blueprint_version text NOT NULL,
+    id uuid NOT NULL,
+    objective_key text NOT NULL,
+    title text NOT NULL,
+    weight numeric(6,5) NOT NULL,
+    source_provenance jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT exam_blueprint_objective_objective_key_check CHECK (((length(objective_key) >= 1) AND (length(objective_key) <= 120))),
+    CONSTRAINT exam_blueprint_objective_source_provenance_check CHECK (((jsonb_typeof(source_provenance) = 'object'::text) AND (source_provenance <> '{}'::jsonb))),
+    CONSTRAINT exam_blueprint_objective_title_check CHECK (((length(title) >= 1) AND (length(title) <= 500))),
+    CONSTRAINT exam_blueprint_objective_weight_check CHECK (((weight >= (0)::numeric) AND (weight <= (1)::numeric)))
+);
+
+
+--
+-- Name: exam_readiness_calibration; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exam_readiness_calibration (
+    id uuid NOT NULL,
+    blueprint_id uuid NOT NULL,
+    blueprint_version text NOT NULL,
+    version text NOT NULL,
+    sample_size integer NOT NULL,
+    mean_absolute_error numeric(6,5) NOT NULL,
+    representative boolean NOT NULL,
+    evidence_provenance jsonb NOT NULL,
+    frozen_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT exam_readiness_calibration_evidence_provenance_check CHECK (((jsonb_typeof(evidence_provenance) = 'object'::text) AND (evidence_provenance <> '{}'::jsonb))),
+    CONSTRAINT exam_readiness_calibration_mean_absolute_error_check CHECK (((mean_absolute_error >= (0)::numeric) AND (mean_absolute_error <= (1)::numeric))),
+    CONSTRAINT exam_readiness_calibration_sample_size_check CHECK ((sample_size > 0)),
+    CONSTRAINT exam_readiness_calibration_version_check CHECK (((length(version) >= 1) AND (length(version) <= 120)))
+);
+
+
+--
+-- Name: exam_readiness_mapping; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exam_readiness_mapping (
+    owner_scope_id uuid NOT NULL,
+    mapping_set_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    blueprint_id uuid NOT NULL,
+    objective_id uuid NOT NULL,
+    concept_id uuid NOT NULL,
+    concept_generation_id uuid NOT NULL,
+    concept_generation_version text NOT NULL,
+    mapping_weight numeric(6,5) NOT NULL,
+    source_provenance jsonb NOT NULL,
+    reviewer_provenance jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT exam_readiness_mapping_mapping_weight_check CHECK (((mapping_weight >= (0)::numeric) AND (mapping_weight <= (1)::numeric))),
+    CONSTRAINT exam_readiness_mapping_reviewer_provenance_check CHECK (((jsonb_typeof(reviewer_provenance) = 'object'::text) AND (reviewer_provenance <> '{}'::jsonb))),
+    CONSTRAINT exam_readiness_mapping_source_provenance_check CHECK (((jsonb_typeof(source_provenance) = 'object'::text) AND (source_provenance <> '{}'::jsonb)))
+);
+
+ALTER TABLE ONLY public.exam_readiness_mapping FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: exam_readiness_mapping_set; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exam_readiness_mapping_set (
+    owner_scope_id uuid NOT NULL,
+    id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    blueprint_id uuid NOT NULL,
+    blueprint_version text NOT NULL,
+    mapping_set_version text NOT NULL,
+    mapping_count integer NOT NULL,
+    readiness_profile_version text NOT NULL,
+    knowledge_algorithm_version text NOT NULL,
+    reviewer_provenance jsonb NOT NULL,
+    reviewed_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT exam_readiness_mapping_set_knowledge_algorithm_version_check CHECK ((knowledge_algorithm_version = 'knowledge-model-v1'::text)),
+    CONSTRAINT exam_readiness_mapping_set_mapping_count_check CHECK ((mapping_count > 0)),
+    CONSTRAINT exam_readiness_mapping_set_mapping_set_version_check CHECK (((length(mapping_set_version) >= 1) AND (length(mapping_set_version) <= 120))),
+    CONSTRAINT exam_readiness_mapping_set_readiness_profile_version_check CHECK ((readiness_profile_version = 'exam-readiness-profile-v1'::text)),
+    CONSTRAINT exam_readiness_mapping_set_reviewer_provenance_check CHECK (((jsonb_typeof(reviewer_provenance) = 'object'::text) AND (reviewer_provenance <> '{}'::jsonb)))
+);
+
+ALTER TABLE ONLY public.exam_readiness_mapping_set FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: exam_readiness_score; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exam_readiness_score (
+    owner_scope_id uuid NOT NULL,
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    readiness_profile_version text NOT NULL,
+    blueprint_id uuid NOT NULL,
+    blueprint_version text NOT NULL,
+    mapping_set_id uuid NOT NULL,
+    mapping_set_version text NOT NULL,
+    knowledge_algorithm_version text NOT NULL,
+    calibration_id uuid,
+    calibration_version text,
+    calibration_status text NOT NULL,
+    calibration_sample_size integer,
+    calibration_mean_absolute_error numeric(6,5),
+    calibration_representative boolean,
+    score numeric(6,5) NOT NULL,
+    evidence_coverage numeric(6,5) NOT NULL,
+    objective_count integer NOT NULL,
+    objective_mapped_count integer NOT NULL,
+    objective_evidence_count integer NOT NULL,
+    mapped_concept_count integer NOT NULL,
+    invalidated_concept_count integer NOT NULL,
+    unmapped_concept_count integer NOT NULL,
+    evidence_eligible_concept_count integer NOT NULL,
+    experimental boolean NOT NULL,
+    snapshot_digest text NOT NULL,
+    input_snapshot jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT exam_readiness_score_calibration_status_check CHECK ((calibration_status = ANY (ARRAY['unavailable'::text, 'inadequate'::text, 'adequate'::text]))),
+    CONSTRAINT exam_readiness_score_check CHECK ((((objective_mapped_count >= 0) AND (objective_mapped_count <= objective_count)) AND ((objective_evidence_count >= 0) AND (objective_evidence_count <= objective_count)) AND (mapped_concept_count >= 0) AND (invalidated_concept_count >= 0) AND (unmapped_concept_count >= 0) AND (evidence_eligible_concept_count >= 0))),
+    CONSTRAINT exam_readiness_score_check1 CHECK ((((calibration_status = 'unavailable'::text) AND (calibration_id IS NULL) AND (calibration_version IS NULL) AND (calibration_sample_size IS NULL) AND (calibration_mean_absolute_error IS NULL) AND (calibration_representative IS NULL) AND experimental) OR ((calibration_status = 'inadequate'::text) AND (calibration_id IS NOT NULL) AND (calibration_version IS NOT NULL) AND (calibration_sample_size IS NOT NULL) AND (calibration_sample_size > 0) AND (calibration_mean_absolute_error IS NOT NULL) AND (calibration_representative IS NOT NULL) AND experimental) OR ((calibration_status = 'adequate'::text) AND (calibration_id IS NOT NULL) AND (calibration_version IS NOT NULL) AND (calibration_sample_size >= 100) AND (calibration_mean_absolute_error <= 0.10000) AND calibration_representative AND (experimental = false)))),
+    CONSTRAINT exam_readiness_score_evidence_coverage_check CHECK (((evidence_coverage >= 0.80000) AND (evidence_coverage <= (1)::numeric))),
+    CONSTRAINT exam_readiness_score_input_snapshot_check CHECK (((jsonb_typeof(input_snapshot) = 'object'::text) AND (input_snapshot <> '{}'::jsonb))),
+    CONSTRAINT exam_readiness_score_mapping_set_version_check CHECK (((length(mapping_set_version) >= 1) AND (length(mapping_set_version) <= 120))),
+    CONSTRAINT exam_readiness_score_objective_count_check CHECK ((objective_count > 0)),
+    CONSTRAINT exam_readiness_score_readiness_profile_version_check CHECK ((readiness_profile_version = 'exam-readiness-profile-v1'::text)),
+    CONSTRAINT exam_readiness_score_score_check CHECK (((score >= (0)::numeric) AND (score <= (1)::numeric))),
+    CONSTRAINT exam_readiness_score_snapshot_digest_check CHECK ((snapshot_digest ~ '^[0-9a-f]{64}$'::text))
+);
+
+ALTER TABLE ONLY public.exam_readiness_score FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -2492,6 +2836,14 @@ ALTER TABLE ONLY public.concept_prerequisite
 
 
 --
+-- Name: concept concept_readiness_generation_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.concept
+    ADD CONSTRAINT concept_readiness_generation_key UNIQUE (owner_scope_id, id, curriculum_generation_id, generation_version);
+
+
+--
 -- Name: concept concept_scope_chapter_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2521,6 +2873,14 @@ ALTER TABLE ONLY public.course
 
 ALTER TABLE ONLY public.course
     ADD CONSTRAINT course_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: course course_readiness_target_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.course
+    ADD CONSTRAINT course_readiness_target_key UNIQUE (owner_scope_id, id, target_exam_blueprint_id);
 
 
 --
@@ -2721,6 +3081,110 @@ ALTER TABLE ONLY public.demo_upload_generation_operation
 
 ALTER TABLE public.attempt_concept_evidence
     ADD CONSTRAINT evidence_unanswerable_reason_shape CHECK ((((judgment_kind = 'unanswerable'::text) AND (unanswerable_reason IS NOT NULL)) OR ((judgment_kind = 'scored'::text) AND (unanswerable_reason IS NULL)))) NOT VALID;
+
+
+--
+-- Name: exam_blueprint exam_blueprint_id_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_blueprint
+    ADD CONSTRAINT exam_blueprint_id_version_key UNIQUE (id, version);
+
+
+--
+-- Name: exam_blueprint_objective exam_blueprint_objective_blueprint_id_objective_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_blueprint_objective
+    ADD CONSTRAINT exam_blueprint_objective_blueprint_id_objective_key_key UNIQUE (blueprint_id, objective_key);
+
+
+--
+-- Name: exam_blueprint_objective exam_blueprint_objective_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_blueprint_objective
+    ADD CONSTRAINT exam_blueprint_objective_pkey PRIMARY KEY (blueprint_id, id);
+
+
+--
+-- Name: exam_blueprint exam_blueprint_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_blueprint
+    ADD CONSTRAINT exam_blueprint_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: exam_readiness_calibration exam_readiness_calibration_blueprint_id_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_calibration
+    ADD CONSTRAINT exam_readiness_calibration_blueprint_id_version_key UNIQUE (blueprint_id, version);
+
+
+--
+-- Name: exam_readiness_calibration exam_readiness_calibration_id_blueprint_id_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_calibration
+    ADD CONSTRAINT exam_readiness_calibration_id_blueprint_id_version_key UNIQUE (id, blueprint_id, version);
+
+
+--
+-- Name: exam_readiness_calibration exam_readiness_calibration_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_calibration
+    ADD CONSTRAINT exam_readiness_calibration_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping
+    ADD CONSTRAINT exam_readiness_mapping_pkey PRIMARY KEY (owner_scope_id, mapping_set_id, objective_id, concept_id);
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_owner_scope_id_course_id_bluepri_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping_set
+    ADD CONSTRAINT exam_readiness_mapping_set_owner_scope_id_course_id_bluepri_key UNIQUE (owner_scope_id, course_id, blueprint_id, mapping_set_version);
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_owner_scope_id_id_course_id_blue_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping_set
+    ADD CONSTRAINT exam_readiness_mapping_set_owner_scope_id_id_course_id_blue_key UNIQUE (owner_scope_id, id, course_id, blueprint_id);
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping_set
+    ADD CONSTRAINT exam_readiness_mapping_set_pkey PRIMARY KEY (owner_scope_id, id);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_owner_scope_id_snapshot_digest_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_owner_scope_id_snapshot_digest_key UNIQUE (owner_scope_id, snapshot_digest);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_pkey PRIMARY KEY (owner_scope_id, id);
 
 
 --
@@ -3527,6 +3991,83 @@ CREATE TRIGGER delivery_submission_is_append_only BEFORE DELETE OR UPDATE ON pub
 
 
 --
+-- Name: exam_blueprint exam_blueprint_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER exam_blueprint_is_immutable BEFORE DELETE OR UPDATE ON public.exam_blueprint FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_configuration_mutation();
+
+
+--
+-- Name: exam_blueprint exam_blueprint_objective_count_normalized; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER exam_blueprint_objective_count_normalized AFTER INSERT ON public.exam_blueprint DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_validate_exam_blueprint_objective_count();
+
+
+--
+-- Name: exam_blueprint_objective exam_blueprint_objective_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER exam_blueprint_objective_is_immutable BEFORE DELETE OR UPDATE ON public.exam_blueprint_objective FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_configuration_mutation();
+
+
+--
+-- Name: exam_blueprint_objective exam_blueprint_objective_weights_normalized; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER exam_blueprint_objective_weights_normalized AFTER INSERT OR DELETE OR UPDATE ON public.exam_blueprint_objective DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_validate_exam_objective_weights();
+
+
+--
+-- Name: exam_readiness_calibration exam_readiness_calibration_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER exam_readiness_calibration_is_immutable BEFORE DELETE OR UPDATE ON public.exam_readiness_calibration FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_configuration_mutation();
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_count_normalized; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER exam_readiness_mapping_count_normalized AFTER INSERT ON public.exam_readiness_mapping DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_validate_exam_mapping_count();
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER exam_readiness_mapping_is_immutable BEFORE DELETE OR UPDATE ON public.exam_readiness_mapping FOR EACH ROW EXECUTE FUNCTION public.reflo_protect_exam_readiness_scoped_record();
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_count_normalized; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER exam_readiness_mapping_set_count_normalized AFTER INSERT ON public.exam_readiness_mapping_set DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_validate_exam_mapping_set_count();
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_is_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER exam_readiness_mapping_set_is_immutable BEFORE DELETE OR UPDATE ON public.exam_readiness_mapping_set FOR EACH ROW EXECUTE FUNCTION public.reflo_protect_exam_readiness_scoped_record();
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_weights_normalized; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER exam_readiness_mapping_weights_normalized AFTER INSERT OR DELETE OR UPDATE ON public.exam_readiness_mapping DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_validate_exam_mapping_weights();
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER exam_readiness_score_is_append_only BEFORE DELETE OR UPDATE ON public.exam_readiness_score FOR EACH ROW EXECUTE FUNCTION public.reflo_protect_exam_readiness_scoped_record();
+
+
+--
 -- Name: fsrs_card_payload fsrs_card_payload_is_append_only; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -4036,6 +4577,14 @@ ALTER TABLE ONLY public.course
 
 
 --
+-- Name: course course_target_exam_blueprint_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.course
+    ADD CONSTRAINT course_target_exam_blueprint_fk FOREIGN KEY (target_exam_blueprint_id) REFERENCES public.exam_blueprint(id);
+
+
+--
 -- Name: curriculum_generation curriculum_generation_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4265,6 +4814,110 @@ ALTER TABLE ONLY public.attempt_concept_evidence
 
 ALTER TABLE ONLY public.attempt_concept_evidence
     ADD CONSTRAINT evidence_replacement_attempt_scope_fk FOREIGN KEY (owner_scope_id, replacement_for_attempt_id) REFERENCES public.attempt(owner_scope_id, id);
+
+
+--
+-- Name: exam_blueprint_objective exam_blueprint_objective_blueprint_id_blueprint_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_blueprint_objective
+    ADD CONSTRAINT exam_blueprint_objective_blueprint_id_blueprint_version_fkey FOREIGN KEY (blueprint_id, blueprint_version) REFERENCES public.exam_blueprint(id, version);
+
+
+--
+-- Name: exam_readiness_calibration exam_readiness_calibration_blueprint_id_blueprint_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_calibration
+    ADD CONSTRAINT exam_readiness_calibration_blueprint_id_blueprint_version_fkey FOREIGN KEY (blueprint_id, blueprint_version) REFERENCES public.exam_blueprint(id, version);
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_blueprint_id_objective_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping
+    ADD CONSTRAINT exam_readiness_mapping_blueprint_id_objective_id_fkey FOREIGN KEY (blueprint_id, objective_id) REFERENCES public.exam_blueprint_objective(blueprint_id, id);
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_owner_scope_id_concept_id_concept_g_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping
+    ADD CONSTRAINT exam_readiness_mapping_owner_scope_id_concept_id_concept_g_fkey FOREIGN KEY (owner_scope_id, concept_id, concept_generation_id, concept_generation_version) REFERENCES public.concept(owner_scope_id, id, curriculum_generation_id, generation_version);
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_owner_scope_id_course_id_concept_ge_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping
+    ADD CONSTRAINT exam_readiness_mapping_owner_scope_id_course_id_concept_ge_fkey FOREIGN KEY (owner_scope_id, course_id, concept_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, course_id, id);
+
+
+--
+-- Name: exam_readiness_mapping exam_readiness_mapping_owner_scope_id_mapping_set_id_cours_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping
+    ADD CONSTRAINT exam_readiness_mapping_owner_scope_id_mapping_set_id_cours_fkey FOREIGN KEY (owner_scope_id, mapping_set_id, course_id, blueprint_id) REFERENCES public.exam_readiness_mapping_set(owner_scope_id, id, course_id, blueprint_id);
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_blueprint_id_blueprint_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping_set
+    ADD CONSTRAINT exam_readiness_mapping_set_blueprint_id_blueprint_version_fkey FOREIGN KEY (blueprint_id, blueprint_version) REFERENCES public.exam_blueprint(id, version);
+
+
+--
+-- Name: exam_readiness_mapping_set exam_readiness_mapping_set_owner_scope_id_course_id_bluepr_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_mapping_set
+    ADD CONSTRAINT exam_readiness_mapping_set_owner_scope_id_course_id_bluepr_fkey FOREIGN KEY (owner_scope_id, course_id, blueprint_id) REFERENCES public.course(owner_scope_id, id, target_exam_blueprint_id);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_blueprint_id_blueprint_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_blueprint_id_blueprint_version_fkey FOREIGN KEY (blueprint_id, blueprint_version) REFERENCES public.exam_blueprint(id, version);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_calibration_id_blueprint_id_calibrati_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_calibration_id_blueprint_id_calibrati_fkey FOREIGN KEY (calibration_id, blueprint_id, calibration_version) REFERENCES public.exam_readiness_calibration(id, blueprint_id, version);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_owner_scope_id_mapping_set_id_course__fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_owner_scope_id_mapping_set_id_course__fkey FOREIGN KEY (owner_scope_id, mapping_set_id, course_id, blueprint_id) REFERENCES public.exam_readiness_mapping_set(owner_scope_id, id, course_id, blueprint_id);
+
+
+--
+-- Name: exam_readiness_score exam_readiness_score_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exam_readiness_score
+    ADD CONSTRAINT exam_readiness_score_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id);
 
 
 --
@@ -4873,6 +5526,27 @@ CREATE POLICY authorized_learning_scope_reset ON public.delivery_submission FOR 
 
 
 --
+-- Name: exam_readiness_mapping authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.exam_readiness_mapping FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: exam_readiness_mapping_set authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.exam_readiness_mapping_set FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
+-- Name: exam_readiness_score authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorized_learning_scope_reset ON public.exam_readiness_score FOR DELETE USING (public.reflo_learning_scope_delete_is_authorized(owner_scope_id));
+
+
+--
 -- Name: fsrs_card_payload authorized_learning_scope_reset; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -5071,6 +5745,24 @@ ALTER TABLE public.demo_upload_generation_operation ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY demo_upload_generation_operation_active_membership ON public.demo_upload_generation_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
 
+
+--
+-- Name: exam_readiness_mapping; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.exam_readiness_mapping ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: exam_readiness_mapping_set; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.exam_readiness_mapping_set ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: exam_readiness_score; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.exam_readiness_score ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: fsrs_card_payload; Type: ROW SECURITY; Schema: public; Owner: -
@@ -5430,6 +6122,27 @@ CREATE POLICY scoped_active_membership ON public.delivery_submission USING (publ
 
 
 --
+-- Name: exam_readiness_mapping scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.exam_readiness_mapping USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: exam_readiness_mapping_set scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.exam_readiness_mapping_set USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: exam_readiness_score scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.exam_readiness_score USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: fsrs_card_payload scoped_active_membership; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -5609,4 +6322,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260724000200'),
     ('20260724000300'),
     ('20260726000100'),
-    ('20260727000100');
+    ('20260727000100'),
+    ('20260727000200');

@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import pg, { type PoolClient } from "pg";
 
 export { PostgresIngestionOperationStore } from "./ingestion-operation-store.js";
@@ -46,11 +48,13 @@ import type {
   CourseConceptProgress,
   CourseProgress,
   CourseSessionMasteryDelta,
+  ExamReadinessDisclosure,
   LibraryCourse,
   LoginTokenIssue,
   SessionHistoryItem,
   SessionIssue,
 } from "@reflo/accounts";
+import { evaluateExamReadiness } from "@reflo/accounts";
 
 const { Pool } = pg;
 
@@ -89,6 +93,7 @@ interface HistoryRow extends Record<string, unknown> {
 }
 
 interface ProgressCourseRow extends Record<string, unknown> {
+  active_curriculum_generation_id: string | null;
   generated_at: Date;
   target_exam_blueprint_id: string | null;
   title: string;
@@ -114,6 +119,40 @@ interface ProgressConceptRow extends Record<string, unknown> {
 interface ProgressSessionRow extends Record<string, unknown> {
   session_id: string;
   summary: Record<string, unknown> | null;
+}
+
+interface ReadinessBlueprintRow extends Record<string, unknown> {
+  id: string;
+  version: string;
+}
+
+interface ReadinessObjectiveRow extends Record<string, unknown> {
+  id: string;
+  weight: string;
+}
+
+interface ReadinessMappingSetRow extends Record<string, unknown> {
+  id: string;
+  knowledge_algorithm_version: string;
+  mapping_set_version: string;
+}
+
+interface ReadinessMappingRow extends Record<string, unknown> {
+  algorithm_version: string | null;
+  concept_generation_id: string;
+  concept_id: string;
+  evidence_count: number | null;
+  mapping_weight: string;
+  mastery: string | null;
+  objective_id: string;
+}
+
+interface ReadinessCalibrationRow extends Record<string, unknown> {
+  id: string;
+  mean_absolute_error: string;
+  representative: boolean;
+  sample_size: number;
+  version: string;
 }
 
 export class PostgresAccountRepository implements AccountRepository {
@@ -424,6 +463,7 @@ export class PostgresAccountRepository implements AccountRepository {
     return this.#scopedRead(account, async (client) => {
       const courseResult = await client.query<ProgressCourseRow>(
         `SELECT course.title, course.target_exam_blueprint_id,
+                course.active_curriculum_generation_id,
                 transaction_timestamp() AS generated_at
          FROM course
          WHERE course.owner_scope_id = $1
@@ -510,9 +550,29 @@ export class PostgresAccountRepository implements AccountRepository {
           concept.assessmentStatus === "assessed" && concept.mastery !== null,
       );
       const targetBlueprintId = course.target_exam_blueprint_id;
+      const readiness = await projectExamReadiness(client, {
+        account,
+        activeCurriculumGenerationId: course.active_curriculum_generation_id,
+        conceptIds: concepts.map((concept) => concept.conceptId),
+        courseId,
+        targetBlueprintId,
+      });
+      const mappedConceptIds = await activeMappedConceptIds(
+        client,
+        account.ownerScopeId,
+        courseId,
+        readiness.mappingSetVersion,
+        course.active_curriculum_generation_id,
+      );
+      const projectedConcepts = concepts.map((concept) => ({
+        ...concept,
+        mappingStatus: mappedConceptIds.has(concept.conceptId)
+          ? ("mapped" as const)
+          : ("unmapped" as const),
+      }));
 
       return {
-        chapters: groupConceptsByChapter(conceptResult.rows, concepts),
+        chapters: groupConceptsByChapter(conceptResult.rows, projectedConcepts),
         courseId,
         generatedAt: course.generated_at,
         mastery: {
@@ -522,27 +582,7 @@ export class PostgresAccountRepository implements AccountRepository {
           totalConceptCount: concepts.length,
           value: averageFixed(assessed.map((concept) => concept.mastery!)),
         },
-        readiness: {
-          blueprintVersion: null,
-          invalidatedConceptCount: 0,
-          mappedConceptCount: 0,
-          reasons:
-            targetBlueprintId === null
-              ? [
-                  "blueprint_missing",
-                  "evidence_minimum_not_met",
-                  "calibration_unavailable",
-                ]
-              : [
-                  "reviewed_mappings_unavailable",
-                  "evidence_minimum_not_met",
-                  "calibration_unavailable",
-                ],
-          score: null,
-          status: "unavailable",
-          targetBlueprintId,
-          unmappedConceptCount: concepts.length,
-        },
+        readiness,
         recentSessionDeltas,
         title: course.title,
       };
@@ -606,6 +646,261 @@ export class PostgresAccountRepository implements AccountRepository {
       client.release();
     }
   }
+}
+
+async function projectExamReadiness(
+  client: PoolClient,
+  input: {
+    readonly account: AuthenticatedAccount;
+    readonly activeCurriculumGenerationId: string | null;
+    readonly conceptIds: readonly string[];
+    readonly courseId: string;
+    readonly targetBlueprintId: string | null;
+  },
+): Promise<ExamReadinessDisclosure> {
+  if (input.targetBlueprintId === null) {
+    return evaluateExamReadiness({
+      blueprint: null,
+      calibration: null,
+      courseConceptIds: input.conceptIds,
+      knowledgeAlgorithmVersion: "knowledge-model-v1",
+      mappingSetVersion: null,
+    });
+  }
+
+  const blueprintResult = await client.query<ReadinessBlueprintRow>(
+    `SELECT id, version
+     FROM exam_blueprint
+     WHERE id = $1`,
+    [input.targetBlueprintId],
+  );
+  const blueprint = blueprintResult.rows[0];
+  if (blueprint === undefined) {
+    return evaluateExamReadiness({
+      blueprint: null,
+      calibration: null,
+      courseConceptIds: input.conceptIds,
+      knowledgeAlgorithmVersion: "knowledge-model-v1",
+      mappingSetVersion: null,
+    });
+  }
+
+  const objectiveResult = await client.query<ReadinessObjectiveRow>(
+    `SELECT id, weight::text
+     FROM exam_blueprint_objective
+     WHERE blueprint_id = $1
+     ORDER BY objective_key, id`,
+    [blueprint.id],
+  );
+  const mappingSetResult = await client.query<ReadinessMappingSetRow>(
+    `SELECT id, mapping_set_version, knowledge_algorithm_version
+     FROM exam_readiness_mapping_set
+     WHERE owner_scope_id = $1
+       AND course_id = $2
+       AND blueprint_id = $3
+       AND blueprint_version = $4
+       AND readiness_profile_version = 'exam-readiness-profile-v1'
+     ORDER BY reviewed_at DESC, mapping_set_version DESC, id
+     LIMIT 1`,
+    [
+      input.account.ownerScopeId,
+      input.courseId,
+      blueprint.id,
+      blueprint.version,
+    ],
+  );
+  const mappingSet = mappingSetResult.rows[0];
+  const mappingRows =
+    mappingSet === undefined
+      ? []
+      : (
+          await client.query<ReadinessMappingRow>(
+            `SELECT mapping.objective_id, mapping.concept_id,
+                    mapping.concept_generation_id,
+                    mapping.mapping_weight::text,
+                    state.mastery::text, state.evidence_count,
+                    state.algorithm_version
+             FROM exam_readiness_mapping AS mapping
+             LEFT JOIN knowledge_state AS state
+               ON state.owner_scope_id = mapping.owner_scope_id
+              AND state.user_id = $3
+              AND state.concept_id = mapping.concept_id
+             WHERE mapping.owner_scope_id = $1
+               AND mapping.mapping_set_id = $2
+             ORDER BY mapping.objective_id, mapping.concept_id`,
+            [input.account.ownerScopeId, mappingSet.id, input.account.userId],
+          )
+        ).rows;
+  const calibration = (
+    await client.query<ReadinessCalibrationRow>(
+      `SELECT id, version, sample_size, mean_absolute_error::text,
+              representative
+       FROM exam_readiness_calibration
+       WHERE blueprint_id = $1
+         AND blueprint_version = $2
+       ORDER BY frozen_at DESC, version DESC, id
+       LIMIT 1`,
+      [blueprint.id, blueprint.version],
+    )
+  ).rows[0];
+  const knowledgeAlgorithmVersion =
+    mappingSet?.knowledge_algorithm_version ?? "knowledge-model-v1";
+  const readiness = evaluateExamReadiness({
+    blueprint: {
+      id: blueprint.id,
+      objectives: objectiveResult.rows.map((objective) => ({
+        id: objective.id,
+        mappings: mappingRows
+          .filter((mapping) => mapping.objective_id === objective.id)
+          .map((mapping) => ({
+            active:
+              input.activeCurriculumGenerationId !== null &&
+              mapping.concept_generation_id ===
+                input.activeCurriculumGenerationId,
+            conceptId: mapping.concept_id,
+            eligibleOutcomeCount: mapping.evidence_count ?? 0,
+            knowledgeAlgorithmVersion: mapping.algorithm_version,
+            mappingWeight: mapping.mapping_weight,
+            mastery: mapping.mastery,
+          })),
+        weight: objective.weight,
+      })),
+      version: blueprint.version,
+    },
+    calibration:
+      calibration === undefined
+        ? null
+        : {
+            meanAbsoluteError: calibration.mean_absolute_error,
+            representative: calibration.representative,
+            sampleSize: calibration.sample_size,
+            version: calibration.version,
+          },
+    courseConceptIds: input.conceptIds,
+    knowledgeAlgorithmVersion,
+    mappingSetVersion: mappingSet?.mapping_set_version ?? null,
+  });
+
+  if (readiness.status === "eligible" && mappingSet !== undefined) {
+    await persistExamReadinessScore(client, {
+      account: input.account,
+      activeCurriculumGenerationId: input.activeCurriculumGenerationId,
+      blueprint,
+      calibration: calibration ?? null,
+      courseId: input.courseId,
+      mappingRows,
+      mappingSet,
+      objectives: objectiveResult.rows,
+      readiness,
+    });
+  }
+  return readiness;
+}
+
+async function persistExamReadinessScore(
+  client: PoolClient,
+  input: {
+    readonly account: AuthenticatedAccount;
+    readonly activeCurriculumGenerationId: string | null;
+    readonly blueprint: ReadinessBlueprintRow;
+    readonly calibration: ReadinessCalibrationRow | null;
+    readonly courseId: string;
+    readonly mappingRows: readonly ReadinessMappingRow[];
+    readonly mappingSet: ReadinessMappingSetRow;
+    readonly objectives: readonly ReadinessObjectiveRow[];
+    readonly readiness: Extract<
+      ExamReadinessDisclosure,
+      { readonly status: "eligible" }
+    >;
+  },
+): Promise<void> {
+  const inputSnapshot = JSON.stringify({
+    activeCurriculumGenerationId: input.activeCurriculumGenerationId,
+    blueprint: input.blueprint,
+    calibration: input.calibration,
+    courseId: input.courseId,
+    mappingRows: input.mappingRows,
+    mappingSet: input.mappingSet,
+    objectives: input.objectives,
+    readiness: input.readiness,
+    userId: input.account.userId,
+  });
+  const snapshotDigest = createHash("sha256")
+    .update(inputSnapshot)
+    .digest("hex");
+  await client.query(
+    `INSERT INTO exam_readiness_score (
+       owner_scope_id, id, user_id, course_id, readiness_profile_version,
+       blueprint_id, blueprint_version, mapping_set_id, mapping_set_version,
+       knowledge_algorithm_version, calibration_id, calibration_version,
+       calibration_status, calibration_sample_size,
+       calibration_mean_absolute_error, calibration_representative, score,
+       evidence_coverage, objective_count, objective_mapped_count,
+       objective_evidence_count, mapped_concept_count,
+       invalidated_concept_count, unmapped_concept_count,
+       evidence_eligible_concept_count, experimental, snapshot_digest,
+       input_snapshot
+     ) VALUES (
+       $1, $2, $3, $4, 'exam-readiness-profile-v1',
+       $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+       $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb
+     )
+     ON CONFLICT (owner_scope_id, snapshot_digest) DO NOTHING`,
+    [
+      input.account.ownerScopeId,
+      randomUUID(),
+      input.account.userId,
+      input.courseId,
+      input.blueprint.id,
+      input.blueprint.version,
+      input.mappingSet.id,
+      input.mappingSet.mapping_set_version,
+      input.mappingSet.knowledge_algorithm_version,
+      input.calibration?.id ?? null,
+      input.calibration?.version ?? null,
+      input.readiness.calibration.status,
+      input.readiness.calibration.sampleSize,
+      input.readiness.calibration.meanAbsoluteError,
+      input.calibration?.representative ?? null,
+      input.readiness.score,
+      input.readiness.evidenceCoverage,
+      input.readiness.objectiveCount,
+      input.readiness.objectiveMappedCount,
+      input.readiness.objectiveEvidenceCount,
+      input.readiness.mappedConceptCount,
+      input.readiness.invalidatedConceptCount,
+      input.readiness.unmappedConceptCount,
+      input.readiness.evidenceEligibleConceptCount,
+      input.readiness.experimental,
+      snapshotDigest,
+      inputSnapshot,
+    ],
+  );
+}
+
+async function activeMappedConceptIds(
+  client: PoolClient,
+  ownerScopeId: string,
+  courseId: string,
+  mappingSetVersion: string | null,
+  activeCurriculumGenerationId: string | null,
+): Promise<ReadonlySet<string>> {
+  if (mappingSetVersion === null || activeCurriculumGenerationId === null) {
+    return new Set();
+  }
+  const result = await client.query<{ concept_id: string }>(
+    `SELECT DISTINCT mapping.concept_id
+     FROM exam_readiness_mapping_set AS mapping_set
+     JOIN exam_readiness_mapping AS mapping
+       ON mapping.owner_scope_id = mapping_set.owner_scope_id
+      AND mapping.mapping_set_id = mapping_set.id
+     WHERE mapping_set.owner_scope_id = $1
+       AND mapping_set.course_id = $2
+       AND mapping_set.mapping_set_version = $3
+       AND mapping.concept_generation_id = $4`,
+    [ownerScopeId, courseId, mappingSetVersion, activeCurriculumGenerationId],
+  );
+  return new Set(result.rows.map((row) => row.concept_id));
 }
 
 function projectConceptProgress(

@@ -21,6 +21,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "demo:voice-clip": "node scripts/build-voice-demo-clip.mjs",
     "lint": "eslint .",
     "test": "vitest run"
   },

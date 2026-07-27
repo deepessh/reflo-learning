@@ -12,6 +12,7 @@
     "build:packages": "turbo run build --filter='./packages/*'",
     "check": "pnpm lint && pnpm test && pnpm build && pnpm package",
     "containers:check": "node scripts/check-app-containers.mjs",
+    "demo:voice-clip": "pnpm --filter @reflo/model-router build && pnpm --filter @reflo/audio build && pnpm --filter @reflo/audio demo:voice-clip && pnpm exec prettier --write demo-artifacts/voice-tutoring-recorded-prototype/manifest.json",
     "dev": "pnpm build:packages && turbo run dev --filter='./apps/*'",
     "doctor": "scripts/doctor.sh",
     "format": "prettier --write .",

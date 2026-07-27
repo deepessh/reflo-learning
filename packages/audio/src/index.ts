@@ -5,3 +5,4 @@ export * from "./errors.js";
 export * from "./ports.js";
 export * from "./retry.js";
 export * from "./service.js";
+export * from "./voice-demo-clip.js";

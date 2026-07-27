@@ -1,7 +1,7 @@
 ---
 id: "0015"
 title: "Repository-owned release-gate evaluation evidence"
-status: Accepted
+status: Superseded
 date: "2026-07-20"
 aliases: [D-GH-15]
 prd_references: "`prds/reflo-prd.md` §6 F7, §11, and §13; D-GH-3, D-GH-5, D-GH-10, D-GH-13, D-GH-14, and pending issue #18"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/15#issuecomment-5027987825
   record_pr: https://github.com/deepessh/reflo-learning/pull/92
 supersedes: []
-superseded_by: null
+superseded_by: "0041"
 deprecation: null
 maintenance: []
 ---

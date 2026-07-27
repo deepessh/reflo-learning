@@ -49,7 +49,7 @@ Detailed rules live in the linked records.
 | [ADR 0033](adrs/0033-pinned-fsrs6-scheduler-profile-and-deterministic-replay.md) | Pinned FSRS-6 scheduler profile and deterministic replay | `D-GH-152` | ADR |
 | [ADR 0034](adrs/0034-connected-online-demo-day-scope.md) | Connected online Demo Day scope | `D-GH-19` | ADR |
 | [ADR 0035](adrs/0035-upstream-signed-clamav-cloud-demo-snapshot-admission.md) | Upstream-signed ClamAV cloud-demo snapshot admission | `D-GH-176` | ADR |
-| [ADR 0038](adrs/0038-second-doubling-of-bounded-curriculum-deadlines.md) | Second doubling of bounded curriculum deadlines | `D-GH-189` | ADR |
+| [ADR 0039](adrs/0039-third-doubling-of-bounded-curriculum-deadlines.md) | Third doubling of bounded curriculum deadlines | `D-GH-191` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -73,7 +73,7 @@ Detailed rules live in the linked records.
   [ADR 0011](adrs/0011-cpu-fallback-tts-and-layered-audio-asset-contract.md),
   [ADR 0022](adrs/0022-single-segment-wan-sprint-prototype-and-long-form-deferral.md),
   [ADR 0024](adrs/0024-shared-traced-model-routing-module.md),
-  and [ADR 0038](adrs/0038-second-doubling-of-bounded-curriculum-deadlines.md).
+  and [ADR 0039](adrs/0039-third-doubling-of-bounded-curriculum-deadlines.md).
 - Learner evidence and product controls:
   [ADR 0006](adrs/0006-passwordless-email-authentication-and-revocable-server-sessions.md),
   [ADR 0014](adrs/0014-p1-feature-flags-and-default-off-enforcement.md),

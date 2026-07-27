@@ -1,7 +1,7 @@
 ---
 id: "0038"
 title: "Second doubling of bounded curriculum deadlines"
-status: Accepted
+status: Superseded
 date: "2026-07-27"
 aliases: [D-GH-189]
 prd_references: "`prds/reflo-prd.md` v2.4 §3 G1, §6 F1, §8 Flow A, §11, §12, and §13; ADR 0010; ADR 0012; ADR 0024; ADR 0037"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/189#issuecomment-5094644086
   record_pr: https://github.com/deepessh/reflo-learning/pull/190
 supersedes: ["0037"]
-superseded_by: null
+superseded_by: "0039"
 deprecation: null
 maintenance: []
 ---

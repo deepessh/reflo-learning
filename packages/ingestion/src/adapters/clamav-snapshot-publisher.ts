@@ -9,58 +9,41 @@ import { IngestionError } from "../errors.js";
 import type { ProcessRunnerPort } from "../ports.js";
 import type { AliOssObjectClient } from "./ali-oss.js";
 import {
-  type SnapshotDigestSignerPort,
-  snapshotManifestDigest,
-} from "./alibaba-kms.js";
-import { CLAMAV_SNAPSHOT_MANIFEST_CONTRACT } from "./clamav.js";
-import {
-  CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
-  type ClamAvSnapshotPublicKeyPin,
-  PinnedP256SnapshotSignatureVerifier,
-} from "./clamav-signature.js";
+  CLAMAV_UPSTREAM_SNAPSHOT_MANIFEST_CONTRACT,
+  CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
+  parseSigtoolDatabaseInfo,
+  type UpstreamClamAvSnapshotFile,
+  type UpstreamClamAvSnapshotManifest,
+  upstreamClamAvSnapshotId,
+} from "./clamav.js";
 
 const MAX_DATABASE_FILE_BYTES = 512 * 1_024 * 1_024;
 const MAX_DATABASE_TOTAL_BYTES = 1_024 * 1_024 * 1_024;
 const MAX_DIAGNOSTIC_BYTES = 8 * 1_024;
-const READY_CONTRACT = "clamav-snapshot-ready-v1";
+const MAX_SNAPSHOT_AGE_MS = 24 * 60 * 60_000;
+const MAX_FUTURE_SKEW_MS = 5 * 60_000;
+const READY_CONTRACT = "upstream-clamav-snapshot-ready-v1";
 
 export interface ClamAvSnapshotBundle {
   readonly databaseDirectory: string;
-  readonly files: readonly {
-    readonly byteLength: number;
-    readonly name: string;
-    readonly sha256: string;
-  }[];
+  readonly files: readonly UpstreamClamAvSnapshotFile[];
   readonly manifestBytes: Uint8Array;
   readonly manifestSha256: string;
-  readonly providerSigning: {
-    readonly keyId: string;
-    readonly keyVersionId: string;
-    readonly requestId: string;
-  };
-  readonly signatureBase64: Uint8Array;
-  readonly signatureSha256: string;
   readonly snapshotId: string;
 }
 
 export class ClamAvSnapshotMaintenancePublisher {
-  readonly #verifier: PinnedP256SnapshotSignatureVerifier;
-
-  constructor(
-    private readonly runner: ProcessRunnerPort,
-    private readonly signer: SnapshotDigestSignerPort,
-    private readonly pin: ClamAvSnapshotPublicKeyPin,
-  ) {
-    this.#verifier = new PinnedP256SnapshotSignatureVerifier([pin]);
-  }
+  constructor(private readonly runner: ProcessRunnerPort) {}
 
   async createBundle(input: {
     readonly databaseDirectory: string;
+    readonly freshClamImageDigest: string;
     readonly publishedAt: Date;
   }): Promise<ClamAvSnapshotBundle> {
     if (
       !path.isAbsolute(input.databaseDirectory) ||
-      !isCanonicalUtc(input.publishedAt)
+      !isCanonicalUtc(input.publishedAt) ||
+      !/^sha256:[a-f0-9]{64}$/.test(input.freshClamImageDigest)
     ) {
       throw unavailable();
     }
@@ -73,20 +56,10 @@ export class ClamAvSnapshotMaintenancePublisher {
     ) {
       throw unavailable();
     }
-    await assertSigtoolVersion(this.runner);
+    const sigtoolVersion = await exactSigtoolVersion(this.runner);
     const names = (await readdir(input.databaseDirectory)).sort();
-    if (
-      names.length < 1 ||
-      names.length > 3 ||
-      names.some((name) => !/^(?:bytecode|daily|main)\.(?:cld|cvd)$/.test(name))
-    ) {
-      throw unavailable();
-    }
-    const files: Array<{
-      byteLength: number;
-      name: string;
-      sha256: string;
-    }> = [];
+    assertClosedDatabaseSet(names);
+    const files: UpstreamClamAvSnapshotFile[] = [];
     let totalBytes = 0;
     const verificationDirectory = await mkdtemp(
       path.join(tmpdir(), "reflo-clamav-verify-"),
@@ -99,82 +72,52 @@ export class ClamAvSnapshotMaintenancePublisher {
         if (totalBytes > MAX_DATABASE_TOTAL_BYTES) {
           throw unavailable();
         }
-        // Validate the same immutable bytes that will be hashed and signed.
-        // Running sigtool against the source path would leave a replacement
-        // race between upstream verification and the following read.
+        // Verify the same bytes that are hashed and published.
         const verificationPath = path.join(verificationDirectory, name);
         await writeFile(verificationPath, bytes, { flag: "wx", mode: 0o600 });
         const verified = await this.runner.run(
           "sigtool",
-          ["--verify-cvd", verificationPath],
+          ["--info", verificationPath],
           { maxOutputBytes: MAX_DIAGNOSTIC_BYTES, timeoutMs: 60_000 },
         );
         if (verified.timedOut || verified.exitCode !== 0) {
           throw unavailable();
         }
+        const metadata = parseSigtoolDatabaseInfo(verified.stdout);
         files.push({
+          ...metadata,
           byteLength: bytes.byteLength,
           name,
           sha256: sha256(bytes),
         });
       }
+    } catch {
+      throw unavailable();
     } finally {
       await rm(verificationDirectory, { force: true, recursive: true });
     }
-    const snapshotId = `cvd-${sha256(
-      Buffer.from(
-        JSON.stringify({
-          files,
-          kid: this.pin.kid,
-          publishedAt: input.publishedAt.toISOString(),
-        }),
-        "utf8",
-      ),
-    ).slice(0, 32)}`;
+    assertFreshDailyDatabase(files, input.publishedAt);
+    const identity = {
+      clamAvVersion: INGESTION_COMPONENTS.clamAv,
+      contractVersion: CLAMAV_UPSTREAM_SNAPSHOT_MANIFEST_CONTRACT,
+      files,
+      profile: CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
+      publishedAt: input.publishedAt.toISOString(),
+      toolchain: {
+        freshClamImageDigest: input.freshClamImageDigest,
+        sigtoolVersion,
+      },
+    } satisfies Omit<UpstreamClamAvSnapshotManifest, "snapshotId">;
+    const snapshotId = upstreamClamAvSnapshotId(identity);
     const manifestBytes = Buffer.from(
-      JSON.stringify({
-        clamAvVersion: INGESTION_COMPONENTS.clamAv,
-        contractVersion: CLAMAV_SNAPSHOT_MANIFEST_CONTRACT,
-        files,
-        kid: this.pin.kid,
-        publishedAt: input.publishedAt.toISOString(),
-        publicKeySpkiSha256: this.pin.spkiSha256,
-        signatureProfile: CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
-        snapshotId,
-      }),
+      JSON.stringify({ ...identity, snapshotId }),
       "utf8",
-    );
-    const signed = await this.signer.signDigest({
-      digest: snapshotManifestDigest(manifestBytes),
-      payload: manifestBytes,
-    });
-    if (
-      !(await this.#verifier.verify({
-        kid: this.pin.kid,
-        payload: manifestBytes,
-        profile: CLAMAV_SNAPSHOT_SIGNATURE_PROFILE,
-        publicKeySpkiSha256: this.pin.spkiSha256,
-        signature: signed.signature,
-      }))
-    ) {
-      throw unavailable();
-    }
-    const signatureBase64 = Buffer.from(
-      Buffer.from(signed.signature).toString("base64"),
-      "ascii",
     );
     return {
       databaseDirectory: input.databaseDirectory,
       files,
       manifestBytes,
       manifestSha256: sha256(manifestBytes),
-      providerSigning: {
-        keyId: signed.providerKeyId,
-        keyVersionId: signed.providerKeyVersionId,
-        requestId: signed.providerRequestId,
-      },
-      signatureBase64,
-      signatureSha256: sha256(signatureBase64),
       snapshotId,
     };
   }
@@ -184,7 +127,7 @@ export class ClamAvSnapshotMaintenancePublisher {
 export class AliOssClamAvSnapshotPublisher {
   constructor(
     private readonly client: AliOssObjectClient,
-    private readonly rootPrefix = "internal/clamav/snapshots/v1",
+    private readonly rootPrefix = "internal/clamav/upstream-snapshots/v1",
   ) {
     if (!isSafeObjectKey(rootPrefix)) {
       throw unavailable();
@@ -223,17 +166,11 @@ export class AliOssClamAvSnapshotPublisher {
       objectKey: `${snapshotPrefix}/snapshot.json`,
       sha256: bundle.manifestSha256,
     });
-    await putImmutable(this.client, {
-      bytes: bundle.signatureBase64,
-      contentType: "application/octet-stream",
-      objectKey: `${snapshotPrefix}/snapshot.sig`,
-      sha256: bundle.signatureSha256,
-    });
     const readyBytes = Buffer.from(
       JSON.stringify({
         contractVersion: READY_CONTRACT,
         manifestSha256: bundle.manifestSha256,
-        signatureSha256: bundle.signatureSha256,
+        profile: CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
         snapshotId: bundle.snapshotId,
       }),
       "utf8",
@@ -249,17 +186,44 @@ export class AliOssClamAvSnapshotPublisher {
   }
 }
 
-async function assertSigtoolVersion(runner: ProcessRunnerPort): Promise<void> {
+async function exactSigtoolVersion(runner: ProcessRunnerPort): Promise<string> {
   const version = await runner.run("sigtool", ["--version"], {
     maxOutputBytes: MAX_DIAGNOSTIC_BYTES,
     timeoutMs: 5_000,
   });
+  const exact = version.stdout.trim();
   if (
     version.timedOut ||
     version.exitCode !== 0 ||
-    !new RegExp(`^ClamAV ${INGESTION_COMPONENTS.clamAv}(?:/|\\s|$)`).test(
-      version.stdout,
-    )
+    !new RegExp(`^ClamAV ${INGESTION_COMPONENTS.clamAv}(?:/|\\s|$)`).test(exact)
+  ) {
+    throw unavailable();
+  }
+  return exact;
+}
+
+function assertClosedDatabaseSet(names: readonly string[]): void {
+  if (
+    names.length !== 3 ||
+    names.filter((name) => name === "main.cvd").length !== 1 ||
+    names.filter((name) => /^daily\.(?:cld|cvd)$/.test(name)).length !== 1 ||
+    names.filter((name) => /^bytecode\.(?:cld|cvd)$/.test(name)).length !== 1
+  ) {
+    throw unavailable();
+  }
+}
+
+function assertFreshDailyDatabase(
+  files: readonly UpstreamClamAvSnapshotFile[],
+  publishedAt: Date,
+): void {
+  const daily = files.find((file) => file.name.startsWith("daily."));
+  const builtAt = new Date(daily?.buildTime ?? "").getTime();
+  const ageMs = publishedAt.getTime() - builtAt;
+  if (
+    !Number.isFinite(builtAt) ||
+    ageMs < -MAX_FUTURE_SKEW_MS ||
+    ageMs > MAX_SNAPSHOT_AGE_MS
   ) {
     throw unavailable();
   }

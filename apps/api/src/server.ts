@@ -17,6 +17,10 @@ import {
 import type { ServerEnvironment } from "@reflo/config";
 import {
   type ConnectedDemoPreflightView,
+  type DemoCourseOutline,
+  type DemoSourceApproval,
+  type DemoUploadMediaType,
+  type DemoUploadView,
   HEALTH_CONTRACT_VERSION,
   type ConnectedStudyView,
   type HealthResponse,
@@ -28,8 +32,13 @@ import {
 } from "@reflo/delivery";
 import { TutorAgentError, type TutorAgentService } from "@reflo/tutor-agent";
 
+import { DemoUploadAccessError } from "./demo-upload.js";
+
 const SESSION_COOKIE = "__Host-reflo_session";
 const CSRF_COOKIE = "__Host-reflo_csrf";
+const MAX_DEMO_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+type ScopeAuthorization = ReturnType<typeof deliveryAuthorization>;
 
 export interface ApiDependencies {
   readonly accounts?: AccountService;
@@ -64,6 +73,27 @@ export interface ApiDependencies {
   };
   readonly preflight?: {
     check(deliveryAvailable: boolean): Promise<ConnectedDemoPreflightView>;
+  };
+  readonly demoUploads?: {
+    create(
+      authorization: ScopeAuthorization,
+      input: {
+        readonly approvalId: string;
+        readonly bytes: Uint8Array;
+        readonly mediaType: DemoUploadMediaType;
+      },
+    ): Promise<DemoUploadView>;
+    get(
+      authorization: ScopeAuthorization,
+      uploadId: string,
+    ): Promise<DemoUploadView | null>;
+    listApprovals(
+      authorization: ScopeAuthorization,
+    ): Promise<readonly DemoSourceApproval[]>;
+    loadOutline(
+      authorization: ScopeAuthorization,
+      uploadId: string,
+    ): Promise<DemoCourseOutline | null>;
   };
   readonly seed?: {
     reset(authorization: ReturnType<typeof deliveryAuthorization>): Promise<{
@@ -194,7 +224,8 @@ export function createApiServer(
         }
         writeCors(response, origin!);
         response.writeHead(204, {
-          "access-control-allow-headers": "content-type, x-reflo-csrf",
+          "access-control-allow-headers":
+            "content-type, x-reflo-csrf, x-reflo-demo-source-approval",
           "access-control-allow-methods": "GET, POST, OPTIONS",
         });
         response.end();
@@ -294,6 +325,58 @@ export function createApiServer(
             sendJson(response, 200, {
               courses: await accounts.listLibrary(account),
             });
+            return;
+          }
+          if (
+            request.method === "GET" &&
+            url.pathname === "/v1/demo/uploads/approvals"
+          ) {
+            const demoUploads = dependencies.demoUploads;
+            if (demoUploads === undefined) {
+              sendJson(response, 503, { error: "demo_upload_unavailable" });
+              return;
+            }
+            sendJson(response, 200, {
+              approvals: await demoUploads.listApprovals(
+                deliveryAuthorization(account),
+              ),
+            });
+            return;
+          }
+          const uploadStatusId = demoUploadRoute(url.pathname);
+          if (request.method === "GET" && uploadStatusId !== null) {
+            const demoUploads = dependencies.demoUploads;
+            if (demoUploads === undefined) {
+              sendJson(response, 503, { error: "demo_upload_unavailable" });
+              return;
+            }
+            const upload = await demoUploads.get(
+              deliveryAuthorization(account),
+              uploadStatusId,
+            );
+            if (upload === null) {
+              sendJson(response, 404, { error: "demo_upload_not_found" });
+              return;
+            }
+            sendJson(response, 200, { upload });
+            return;
+          }
+          const uploadOutlineId = demoUploadOutlineRoute(url.pathname);
+          if (request.method === "GET" && uploadOutlineId !== null) {
+            const demoUploads = dependencies.demoUploads;
+            if (demoUploads === undefined) {
+              sendJson(response, 503, { error: "demo_upload_unavailable" });
+              return;
+            }
+            const outline = await demoUploads.loadOutline(
+              deliveryAuthorization(account),
+              uploadOutlineId,
+            );
+            if (outline === null) {
+              sendJson(response, 404, { error: "demo_outline_not_found" });
+              return;
+            }
+            sendJson(response, 200, { outline });
             return;
           }
           if (
@@ -449,6 +532,36 @@ export function createApiServer(
               const result = await seed.reset(deliveryAuthorization(account));
               writeCors(response, origin!);
               sendJson(response, 200, { seed: result });
+              return;
+            }
+            if (url.pathname === "/v1/demo/uploads") {
+              const demoUploads = dependencies.demoUploads;
+              if (demoUploads === undefined) {
+                sendJson(response, 503, { error: "demo_upload_unavailable" });
+                return;
+              }
+              const mediaType = demoUploadMediaType(
+                singleHeader(request.headers["content-type"]),
+              );
+              const approvalId = demoSourceApproval(
+                singleHeader(request.headers["x-reflo-demo-source-approval"]),
+              );
+              if (
+                request.headers["content-encoding"] !== undefined &&
+                request.headers["content-encoding"] !== "identity"
+              ) {
+                throw new JsonBodyError();
+              }
+              const bytes = await readBinaryBody(
+                request,
+                MAX_DEMO_UPLOAD_BYTES,
+              );
+              const upload = await demoUploads.create(
+                deliveryAuthorization(account),
+                { approvalId, bytes, mediaType },
+              );
+              writeCors(response, origin!);
+              sendJson(response, 202, { upload });
               return;
             }
             if (url.pathname === "/v1/demo/email-quiz/submit") {
@@ -616,6 +729,14 @@ export function createApiServer(
           sendJson(response, 403, { error: error.message });
           return;
         }
+        if (error instanceof DemoUploadAccessError) {
+          sendJson(response, 404, { error: "demo_upload_not_found" });
+          return;
+        }
+        if (error instanceof RequestBodyTooLargeError) {
+          sendJson(response, 413, { error: "upload_too_large" });
+          return;
+        }
         if (
           error instanceof AccountInputError ||
           error instanceof JsonBodyError
@@ -675,17 +796,34 @@ async function readJsonBody(
 }
 
 async function readRawBody(request: IncomingMessage): Promise<string> {
+  return Buffer.from(await readBinaryBody(request, 16_384)).toString("utf8");
+}
+
+async function readBinaryBody(
+  request: IncomingMessage,
+  maximumBytes: number,
+): Promise<Uint8Array> {
+  const declaredLength = singleHeader(request.headers["content-length"]);
+  if (
+    declaredLength !== undefined &&
+    (!/^\d+$/.test(declaredLength) || Number(declaredLength) > maximumBytes)
+  ) {
+    throw new RequestBodyTooLargeError();
+  }
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     length += buffer.length;
-    if (length > 16_384) {
-      throw new JsonBodyError();
+    if (length > maximumBytes) {
+      throw new RequestBodyTooLargeError();
     }
     chunks.push(buffer);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  if (length < 1) {
+    throw new JsonBodyError();
+  }
+  return Buffer.concat(chunks);
 }
 
 function stringField(body: Record<string, unknown>, name: string): string {
@@ -790,6 +928,41 @@ function courseProgressRoute(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
+function demoUploadRoute(pathname: string): string | null {
+  const match =
+    /^\/v1\/demo\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(
+      pathname,
+    );
+  return match?.[1] ?? null;
+}
+
+function demoUploadOutlineRoute(pathname: string): string | null {
+  const match =
+    /^\/v1\/demo\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/outline$/i.exec(
+      pathname,
+    );
+  return match?.[1] ?? null;
+}
+
+function demoUploadMediaType(value: string | undefined): DemoUploadMediaType {
+  if (
+    value !== "application/pdf" &&
+    value !== "application/epub+zip" &&
+    value !==
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    throw new JsonBodyError();
+  }
+  return value;
+}
+
+function demoSourceApproval(value: string | undefined): string {
+  if (value === undefined || !/^[a-z0-9][a-z0-9._-]{2,127}$/.test(value)) {
+    throw new JsonBodyError();
+  }
+  return value;
+}
+
 function parseCookies(header: string | undefined): Map<string, string> {
   const cookies = new Map<string, string>();
   for (const pair of header?.split(";") ?? []) {
@@ -829,3 +1002,4 @@ function singleHeader(
 }
 
 class JsonBodyError extends Error {}
+class RequestBodyTooLargeError extends Error {}

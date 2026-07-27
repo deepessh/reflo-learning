@@ -18,6 +18,7 @@ export interface PromptDefinition {
   >;
   readonly generationParametersVersion: string;
   readonly id: string;
+  readonly outputContract: string;
   readonly outputSchemaId: string;
   readonly tools: readonly PromptToolDeclaration[];
   readonly version: string;
@@ -49,6 +50,36 @@ const COMMON_GROUNDING_INSTRUCTIONS = [
   "Return only the declared output schema and never invent citation labels or URLs.",
 ] as const;
 
+const OUTPUT_CONTRACTS = Object.freeze({
+  "assessment.grade-short-answer.v1": exactOutputContract(
+    '{"judgments":[{"conceptId":string,"judgmentKind":"scored","confidence":number,"rubricBand":"incorrect"|"partially_correct"|"correct","score":0|0.5|1}|{"conceptId":string,"judgmentKind":"unanswerable","reason":"source_insufficient"|"source_conflict"|"rubric_insufficient"|"rubric_conflict"}]}',
+  ),
+  "assessment.quiz.v1": exactOutputContract(
+    '{"items":[{"conceptIds":authorized-concept-id[],"difficulty":1|2|3|4|5,"itemType":"multiple_choice"|"concept_linking","keyedAnswer":string,"prompt":string,"sourceSpanIds":authorized-source-span-id[],"responseOptions":string[]}|{"conceptIds":authorized-concept-id[],"difficulty":1|2|3|4|5,"itemType":"short_answer","keyedAnswer":string,"prompt":string,"sourceSpanIds":authorized-source-span-id[],"rubric":string}]}',
+    "The items array length must equal typedInput.count and include every typedInput.requiredItemTypes value. For multiple_choice and concept_linking, responseOptions must contain at least two unique strings including keyedAnswer and rubric must be absent. For short_answer, rubric is required and responseOptions must be absent.",
+  ),
+  "curriculum.structure.v1": exactOutputContract(
+    '{"chapters":[{"concepts":[{"key":unique-lowercase-key,"name":string,"prerequisiteKeys":earlier-concept-key[],"sourceSpanIds":authorized-source-span-id[]}],"sourceSpanIds":authorized-source-span-id[],"title":string}]}',
+    "Return at least one chapter with at least one concept. Concept keys must be unique across the document; every prerequisite key must reference a concept emitted earlier in the response.",
+  ),
+  "lesson.audio-script.v1": exactOutputContract(
+    '{"script":string,"sourceSpanIds":authorized-source-span-id[]}',
+  ),
+  "lesson.reteach.v1": exactOutputContract(
+    '{"content":string,"sourceSpanIds":authorized-source-span-id[],"strategyTag":string}',
+  ),
+  "lesson.text.v1": exactOutputContract(
+    '{"content":string,"sourceSpanIds":authorized-source-span-id[],"strategyTag":string}',
+    "The content string must contain 400 to 600 words; fewer than 400 or more than 600 words is invalid.",
+  ),
+  "media.video.v1": exactOutputContract(
+    '{"durationSeconds":number,"mimeType":string,"sourceSpanIds":authorized-source-span-id[],"uri":string}',
+  ),
+  "tutor.answer.v1": exactOutputContract(
+    '{"kind":"answer","content":string,"sourceSpanIds":authorized-source-span-id[]} | {"kind":"not_found"}',
+  ),
+} as const satisfies Record<PromptedTaskId, string>);
+
 const definitions = {
   "assessment.grade-short-answer.v1": definePrompt({
     fixedInstructions: [
@@ -59,23 +90,26 @@ const definitions = {
     generationParameters: { temperature: 0 },
     generationParametersVersion: "grading-generation-parameters-v2",
     id: "assessment-grade-short-answer",
+    outputContract: OUTPUT_CONTRACTS["assessment.grade-short-answer.v1"],
     outputSchemaId: "short-answer-judgment-result-v2",
     tools: [],
-    version: "2",
+    version: "3",
   }),
   "assessment.quiz.v1": definePrompt({
     fixedInstructions: [
       ...COMMON_GROUNDING_INSTRUCTIONS,
       "Generate answerable quiz items with type, difficulty, keyed answers, and source provenance.",
-      "Multiple-choice and concept-linking items require unique response options containing the keyed answer; short-answer items require a grading rubric.",
+      "For every multiple-choice or concept-linking item, emit responseOptions with at least two unique choices containing keyedAnswer, and do not emit rubric.",
+      "For every short-answer item, emit rubric and do not emit responseOptions.",
       "Cover every required item type supplied in the typed input.",
     ],
     generationParameters: { temperature: 0.2 },
     generationParametersVersion: "quiz-generation-parameters-v1",
     id: "assessment-quiz",
+    outputContract: OUTPUT_CONTRACTS["assessment.quiz.v1"],
     outputSchemaId: "quiz-generation-result-v2",
     tools: [],
-    version: "2",
+    version: "3",
   }),
   "curriculum.structure.v1": definePrompt({
     fixedInstructions: [
@@ -86,9 +120,10 @@ const definitions = {
     generationParameters: { temperature: 0.1 },
     generationParametersVersion: "curriculum-generation-parameters-v1",
     id: "curriculum-structure",
+    outputContract: OUTPUT_CONTRACTS["curriculum.structure.v1"],
     outputSchemaId: "curriculum-structure-result-v1",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "lesson.audio-script.v1": definePrompt({
     fixedInstructions: [
@@ -98,9 +133,10 @@ const definitions = {
     generationParameters: { temperature: 0.2 },
     generationParametersVersion: "audio-script-generation-parameters-v1",
     id: "lesson-audio-script",
+    outputContract: OUTPUT_CONTRACTS["lesson.audio-script.v1"],
     outputSchemaId: "audio-script-result-v1",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "lesson.reteach.v1": definePrompt({
     fixedInstructions: [
@@ -110,21 +146,23 @@ const definitions = {
     generationParameters: { temperature: 0.3 },
     generationParametersVersion: "lesson-generation-parameters-v1",
     id: "lesson-reteach",
+    outputContract: OUTPUT_CONTRACTS["lesson.reteach.v1"],
     outputSchemaId: "lesson-result-v1",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "lesson.text.v1": definePrompt({
     fixedInstructions: [
       ...COMMON_GROUNDING_INSTRUCTIONS,
-      "Produce a short text micro-lesson with source-span provenance.",
+      "Produce a 450 to 550 word text micro-lesson with source-span provenance; verify the word count before returning.",
     ],
     generationParameters: { temperature: 0.2 },
     generationParametersVersion: "lesson-generation-parameters-v1",
     id: "lesson-text",
+    outputContract: OUTPUT_CONTRACTS["lesson.text.v1"],
     outputSchemaId: "lesson-result-v1",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "media.video.v1": definePrompt({
     fixedInstructions: [
@@ -134,9 +172,10 @@ const definitions = {
     generationParameters: { durationSeconds: 90, resolution: "720p" },
     generationParametersVersion: "video-generation-parameters-v1",
     id: "media-video",
+    outputContract: OUTPUT_CONTRACTS["media.video.v1"],
     outputSchemaId: "video-asset-result-v1",
     tools: [],
-    version: "1",
+    version: "2",
   }),
   "tutor.answer.v1": definePrompt({
     fixedInstructions: [
@@ -146,6 +185,7 @@ const definitions = {
     generationParameters: { temperature: 0.1 },
     generationParametersVersion: "tutor-generation-parameters-v1",
     id: "tutor-answer",
+    outputContract: OUTPUT_CONTRACTS["tutor.answer.v1"],
     outputSchemaId: "tutor-answer-result-v1",
     tools: [
       {
@@ -153,7 +193,7 @@ const definitions = {
         name: "resolve_authorized_source_span",
       },
     ],
-    version: "1",
+    version: "2",
   }),
 } as const satisfies Record<PromptedTaskId, PromptDefinition>;
 
@@ -190,6 +230,12 @@ export function isPromptedTask(task: ModelTaskId): task is PromptedTaskId {
 
 function definePrompt(definition: PromptDefinition): PromptDefinition {
   return deepFreeze(definition);
+}
+
+function exactOutputContract(shape: string, requirements = ""): string {
+  return `Return exactly this JSON shape with no additional keys: ${shape}.${
+    requirements === "" ? "" : ` ${requirements}`
+  }`;
 }
 
 function getSourceMaterial(input: object): readonly AuthorizedSourceSpan[] {

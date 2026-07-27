@@ -10,6 +10,7 @@ import {
   SequentialAccountIdGenerator,
 } from "@reflo/accounts/testing";
 
+import { DemoUploadAccessError } from "./demo-upload";
 import { createApiServer } from "./server";
 
 const servers: ReturnType<typeof createApiServer>[] = [];
@@ -236,6 +237,203 @@ describe("auth, library, and session-history API", () => {
         )
       ).status,
     ).toBe(404);
+  });
+
+  it("admits only authenticated CSRF-protected operator uploads through the injected owner-scoped service", async () => {
+    const fixture = createAccountFixture();
+    const uploadId = "55000000-0000-4000-8000-000000000001";
+    const courseId = "55000000-0000-4000-8000-000000000002";
+    const approval = {
+      approvalId: "hf-agents-course-core-v1",
+      attribution: "Hugging Face Agents Course contributors",
+      contractVersion: "demo-upload-v1" as const,
+      extension: "pdf" as const,
+      licenseLabel: "Apache-2.0",
+      mediaType: "application/pdf" as const,
+      sourceRevision: "8c0832eae634ebb34541c65265caa6da4c5d2c57",
+      title: "Agents Course core Units 1–4",
+    };
+    const upload = {
+      approvalId: approval.approvalId,
+      contractVersion: "demo-upload-v1" as const,
+      courseId,
+      failure: null,
+      processingLane: "standard" as const,
+      state: "queued" as const,
+      statusUpdatedAt: "2026-07-25T20:00:00.000Z",
+      uploadId,
+    };
+    const outline = {
+      chapters: [
+        {
+          chapterId: "55000000-0000-4000-8000-000000000003",
+          concepts: [
+            {
+              conceptId: "55000000-0000-4000-8000-000000000004",
+              name: "Agent planning",
+              sourceSpanCount: 2,
+            },
+          ],
+          order: 1,
+          title: "Agent foundations",
+        },
+      ],
+      contractVersion: "demo-upload-v1" as const,
+      courseId,
+      generatedAt: "2026-07-25T20:01:00.000Z",
+      title: approval.title,
+      uploadId,
+    };
+    const demoUploads = {
+      create: vi.fn().mockResolvedValue(upload),
+      get: vi.fn().mockResolvedValue(upload),
+      listApprovals: vi.fn().mockResolvedValue([approval]),
+      loadOutline: vi.fn().mockResolvedValue(outline),
+    };
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      { demoUploads },
+    );
+    const payload = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+
+    expect(
+      (
+        await fetch(`${baseUrl}/v1/demo/uploads`, {
+          body: payload,
+          headers: {
+            "content-type": "application/pdf",
+            "x-reflo-demo-source-approval": approval.approvalId,
+          },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(401);
+    expect(demoUploads.create).not.toHaveBeenCalled();
+
+    const cookie = await login(baseUrl, fixture.email);
+    const approvalsResponse = await fetch(
+      `${baseUrl}/v1/demo/uploads/approvals`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(approvalsResponse.status).toBe(200);
+    expect(await approvalsResponse.json()).toEqual({
+      approvals: [approval],
+    });
+
+    expect(
+      (
+        await fetch(`${baseUrl}/v1/demo/uploads`, {
+          body: payload,
+          headers: {
+            "content-type": "application/pdf",
+            cookie: cookie.header,
+            origin: "https://app.reflo.example",
+            "x-reflo-demo-source-approval": approval.approvalId,
+          },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
+
+    const createResponse = await fetch(`${baseUrl}/v1/demo/uploads`, {
+      body: payload,
+      headers: {
+        "content-type": "application/pdf",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+        "x-reflo-demo-source-approval": approval.approvalId,
+      },
+      method: "POST",
+    });
+    expect(createResponse.status).toBe(202);
+    expect(await createResponse.json()).toEqual({ upload });
+    expect(demoUploads.create).toHaveBeenCalledOnce();
+    const [authorization, createInput] = demoUploads.create.mock.calls[0]!;
+    expect(authorization).toEqual(
+      expect.objectContaining({
+        actorId: expect.any(String),
+        ownerScopeId: expect.any(String),
+      }),
+    );
+    expect(createInput).toMatchObject({
+      approvalId: approval.approvalId,
+      mediaType: "application/pdf",
+    });
+    expect([...createInput.bytes]).toEqual([...payload]);
+
+    const statusResponse = await fetch(
+      `${baseUrl}/v1/demo/uploads/${uploadId}`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(statusResponse.status).toBe(200);
+    expect(await statusResponse.json()).toEqual({ upload });
+
+    const outlineResponse = await fetch(
+      `${baseUrl}/v1/demo/uploads/${uploadId}/outline`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(outlineResponse.status).toBe(200);
+    expect(await outlineResponse.json()).toEqual({ outline });
+  });
+
+  it("fails closed for unapproved upload media and hidden operator authorization", async () => {
+    const fixture = createAccountFixture();
+    const demoUploads = {
+      create: vi.fn(),
+      get: vi.fn(),
+      listApprovals: vi
+        .fn()
+        .mockRejectedValue(new DemoUploadAccessError("authorization_denied")),
+      loadOutline: vi.fn(),
+    };
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      { demoUploads },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+
+    const denied = await fetch(`${baseUrl}/v1/demo/uploads/approvals`, {
+      headers: {
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+      },
+    });
+    expect(denied.status).toBe(404);
+    expect(await denied.json()).toEqual({ error: "demo_upload_not_found" });
+
+    const invalidMedia = await fetch(`${baseUrl}/v1/demo/uploads`, {
+      body: new Uint8Array([1]),
+      headers: {
+        "content-type": "text/plain",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+        "x-reflo-demo-source-approval": "approved-source-v1",
+      },
+      method: "POST",
+    });
+    expect(invalidMedia.status).toBe(400);
+    expect(demoUploads.create).not.toHaveBeenCalled();
   });
 
   it("serves authenticated demo delivery paths and ignores email replies", async () => {
@@ -535,7 +733,7 @@ describe("auth, library, and session-history API", () => {
           },
           {
             code: "available",
-            contractVersion: "route-policy-v3/test-adapter-v1",
+            contractVersion: "route-policy-v4/test-adapter-v1",
             name: "model",
           },
           {

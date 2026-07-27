@@ -45,6 +45,8 @@ const audioWorkerPath = path.join(
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const maximumCommandOutputBytes = 1024 * 1024;
+const clamavAdmissionProfile = "upstream-clamav-cloud-demo-v1";
+const clamavManifestContract = "upstream-clamav-snapshot-manifest-v1";
 
 export class LocalWorkerError extends Error {
   constructor(state, component, action) {
@@ -136,7 +138,12 @@ export function piperStatePathsMatch(state, piperDirectory, voiceContract) {
 export function renderProfileEnvironment(state) {
   const entries = {
     REFLO_ENV: "dev",
+    REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE: clamavAdmissionProfile,
+    REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR: state.clamavAdmission.directory,
     REFLO_LOCAL_CLAMAV_DATABASE_DIR: state.clamav.directory,
+    REFLO_LOCAL_CLAMAV_MANIFEST_PATH: state.clamavAdmission.manifestPath,
+    REFLO_LOCAL_CLAMAV_SCANNER_IMAGE: state.clamavAdmission.scannerImage,
+    REFLO_LOCAL_CLAMAV_SNAPSHOT_ID: state.clamavAdmission.snapshotId,
     REFLO_LOCAL_INGESTION_IMAGE: state.ingestion.imageReference,
     REFLO_LOCAL_INGESTION_IMAGE_DIGEST: state.ingestion.imageDigest,
     REFLO_LOCAL_PIPER_ARTIFACT_REVISION: state.piper.artifactRevision,
@@ -166,8 +173,8 @@ export function validateLocalWorkersContract(
 ) {
   const errors = [];
   if (
-    contract.contractVersion !== "reflo-local-workers-v1" ||
-    contract.stateVersion !== "reflo-local-workers-state-v1" ||
+    contract.contractVersion !== "reflo-local-workers-v2" ||
+    contract.stateVersion !== "reflo-local-workers-state-v2" ||
     contract.profile !== "development-only"
   ) {
     errors.push("invalid local-worker contract identity");
@@ -299,6 +306,11 @@ async function prepare() {
     "failed to refresh and verify the ClamAV development snapshot",
     () => prepareClamav(contract),
   );
+  const clamavAdmission = await runPreparationStep(
+    "clamav-admission",
+    "publish and verify the upstream-signed ClamAV admission snapshot",
+    () => prepareClamavAdmission(contract, clamav),
+  );
   const state = {
     contractVersion: contract.stateVersion,
     preparedAt: new Date().toISOString(),
@@ -308,6 +320,7 @@ async function prepare() {
     podmanServerVersion: podman.serverVersion,
     ingestion,
     clamav,
+    clamavAdmission,
     tessdata,
     piper,
   };
@@ -505,6 +518,7 @@ async function collectReadiness(contract, ingestionManifest) {
       () => verifyPreparedIngestion(contract, ingestionManifest, state),
     ],
     ["clamav", () => verifyPreparedClamav(contract, state)],
+    ["clamav-admission", () => verifyPreparedClamavAdmission(contract, state)],
     ["tessdata", () => verifyPreparedTessdata(contract, state)],
     ["piper", () => verifyPreparedPiper(contract, state)],
     ["local-workers", () => verifyPreparedProfile(state)],
@@ -1085,7 +1099,36 @@ async function verifyUpdaterImage(contract) {
   }
 }
 
-async function inspectClamavDirectory(contract, directory) {
+async function inspectClamavDirectory(
+  contract,
+  directory,
+  allowedMetadataFiles = contract.clamav.allowedMetadataFiles,
+) {
+  const sigtoolVersion = (
+    await runCommand(
+      "podman",
+      [
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--read-only",
+        "--entrypoint=/usr/bin/sigtool",
+        contract.clamav.updaterImage,
+        "--version",
+      ],
+      { timeout: 30_000 },
+    )
+  ).stdout.trim();
+  if (!sigtoolVersion.startsWith(`ClamAV ${contract.clamav.version}`)) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "clamav",
+      `sigtool reported ${sigtoolVersion || "an unknown version"}`,
+    );
+  }
   const selected = [];
   for (const candidates of contract.clamav.databases) {
     const present = [];
@@ -1107,7 +1150,7 @@ async function inspectClamavDirectory(contract, directory) {
   const unexpectedEntries = unexpectedClamavDirectoryEntries(
     directoryEntries,
     selected,
-    contract.clamav.allowedMetadataFiles,
+    allowedMetadataFiles,
   );
   if (unexpectedEntries.length > 0) {
     throw new LocalWorkerError(
@@ -1151,11 +1194,19 @@ async function inspectClamavDirectory(contract, directory) {
     }
     const buildTimeText = output.match(/^Build time: (.+)$/m)?.[1]?.trim();
     const buildTime = new Date(buildTimeText ?? "");
+    const databaseVersion = Number(output.match(/^Version: ([0-9]+)$/m)?.[1]);
     if (!Number.isFinite(buildTime.getTime())) {
       throw new LocalWorkerError(
         "INVALID",
         "clamav",
         `${filename} has no valid signed build time`,
+      );
+    }
+    if (!Number.isSafeInteger(databaseVersion) || databaseVersion < 1) {
+      throw new LocalWorkerError(
+        "INVALID",
+        "clamav",
+        `${filename} has no valid database version`,
       );
     }
     if (filename.startsWith("daily.")) {
@@ -1165,6 +1216,7 @@ async function inspectClamavDirectory(contract, directory) {
     files.push({
       byteLength: fileStat.size,
       buildTime: buildTime.toISOString(),
+      databaseVersion,
       filename,
       sha256: await sha256File(filePath),
     });
@@ -1187,7 +1239,15 @@ async function inspectClamavDirectory(contract, directory) {
       `daily signatures were built at ${dailyBuiltAt}; run local-workers:prepare`,
     );
   }
-  return { dailyBuiltAt, files };
+  files.sort((left, right) => left.filename.localeCompare(right.filename));
+  return {
+    dailyBuiltAt,
+    files,
+    toolchain: {
+      freshClamImageDigest: contract.clamav.updaterImageDigest,
+      sigtoolVersion,
+    },
+  };
 }
 
 async function verifyPreparedClamav(contract, state) {
@@ -1231,6 +1291,274 @@ async function verifyPreparedClamav(contract, state) {
     component: "clamav",
     message: `ClamAV ${contract.clamav.version} verified snapshot built ${inspected.dailyBuiltAt}`,
   };
+}
+
+async function prepareClamavAdmission(contract, clamav) {
+  const identity = {
+    clamAvVersion: contract.clamav.version,
+    contractVersion: clamavManifestContract,
+    files: clamav.files.map((file) => ({
+      buildTime: file.buildTime,
+      byteLength: file.byteLength,
+      databaseVersion: file.databaseVersion,
+      name: file.filename,
+      sha256: file.sha256,
+    })),
+    profile: clamavAdmissionProfile,
+    publishedAt: new Date().toISOString(),
+    toolchain: clamav.toolchain,
+  };
+  const snapshotId = clamavSnapshotId(identity);
+  const admissionRoot = path.join(generatedRoot, "clamav-admission");
+  const directory = path.join(admissionRoot, snapshotId);
+  const manifestPath = path.join(directory, "snapshot.json");
+  const manifestBytes = Buffer.from(
+    JSON.stringify({ ...identity, snapshotId }),
+    "utf8",
+  );
+  const admission = {
+    directory,
+    manifestPath,
+    manifestSha256: sha256Bytes(manifestBytes),
+    profile: clamavAdmissionProfile,
+    scannerImage: contract.clamav.updaterImage,
+    snapshotId,
+  };
+  if (await pathExists(directory)) {
+    await validateClamavAdmission(contract, clamav, admission);
+    return admission;
+  }
+  await ensureDirectory(admissionRoot);
+  const nextDirectory = path.join(admissionRoot, `.${snapshotId}.next`);
+  await rm(nextDirectory, { force: true, recursive: true });
+  await mkdir(nextDirectory, { mode: 0o700 });
+  try {
+    for (const file of clamav.files) {
+      const source = path.join(clamav.directory, file.filename);
+      const destination = path.join(nextDirectory, file.filename);
+      await verifyRegularFile(source, "clamav-admission");
+      await copyFile(source, destination, fsConstants.COPYFILE_EXCL);
+      await chmod(destination, 0o444);
+    }
+    await writeFile(path.join(nextDirectory, "snapshot.json"), manifestBytes, {
+      flag: "wx",
+      mode: 0o444,
+    });
+    await chmod(nextDirectory, 0o555);
+    await rename(nextDirectory, directory);
+  } catch (error) {
+    await chmod(nextDirectory, 0o700).catch(() => undefined);
+    await rm(nextDirectory, { force: true, recursive: true });
+    throw error;
+  }
+  await validateClamavAdmission(contract, clamav, admission);
+  return admission;
+}
+
+async function verifyPreparedClamavAdmission(contract, state) {
+  const admission = state.clamavAdmission;
+  if (
+    admission?.scannerImage !== contract.clamav.updaterImage ||
+    admission?.directory === state.clamav.directory ||
+    admission?.profile !== clamavAdmissionProfile ||
+    path.dirname(admission.directory) !==
+      path.join(generatedRoot, "clamav-admission")
+  ) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "clamav-admission",
+      "recorded upstream snapshot identity is invalid",
+    );
+  }
+  await validateClamavAdmission(contract, state.clamav, admission);
+  const inspected = await inspectClamavDirectory(
+    contract,
+    admission.directory,
+    ["snapshot.json"],
+  );
+  const manifest = await readJson(admission.manifestPath);
+  if (
+    JSON.stringify(inspected.files) !==
+      JSON.stringify(
+        manifest.files.map((file) => ({
+          byteLength: file.byteLength,
+          buildTime: file.buildTime,
+          databaseVersion: file.databaseVersion,
+          filename: file.name,
+          sha256: file.sha256,
+        })),
+      ) ||
+    JSON.stringify(inspected.toolchain) !== JSON.stringify(manifest.toolchain)
+  ) {
+    throw invalidClamavAdmission();
+  }
+  return {
+    state: "AVAILABLE",
+    component: "clamav-admission",
+    message: `Upstream-signed immutable snapshot ${admission.snapshotId}`,
+  };
+}
+
+export async function validateClamavAdmission(
+  contract,
+  clamav,
+  admission,
+  now = new Date(),
+) {
+  if (
+    admission.profile !== clamavAdmissionProfile ||
+    !/^cvd-[a-f0-9]{32}$/.test(admission.snapshotId ?? "") ||
+    !sha256Pattern.test(admission.manifestSha256 ?? "") ||
+    path.dirname(admission.manifestPath) !== admission.directory ||
+    path.basename(admission.directory) !== admission.snapshotId
+  ) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "clamav-admission",
+      "content-addressed snapshot paths or identity are invalid",
+    );
+  }
+  await verifyRegularFile(admission.manifestPath, "clamav-admission");
+  const manifestBytes = await readFile(admission.manifestPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    throw invalidClamavAdmission();
+  }
+  if (
+    !isRecord(manifest) ||
+    JSON.stringify(Object.keys(manifest).sort()) !==
+      JSON.stringify([
+        "clamAvVersion",
+        "contractVersion",
+        "files",
+        "profile",
+        "publishedAt",
+        "snapshotId",
+        "toolchain",
+      ]) ||
+    manifest.clamAvVersion !== contract.clamav.version ||
+    manifest.contractVersion !== clamavManifestContract ||
+    manifest.profile !== clamavAdmissionProfile ||
+    manifest.snapshotId !== admission.snapshotId ||
+    !isRecord(manifest.toolchain) ||
+    JSON.stringify(Object.keys(manifest.toolchain).sort()) !==
+      JSON.stringify(["freshClamImageDigest", "sigtoolVersion"]) ||
+    manifest.toolchain.freshClamImageDigest !==
+      contract.clamav.updaterImageDigest ||
+    manifest.toolchain.sigtoolVersion !== clamav.toolchain?.sigtoolVersion ||
+    !Array.isArray(manifest.files)
+  ) {
+    throw invalidClamavAdmission();
+  }
+  const publishedAt = new Date(manifest.publishedAt);
+  const daily = manifest.files.find(
+    (file) => isRecord(file) && /^daily\.(?:cld|cvd)$/.test(file.name),
+  );
+  const dailyBuildTime = new Date(
+    isRecord(daily) ? daily.buildTime : "",
+  ).getTime();
+  const publishedAgeMs = now.getTime() - publishedAt.getTime();
+  const dailyAgeMs = now.getTime() - dailyBuildTime;
+  if (
+    !Number.isFinite(now.getTime()) ||
+    !Number.isFinite(publishedAt.getTime()) ||
+    !Number.isFinite(dailyBuildTime) ||
+    publishedAgeMs < -5 * 60_000 ||
+    dailyAgeMs < -5 * 60_000 ||
+    publishedAgeMs > contract.clamav.maxAgeHours * 60 * 60_000 ||
+    dailyAgeMs > contract.clamav.maxAgeHours * 60 * 60_000
+  ) {
+    throw new LocalWorkerError(
+      "STALE",
+      "clamav-admission",
+      "upstream snapshot is absent or outside the 24-hour admission window",
+    );
+  }
+  const expectedFiles = new Map(
+    clamav.files.map((file) => [
+      file.filename,
+      {
+        buildTime: file.buildTime,
+        byteLength: file.byteLength,
+        databaseVersion: file.databaseVersion,
+        sha256: file.sha256,
+      },
+    ]),
+  );
+  if (
+    manifest.files.length !== expectedFiles.size ||
+    manifest.files.some(
+      (file) =>
+        !isRecord(file) ||
+        Object.keys(file).sort().join(",") !==
+          "buildTime,byteLength,databaseVersion,name,sha256" ||
+        !expectedFiles.has(file.name) ||
+        expectedFiles.get(file.name).buildTime !== file.buildTime ||
+        expectedFiles.get(file.name).byteLength !== file.byteLength ||
+        expectedFiles.get(file.name).databaseVersion !== file.databaseVersion ||
+        expectedFiles.get(file.name).sha256 !== file.sha256,
+    )
+  ) {
+    throw invalidClamavAdmission();
+  }
+  const directoryNames = (await readdir(admission.directory)).sort();
+  const allowedNames = [
+    ...manifest.files.map((file) => file.name),
+    path.basename(admission.manifestPath),
+  ].sort();
+  if (JSON.stringify(directoryNames) !== JSON.stringify(allowedNames)) {
+    throw invalidClamavAdmission();
+  }
+  for (const file of manifest.files) {
+    const filePath = path.join(admission.directory, file.name);
+    await verifyRegularFile(filePath, "clamav-admission");
+    const fileStat = await stat(filePath);
+    if (
+      fileStat.size !== file.byteLength ||
+      (await sha256File(filePath)) !== file.sha256
+    ) {
+      throw invalidClamavAdmission();
+    }
+  }
+  if (
+    sha256Bytes(manifestBytes) !== admission.manifestSha256 ||
+    clamavSnapshotId({
+      clamAvVersion: manifest.clamAvVersion,
+      contractVersion: manifest.contractVersion,
+      files: manifest.files,
+      profile: manifest.profile,
+      publishedAt: manifest.publishedAt,
+      toolchain: manifest.toolchain,
+    }) !== admission.snapshotId
+  ) {
+    throw invalidClamavAdmission();
+  }
+}
+
+function invalidClamavAdmission() {
+  return new LocalWorkerError(
+    "INVALID",
+    "clamav-admission",
+    "upstream signature, manifest, or database identity is invalid",
+  );
+}
+
+export function clamavSnapshotId(identity) {
+  return `cvd-${sha256Bytes(
+    Buffer.from(
+      JSON.stringify({
+        clamAvVersion: identity.clamAvVersion,
+        contractVersion: identity.contractVersion,
+        files: identity.files,
+        profile: identity.profile,
+        publishedAt: identity.publishedAt,
+        toolchain: identity.toolchain,
+      }),
+      "utf8",
+    ),
+  ).slice(0, 32)}`;
 }
 
 async function prepareTessdata(contract) {
@@ -1810,6 +2138,7 @@ async function readState(contract) {
     typeof state.preparedAt !== "string" ||
     typeof state.ingestion !== "object" ||
     typeof state.clamav !== "object" ||
+    typeof state.clamavAdmission !== "object" ||
     typeof state.tessdata !== "object" ||
     typeof state.piper !== "object"
   ) {
@@ -1989,6 +2318,22 @@ function safeAbsoluteInput(value, name) {
     );
   }
   return path.resolve(value);
+}
+
+function requiredEnvironment(name) {
+  const value = process.env[name]?.trim();
+  if (value === undefined || value === "") {
+    throw new LocalWorkerError(
+      "INVALID",
+      "configuration",
+      `${name} is required`,
+    );
+  }
+  return value;
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertGeneratedRoot() {

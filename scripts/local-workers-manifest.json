@@ -1,6 +1,6 @@
 {
-  "contractVersion": "reflo-local-workers-v1",
-  "stateVersion": "reflo-local-workers-state-v1",
+  "contractVersion": "reflo-local-workers-v2",
+  "stateVersion": "reflo-local-workers-state-v2",
   "profile": "development-only",
   "supportedPodmanVersions": ["5.8.3", "6.0.1"],
   "ingestion": {

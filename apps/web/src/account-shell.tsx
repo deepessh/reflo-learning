@@ -18,6 +18,7 @@ import type {
 } from "@reflo/accounts";
 
 import { courseProgress, sessionDuration } from "./account-view";
+import { DemoUploadPanel } from "./demo-upload-panel";
 import { FlowBStudy } from "./flow-b-study";
 import { KnowledgeMap } from "./knowledge-map";
 
@@ -163,6 +164,10 @@ export function AccountShell({
             setSelectedCourseId(courseId);
             void loadProgress(courseId);
           }}
+          onUploadedCourse={(courseId) => {
+            setSelectedCourseId(courseId);
+            void loadProgress(courseId);
+          }}
           progress={progress}
           progressScreen={progressScreen}
           selectedCourseId={selectedCourseId}
@@ -238,6 +243,7 @@ function Dashboard({
   courses,
   onRetryProgress,
   onSelectCourse,
+  onUploadedCourse,
   progress,
   progressScreen,
   selectedCourseId,
@@ -247,6 +253,7 @@ function Dashboard({
   readonly courses: readonly LibraryCourse[];
   readonly onRetryProgress: () => void;
   readonly onSelectCourse: (courseId: string) => void;
+  readonly onUploadedCourse: (courseId: string) => void;
   readonly progress: CourseProgress | null;
   readonly progressScreen: ProgressScreen;
   readonly selectedCourseId: string | null;
@@ -263,6 +270,10 @@ function Dashboard({
       </div>
 
       <div className="dashboard-grid">
+        <DemoUploadPanel
+          apiOrigin={apiOrigin}
+          onCourseReady={onUploadedCourse}
+        />
         <section className="panel course-panel">
           <div className="panel-heading">
             <h2>Your courses</h2>

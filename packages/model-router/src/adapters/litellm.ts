@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 
-import type { ModelTaskId } from "../contracts.js";
+import type {
+  ModelTaskId,
+  ModelTaskInput,
+  QuizGenerationInput,
+  ShortAnswerGradingInput,
+} from "../contracts.js";
 import {
   ModelAdapterError,
   type AdapterDescriptor,
@@ -16,8 +21,11 @@ import {
 } from "../ports.js";
 import { EMBEDDING_V1_DIMENSIONS } from "../validation.js";
 
-export const LITELLM_DEV_ADAPTER_VERSION =
+export const LITELLM_DEV_TEXT_ADAPTER_VERSION =
+  "litellm-openai-compatible-dev-text-v2" as const;
+export const LITELLM_DEV_EMBEDDING_ADAPTER_VERSION =
   "litellm-openai-compatible-dev-v1" as const;
+export const LITELLM_DEV_ADAPTER_VERSION = LITELLM_DEV_TEXT_ADAPTER_VERSION;
 
 const MAX_BATCH_SIZE = 10;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -36,22 +44,6 @@ const TEXT_TASKS = {
     "curriculum.structure.v1",
   ]),
 } as const;
-
-const TEXT_OUTPUT_CONTRACTS = Object.freeze({
-  "assessment.grade-short-answer.v1":
-    '{"judgments":[{"conceptId":string,"judgmentKind":"scored","confidence":number,"rubricBand":"incorrect"|"partially_correct"|"correct","score":0|0.5|1}|{"conceptId":string,"judgmentKind":"unanswerable","reason":"source_insufficient"|"source_conflict"|"rubric_insufficient"|"rubric_conflict"}]}',
-  "assessment.quiz.v1":
-    '{"items":[{"conceptIds":string[],"difficulty":1|2|3|4|5,"itemType":"multiple_choice"|"short_answer"|"concept_linking","keyedAnswer":string,"prompt":string,"sourceSpanIds":string[],"responseOptions"?:string[],"rubric"?:string}]}',
-  "curriculum.structure.v1":
-    '{"chapters":[{"concepts":[{"key":string,"name":string,"prerequisiteKeys":string[],"sourceSpanIds":string[]}],"sourceSpanIds":string[],"title":string}]}',
-  "lesson.audio-script.v1": '{"script":string,"sourceSpanIds":string[]}',
-  "lesson.reteach.v1":
-    '{"content":string,"sourceSpanIds":string[],"strategyTag":string}',
-  "lesson.text.v1":
-    '{"content":string (400-600 words),"sourceSpanIds":string[],"strategyTag":string}',
-  "tutor.answer.v1":
-    '{"kind":"answer","content":string,"sourceSpanIds":string[]} | {"kind":"not_found","reason":string}',
-} as const satisfies Partial<Record<ModelTaskId, string>>);
 
 export interface LiteLlmDevEnvironment {
   readonly REFLO_ENV?: string;
@@ -101,7 +93,7 @@ export function createLiteLlmDevAdapters(
     configuration.textModel,
   );
   const embedding: AdapterDescriptor = Object.freeze({
-    adapterVersion: LITELLM_DEV_ADAPTER_VERSION,
+    adapterVersion: LITELLM_DEV_EMBEDDING_ADAPTER_VERSION,
     capability: "embedding",
     developmentOnly: true,
     driftCanaryPassed: false,
@@ -188,8 +180,8 @@ class LiteLlmHttpClient {
             content: JSON.stringify({
               fixedInstructions: prompt.fixedInstructions,
               generationParametersVersion: prompt.generationParametersVersion,
+              outputContract: prompt.outputContract,
               outputSchemaId: prompt.outputSchemaId,
-              outputContract: textOutputContract(invocation.task),
               promptDigest: prompt.digest,
               promptId: prompt.id,
               promptVersion: prompt.version,
@@ -208,7 +200,7 @@ class LiteLlmHttpClient {
           },
         ],
         model: this.configuration.textModel,
-        response_format: { type: "json_object" },
+        response_format: responseFormat(invocation),
         stream: false,
         ...allowedGenerationParameters(prompt.generationParameters),
       },
@@ -322,19 +314,6 @@ class LiteLlmHttpClient {
       payload,
     };
   }
-}
-
-function textOutputContract(task: ModelTaskId): string {
-  const contract =
-    TEXT_OUTPUT_CONTRACTS[task as keyof typeof TEXT_OUTPUT_CONTRACTS];
-  if (contract === undefined) {
-    throw adapterFailure("invalid_request", false);
-  }
-  const requirements =
-    task === "lesson.text.v1"
-      ? " The content string must contain 400 to 600 words; fewer than 400 or more than 600 words is invalid."
-      : "";
-  return `Return exactly this JSON shape with no additional keys: ${contract}.${requirements}`;
 }
 
 interface ParsedHttpResponse {
@@ -544,7 +523,7 @@ function developmentEmbeddingProfile(baseUrl: URL, model: string): string {
         baseUrl: baseUrl.origin,
         dimensions: EMBEDDING_V1_DIMENSIONS,
         model,
-        transport: LITELLM_DEV_ADAPTER_VERSION,
+        transport: LITELLM_DEV_EMBEDDING_ADAPTER_VERSION,
       }),
     )
     .digest("hex")
@@ -558,7 +537,7 @@ function textDescriptor(
   model: string,
 ): AdapterDescriptor {
   return Object.freeze({
-    adapterVersion: LITELLM_DEV_ADAPTER_VERSION,
+    adapterVersion: LITELLM_DEV_TEXT_ADAPTER_VERSION,
     capability,
     developmentOnly: true,
     driftCanaryPassed: false,
@@ -569,6 +548,236 @@ function textDescriptor(
     mutableAlias: true,
     selector,
   });
+}
+
+type JsonSchema = Readonly<Record<string, unknown>>;
+
+function responseFormat(invocation: AdapterInvocation):
+  | { readonly type: "json_object" }
+  | {
+      readonly json_schema: {
+        readonly name: string;
+        readonly schema: JsonSchema;
+        readonly strict: true;
+      };
+      readonly type: "json_schema";
+    } {
+  const schema = outputJsonSchema(invocation);
+  if (schema === undefined) {
+    return { type: "json_object" };
+  }
+  return {
+    json_schema: {
+      name: `reflo_${invocation.task.replaceAll(".", "_").replaceAll("-", "_")}`,
+      schema,
+      strict: true,
+    },
+    type: "json_schema",
+  };
+}
+
+function outputJsonSchema(
+  invocation: AdapterInvocation,
+): JsonSchema | undefined {
+  switch (invocation.task) {
+    case "assessment.grade-short-answer.v1":
+      return gradingJsonSchema(
+        invocation.input as ModelTaskInput<"assessment.grade-short-answer.v1">,
+      );
+    case "assessment.quiz.v1":
+      return quizJsonSchema(
+        invocation.input as ModelTaskInput<"assessment.quiz.v1">,
+      );
+    case "curriculum.structure.v1":
+      return curriculumJsonSchema(
+        invocation.input as ModelTaskInput<"curriculum.structure.v1">,
+      );
+    case "lesson.audio-script.v1":
+      return audioScriptJsonSchema(
+        invocation.input as ModelTaskInput<"lesson.audio-script.v1">,
+      );
+    case "lesson.reteach.v1":
+      return lessonJsonSchema(
+        invocation.input as ModelTaskInput<"lesson.reteach.v1">,
+      );
+    case "lesson.text.v1":
+      return lessonJsonSchema(
+        invocation.input as ModelTaskInput<"lesson.text.v1">,
+        2_400,
+      );
+    case "tutor.answer.v1":
+      // The OpenAI-compatible strict schema dialect rejects a root union. Keep
+      // the dialogue union in JSON mode and enforce it in RESULT_VALIDATORS.
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+function curriculumJsonSchema(
+  input: ModelTaskInput<"curriculum.structure.v1">,
+): JsonSchema {
+  const sourceSpanId = authorizedIdSchema(
+    input.sourceSpans.map((span) => span.id),
+  );
+  return exactObject({
+    chapters: {
+      items: exactObject({
+        concepts: {
+          items: exactObject({
+            key: {
+              pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+              type: "string",
+            },
+            name: nonEmptyStringSchema(),
+            prerequisiteKeys: {
+              items: {
+                pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+                type: "string",
+              },
+              type: "array",
+            },
+            sourceSpanIds: nonEmptyArray(sourceSpanId),
+          }),
+          minItems: 1,
+          type: "array",
+        },
+        sourceSpanIds: nonEmptyArray(sourceSpanId),
+        title: nonEmptyStringSchema(),
+      }),
+      minItems: 1,
+      type: "array",
+    },
+  });
+}
+
+function lessonJsonSchema(
+  input: ModelTaskInput<"lesson.reteach.v1" | "lesson.text.v1">,
+  minimumContentCharacters = 1,
+): JsonSchema {
+  return exactObject({
+    content: { minLength: minimumContentCharacters, type: "string" },
+    sourceSpanIds: nonEmptyArray(
+      authorizedIdSchema(input.sourceSpans.map((span) => span.id)),
+    ),
+    strategyTag: nonEmptyStringSchema(),
+  });
+}
+
+function audioScriptJsonSchema(
+  input: ModelTaskInput<"lesson.audio-script.v1">,
+): JsonSchema {
+  return exactObject({
+    script: nonEmptyStringSchema(),
+    sourceSpanIds: nonEmptyArray(
+      authorizedIdSchema(input.sourceSpans.map((span) => span.id)),
+    ),
+  });
+}
+
+function quizJsonSchema(input: QuizGenerationInput): JsonSchema {
+  const commonProperties = {
+    conceptIds: nonEmptyArray(authorizedIdSchema(input.conceptIds)),
+    difficulty: { enum: [1, 2, 3, 4, 5], type: "integer" },
+    keyedAnswer: nonEmptyStringSchema(),
+    prompt: nonEmptyStringSchema(),
+    sourceSpanIds: nonEmptyArray(
+      authorizedIdSchema(input.sourceSpans.map((span) => span.id)),
+    ),
+  } as const;
+  const closedItem = exactObject({
+    ...commonProperties,
+    itemType: {
+      enum: ["multiple_choice", "concept_linking"],
+      type: "string",
+    },
+    responseOptions: {
+      items: nonEmptyStringSchema(),
+      minItems: 2,
+      type: "array",
+    },
+  });
+  const shortAnswerItem = exactObject({
+    ...commonProperties,
+    itemType: { enum: ["short_answer"], type: "string" },
+    rubric: nonEmptyStringSchema(),
+  });
+  return exactObject({
+    items: {
+      items: { anyOf: [closedItem, shortAnswerItem] },
+      maxItems: input.count,
+      minItems: input.count,
+      type: "array",
+    },
+  });
+}
+
+function gradingJsonSchema(input: ShortAnswerGradingInput): JsonSchema {
+  const conceptId = authorizedIdSchema(
+    input.rubrics.map((rubric) => rubric.conceptId),
+  );
+  const scored = (
+    rubricBand: "correct" | "incorrect" | "partially_correct",
+    score: 0 | 0.5 | 1,
+  ) =>
+    exactObject({
+      conceptId,
+      confidence: { maximum: 1, minimum: 0, type: "number" },
+      judgmentKind: { enum: ["scored"], type: "string" },
+      rubricBand: { enum: [rubricBand], type: "string" },
+      score: { enum: [score], type: "number" },
+    });
+  const unanswerable = exactObject({
+    conceptId,
+    judgmentKind: { enum: ["unanswerable"], type: "string" },
+    reason: {
+      enum: [
+        "source_insufficient",
+        "source_conflict",
+        "rubric_insufficient",
+        "rubric_conflict",
+      ],
+      type: "string",
+    },
+  });
+  return exactObject({
+    judgments: {
+      items: {
+        anyOf: [
+          scored("incorrect", 0),
+          scored("partially_correct", 0.5),
+          scored("correct", 1),
+          unanswerable,
+        ],
+      },
+      maxItems: input.rubrics.length,
+      minItems: input.rubrics.length,
+      type: "array",
+    },
+  });
+}
+
+function exactObject(
+  properties: Readonly<Record<string, JsonSchema>>,
+): JsonSchema {
+  return {
+    additionalProperties: false,
+    properties,
+    required: Object.keys(properties),
+    type: "object",
+  };
+}
+
+function authorizedIdSchema(values: readonly string[]): JsonSchema {
+  return { enum: [...new Set(values)], type: "string" };
+}
+
+function nonEmptyArray(items: JsonSchema): JsonSchema {
+  return { items, minItems: 1, type: "array" };
+}
+
+function nonEmptyStringSchema(): JsonSchema {
+  return { minLength: 1, type: "string" };
 }
 
 function statusFailure(status: number): ModelAdapterError {

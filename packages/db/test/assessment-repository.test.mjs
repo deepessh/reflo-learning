@@ -422,7 +422,7 @@ function policy() {
       promptId: "assessment-grade-short-answer",
       promptVersion: "2",
       resultSchemaVersion: "short-answer-judgment-result-v2",
-      routePolicyVersion: "route-policy-v3",
+      routePolicyVersion: "route-policy-v4",
     },
     gradingPolicyVersion: "grading-policy-v1",
     ratingMappingVersion: "rating-mapping-v1",

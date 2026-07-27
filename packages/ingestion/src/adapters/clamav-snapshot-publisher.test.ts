@@ -1,4 +1,3 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +5,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProcessResult, ProcessRunnerPort } from "../ports.js";
-import type { SnapshotDigestSignerPort } from "./alibaba-kms.js";
 import type { AliOssObjectClient } from "./ali-oss.js";
 import {
   AliOssClamAvSnapshotPublisher,
@@ -22,37 +20,39 @@ afterEach(async () => {
 });
 
 describe("ClamAV snapshot maintenance publication", () => {
-  it("verifies upstream CVDs, signs exact manifest bytes, and records provenance", async () => {
+  it("verifies official databases and records immutable upstream identity", async () => {
     const fixture = await publisherFixture();
     const bundle = await fixture.publisher.createBundle({
       databaseDirectory: fixture.directory,
-      publishedAt: new Date("2026-07-21T18:00:00.000Z"),
+      freshClamImageDigest: `sha256:${"a".repeat(64)}`,
+      publishedAt: new Date("2026-07-26T18:10:00.000Z"),
     });
 
     expect(bundle.snapshotId).toMatch(/^cvd-[a-f0-9]{32}$/);
-    expect(bundle.files).toEqual([
-      expect.objectContaining({ name: "daily.cvd" }),
-      expect.objectContaining({ name: "main.cvd" }),
+    expect(bundle.files.map((file) => file.name)).toEqual([
+      "bytecode.cvd",
+      "daily.cvd",
+      "main.cvd",
     ]);
-    expect(bundle.providerSigning).toEqual({
-      keyId: "kms-key-12345678",
-      keyVersionId: "kms-version-12345678",
-      requestId: "kms-request-12345678",
-    });
     const manifest = JSON.parse(
       Buffer.from(bundle.manifestBytes).toString("utf8"),
     ) as Record<string, unknown>;
     expect(manifest).toMatchObject({
       clamAvVersion: "1.4.5",
-      contractVersion: "snapshot-manifest-v1",
-      kid: "snapshot-key-v1",
-      signatureProfile: "clamav-snapshot-signature-v1",
+      contractVersion: "upstream-clamav-snapshot-manifest-v1",
+      profile: "upstream-clamav-cloud-demo-v1",
       snapshotId: bundle.snapshotId,
+      toolchain: {
+        freshClamImageDigest: `sha256:${"a".repeat(64)}`,
+        sigtoolVersion: "ClamAV 1.4.5",
+      },
     });
+    expect(JSON.stringify(manifest)).not.toMatch(/kms|kid|signatureProfile/i);
     expect(fixture.runner.calls.map((call) => call.args[0])).toEqual([
       "--version",
-      "--verify-cvd",
-      "--verify-cvd",
+      "--info",
+      "--info",
+      "--info",
     ]);
     expect(
       fixture.runner.calls
@@ -61,11 +61,12 @@ describe("ClamAV snapshot maintenance publication", () => {
     ).toBe(true);
   });
 
-  it("publishes the immutable readiness marker only after every bundle object", async () => {
+  it("publishes the immutable readiness marker only after every snapshot object", async () => {
     const fixture = await publisherFixture();
     const bundle = await fixture.publisher.createBundle({
       databaseDirectory: fixture.directory,
-      publishedAt: new Date("2026-07-21T18:00:00.000Z"),
+      freshClamImageDigest: `sha256:${"a".repeat(64)}`,
+      publishedAt: new Date("2026-07-26T18:10:00.000Z"),
     });
     const puts: string[] = [];
     const client = objectClient({
@@ -80,10 +81,10 @@ describe("ClamAV snapshot maintenance publication", () => {
 
     expect(puts.at(-1)).toBe(result.readyObjectKey);
     expect(puts).toEqual([
+      `${result.snapshotPrefix}/bytecode.cvd`,
       `${result.snapshotPrefix}/daily.cvd`,
       `${result.snapshotPrefix}/main.cvd`,
       `${result.snapshotPrefix}/snapshot.json`,
-      `${result.snapshotPrefix}/snapshot.sig`,
       `${result.snapshotPrefix}/ready.json`,
     ]);
   });
@@ -92,7 +93,8 @@ describe("ClamAV snapshot maintenance publication", () => {
     const fixture = await publisherFixture();
     const bundle = await fixture.publisher.createBundle({
       databaseDirectory: fixture.directory,
-      publishedAt: new Date("2026-07-21T18:00:00.000Z"),
+      freshClamImageDigest: `sha256:${"a".repeat(64)}`,
+      publishedAt: new Date("2026-07-26T18:10:00.000Z"),
     });
     const puts: string[] = [];
     const client = objectClient({
@@ -110,41 +112,41 @@ describe("ClamAV snapshot maintenance publication", () => {
     ).rejects.toMatchObject({ code: "infrastructure_unavailable" });
     expect(puts.some((key) => key.endsWith("ready.json"))).toBe(false);
   });
+
+  it("rejects incomplete or stale official database sets", async () => {
+    const fixture = await publisherFixture();
+    await rm(path.join(fixture.directory, "bytecode.cvd"));
+    await expect(
+      fixture.publisher.createBundle({
+        databaseDirectory: fixture.directory,
+        freshClamImageDigest: `sha256:${"a".repeat(64)}`,
+        publishedAt: new Date("2026-07-26T18:10:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "infrastructure_unavailable" });
+
+    const second = await publisherFixture();
+    await expect(
+      second.publisher.createBundle({
+        databaseDirectory: second.directory,
+        freshClamImageDigest: `sha256:${"a".repeat(64)}`,
+        publishedAt: new Date("2026-07-28T18:10:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "infrastructure_unavailable" });
+  });
 });
 
 async function publisherFixture() {
   const directory = await mkdtemp(path.join(tmpdir(), "reflo-cvd-publish-"));
   scratch.push(directory);
-  await writeFile(path.join(directory, "daily.cvd"), "daily database");
-  await writeFile(path.join(directory, "main.cvd"), "main database");
-  const keys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  const spki = keys.publicKey.export({ format: "der", type: "spki" });
-  const signer: SnapshotDigestSignerPort = {
-    async signDigest(input) {
-      expect(input.digest).toEqual(
-        createHash("sha256").update(input.payload).digest(),
-      );
-      return {
-        providerKeyId: "kms-key-12345678",
-        providerKeyVersionId: "kms-version-12345678",
-        providerRequestId: "kms-request-12345678",
-        signature: sign("sha256", input.payload, {
-          dsaEncoding: "der",
-          key: keys.privateKey,
-        }),
-      };
-    },
-  };
+  await Promise.all(
+    ["bytecode.cvd", "daily.cvd", "main.cvd"].map((name) =>
+      writeFile(path.join(directory, name), `${name} database`),
+    ),
+  );
   const runner = new SuccessRunner();
   return {
     directory,
-    publisher: new ClamAvSnapshotMaintenancePublisher(runner, signer, {
-      kid: "snapshot-key-v1",
-      spkiPem: keys.publicKey
-        .export({ format: "pem", type: "spki" })
-        .toString(),
-      spkiSha256: createHash("sha256").update(spki).digest("hex"),
-    }),
+    publisher: new ClamAvSnapshotMaintenancePublisher(runner),
     runner,
   };
 }
@@ -161,7 +163,15 @@ class SuccessRunner implements ProcessRunnerPort {
       exitCode: 0,
       signal: null,
       stderr: "",
-      stdout: args[0] === "--version" ? "ClamAV 1.4.5\n" : "Verification OK\n",
+      stdout:
+        args[0] === "--version"
+          ? "ClamAV 1.4.5\n"
+          : [
+              "Build time: 2026-07-26T18:00:00.000Z",
+              `Version: ${100 + this.calls.length}`,
+              "Verification OK.",
+              "",
+            ].join("\n"),
       timedOut: false,
     };
   }

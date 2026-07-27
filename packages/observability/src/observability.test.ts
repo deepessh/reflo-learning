@@ -35,7 +35,7 @@ const logicalTrace: ModelLogicalCallTrace = {
   promptDigest: "a".repeat(64),
   promptId: "assessment-grade-short-answer",
   promptVersion: "2",
-  routePolicyVersion: "route-policy-v3",
+  routePolicyVersion: "route-policy-v4",
   startedAt: "2026-07-24T20:00:00.000Z",
   task: "assessment.grade-short-answer.v1",
 };

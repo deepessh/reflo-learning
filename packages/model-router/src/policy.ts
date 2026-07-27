@@ -1,7 +1,7 @@
 import type { ModelTaskId } from "./contracts.js";
 import type { ModelCapability } from "./ports.js";
 
-export const ROUTE_POLICY_VERSION = "route-policy-v3" as const;
+export const ROUTE_POLICY_VERSION = "route-policy-v4" as const;
 
 export interface RouteDefinition {
   readonly capability: ModelCapability;
@@ -18,14 +18,14 @@ export interface RouteDefinition {
   readonly textType?: "document" | "query";
 }
 
-export const ROUTE_POLICY_V3 = Object.freeze({
+export const ROUTE_POLICY_V4 = Object.freeze({
   "assessment.grade-short-answer.v1": route({
     capability: "grading",
     fallback: null,
     inputSchemaVersion: "short-answer-grading-input-v2",
     maxImmediateAttempts: 2,
     promptId: "assessment-grade-short-answer",
-    promptVersion: "2",
+    promptVersion: "3",
     requestedSelector: "qwen.grading",
     resultSchemaVersion: "short-answer-judgment-result-v2",
     task: "assessment.grade-short-answer.v1",
@@ -36,7 +36,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     inputSchemaVersion: "quiz-generation-input-v2",
     maxImmediateAttempts: 2,
     promptId: "assessment-quiz",
-    promptVersion: "2",
+    promptVersion: "3",
     requestedSelector: "qwen.structured",
     resultSchemaVersion: "quiz-generation-result-v2",
     task: "assessment.quiz.v1",
@@ -47,7 +47,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     inputSchemaVersion: "curriculum-structure-input-v1",
     maxImmediateAttempts: 2,
     promptId: "curriculum-structure",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "qwen.structured",
     resultSchemaVersion: "curriculum-structure-result-v1",
     task: "curriculum.structure.v1",
@@ -78,7 +78,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     inputSchemaVersion: "lesson-input-v1",
     maxImmediateAttempts: 2,
     promptId: "lesson-audio-script",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "qwen.grounded-generation",
     resultSchemaVersion: "audio-script-result-v1",
     task: "lesson.audio-script.v1",
@@ -89,7 +89,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     inputSchemaVersion: "lesson-input-v1",
     maxImmediateAttempts: 2,
     promptId: "lesson-reteach",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "qwen.grounded-generation",
     resultSchemaVersion: "lesson-result-v1",
     task: "lesson.reteach.v1",
@@ -100,7 +100,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     inputSchemaVersion: "lesson-input-v1",
     maxImmediateAttempts: 2,
     promptId: "lesson-text",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "qwen.grounded-generation",
     resultSchemaVersion: "lesson-result-v1",
     task: "lesson.text.v1",
@@ -123,7 +123,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     maxImmediateAttempts: 2,
     mediaRetryRequiresSubmissionIdempotency: true,
     promptId: "media-video",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "wanx.video",
     resultSchemaVersion: "video-asset-result-v1",
     task: "media.video.v1",
@@ -134,7 +134,7 @@ export const ROUTE_POLICY_V3 = Object.freeze({
     inputSchemaVersion: "tutor-answer-input-v1",
     maxImmediateAttempts: 2,
     promptId: "tutor-answer",
-    promptVersion: "1",
+    promptVersion: "2",
     requestedSelector: "qwen.dialogue",
     resultSchemaVersion: "tutor-answer-result-v1",
     task: "tutor.answer.v1",

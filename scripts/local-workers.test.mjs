@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -7,11 +15,13 @@ import {
   hostPlatformKey,
   ingestionLaunchArguments,
   isSupportedPodmanVersion,
+  clamavSnapshotId,
   parsePodmanVersionReport,
   piperStatePathsMatch,
   podmanVersionReportIsSupported,
   renderProfileEnvironment,
   unexpectedClamavDirectoryEntries,
+  validateClamavAdmission,
   validateLocalWorkersContract,
 } from "./local-workers.mjs";
 
@@ -153,7 +163,14 @@ describe("optional local worker profile", () => {
         "REFLO_LOCAL_PIPER_MODEL_PATH='/tmp/reflo workers/voice.onnx'",
       ),
     );
-    assert.ok(!keys.some((key) => /KEY|PASSWORD|SECRET|TOKEN/.test(key)));
+    assert.ok(
+      environment.includes(
+        "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE='upstream-clamav-cloud-demo-v1'",
+      ),
+    );
+    assert.ok(
+      !keys.some((key) => /PASSWORD|SECRET|TOKEN|PRIVATE_KEY/.test(key)),
+    );
     assert.equal(keys.length, new Set(keys).size);
   });
 
@@ -235,6 +252,72 @@ describe("optional local worker profile", () => {
     );
   });
 
+  it("verifies the exact upstream-signed content-addressed ClamAV bundle", async () => {
+    const fixture = mkdtempSync(path.join(tmpdir(), "reflo-clamav-upstream-"));
+    try {
+      const files = ["bytecode.cvd", "daily.cld", "main.cvd"].map(
+        (filename, index) => {
+          const bytes = Buffer.from(`upstream-clamav-${index}`, "utf8");
+          return {
+            buildTime: "2026-07-26T18:00:00.000Z",
+            byteLength: bytes.byteLength,
+            bytes,
+            databaseVersion: 27_100 + index,
+            name: filename,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+          };
+        },
+      );
+      const identity = {
+        clamAvVersion: "1.4.5",
+        contractVersion: "upstream-clamav-snapshot-manifest-v1",
+        files: files.map(({ bytes: _bytes, ...file }) => file),
+        profile: "upstream-clamav-cloud-demo-v1",
+        publishedAt: "2026-07-26T18:10:00.000Z",
+        toolchain: {
+          freshClamImageDigest: contract.clamav.updaterImageDigest,
+          sigtoolVersion: "ClamAV 1.4.5",
+        },
+      };
+      const snapshotId = clamavSnapshotId(identity);
+      const databaseDirectory = path.join(fixture, snapshotId);
+      mkdirSync(databaseDirectory);
+      for (const file of files) {
+        writeFileSync(path.join(databaseDirectory, file.name), file.bytes);
+      }
+      const manifest = Buffer.from(JSON.stringify({ ...identity, snapshotId }));
+      const manifestPath = path.join(databaseDirectory, "snapshot.json");
+      writeFileSync(manifestPath, manifest);
+
+      await assert.doesNotReject(
+        validateClamavAdmission(
+          contract,
+          {
+            files: files.map(({ bytes: _bytes, ...file }) => ({
+              buildTime: file.buildTime,
+              byteLength: file.byteLength,
+              databaseVersion: file.databaseVersion,
+              filename: file.name,
+              sha256: file.sha256,
+            })),
+            toolchain: identity.toolchain,
+          },
+          {
+            directory: databaseDirectory,
+            manifestPath,
+            manifestSha256: createHash("sha256").update(manifest).digest("hex"),
+            profile: identity.profile,
+            scannerImage: contract.clamav.updaterImage,
+            snapshotId,
+          },
+          new Date("2026-07-26T18:30:00.000Z"),
+        ),
+      );
+    } finally {
+      rmSync(fixture, { force: true, recursive: true });
+    }
+  });
+
   it("rejects state-recorded Piper paths before execution", () => {
     const piperDirectory = "/tmp/reflo-workers/piper";
     const state = {
@@ -267,6 +350,14 @@ function profileState() {
       imageDigest: `sha256:${"a".repeat(64)}`,
     },
     clamav: { directory: "/tmp/reflo workers/clamav" },
+    clamavAdmission: {
+      directory: `/tmp/reflo workers/clamav-admission/cvd-${"e".repeat(32)}`,
+      manifestPath: `/tmp/reflo workers/clamav-admission/cvd-${"e".repeat(32)}/snapshot.json`,
+      manifestSha256: "e".repeat(64),
+      profile: "upstream-clamav-cloud-demo-v1",
+      scannerImage: `clamav@sha256:${"f".repeat(64)}`,
+      snapshotId: `cvd-${"e".repeat(32)}`,
+    },
     tessdata: { directory: "/tmp/reflo workers/tessdata" },
     piper: {
       artifactRevision: "b".repeat(40),

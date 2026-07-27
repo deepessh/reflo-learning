@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -100,6 +100,26 @@ export function checkToolchainPolicy(rootDirectory) {
     errors.push("@reflo/db db:dump must use the canonical container generator");
   }
   const turbo = JSON.parse(read(root, "turbo.json"));
+  const ingestionPackage = read(root, "packages/ingestion/package.json");
+  const clamavComposition = [
+    ingestionPackage,
+    read(root, "packages/ingestion/src/index.ts"),
+    read(root, "apps/api/src/demo-upload-composition.ts"),
+    read(root, "scripts/local-workers.mjs"),
+    read(root, ".env.example"),
+  ].join("\n");
+  if (
+    /@alicloud\/kms|alibaba-kms|AlibabaKmsSnapshot|PinnedP256Snapshot|clamav-snapshot-signature-v1|REFLO_LOCAL_CLAMAV_(?:PUBLIC_KEY|SIGNATURE)/.test(
+      clamavComposition,
+    ) ||
+    existsSync(
+      path.join(root, "packages/ingestion/src/adapters/alibaba-kms.ts"),
+    )
+  ) {
+    errors.push(
+      "upstream ClamAV demo admission must not retain a KMS signer, key pin, or detached Reflo signature",
+    );
+  }
   for (const variable of [
     "REFLO_POSTGRES_CONTAINER_ID",
     "REFLO_POSTGRES_CONTAINER_REWRITE_FROM",
@@ -107,6 +127,23 @@ export function checkToolchainPolicy(rootDirectory) {
   ]) {
     if (!turbo.tasks?.test?.env?.includes(variable)) {
       errors.push(`turbo test env must pass ${variable}`);
+    }
+  }
+  for (const variable of [
+    "REFLO_DEMO_OPERATOR_OWNER_SCOPE_ID",
+    "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE",
+    "REFLO_DEMO_UPLOAD_PROCESSOR_MODE",
+    "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
+    "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
+    "REFLO_LOCAL_CLAMAV_MANIFEST_PATH",
+    "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
+    "REFLO_LOCAL_CLAMAV_SNAPSHOT_ID",
+    "REFLO_LOCAL_INGESTION_IMAGE",
+    "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
+    "REFLO_LOCAL_TESSDATA_DIR",
+  ]) {
+    if (!turbo.tasks?.dev?.env?.includes(variable)) {
+      errors.push(`turbo dev env must pass ${variable}`);
     }
   }
 

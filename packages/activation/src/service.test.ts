@@ -117,7 +117,7 @@ describe("activation generation", () => {
     expect(lesson.sourceSpanIds).toEqual([ids.spanA]);
     expect(lesson.modelProvenance).toMatchObject({
       promptId: "lesson-text",
-      promptVersion: "1",
+      promptVersion: "2",
       task: "lesson.text.v1",
       validationOutcome: "passed",
     });
@@ -175,7 +175,7 @@ describe("activation generation", () => {
       expect(bank.modelProvenance).toMatchObject({
         inputSchemaVersion: "quiz-generation-input-v2",
         promptId: "assessment-quiz",
-        promptVersion: "2",
+        promptVersion: "3",
         resultSchemaVersion: "quiz-generation-result-v2",
       });
       expect(bank.items.every((item) => item.sourceSpanIds.length > 0)).toBe(

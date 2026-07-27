@@ -18,7 +18,8 @@ diagnostics, and the `scan-detect-v1` candidate-page classification.
   finalization. Queue values are never authority.
 - `QuarantineObjectPort` alone stages the authorized object into job-scoped
   ephemeral storage.
-- `MalwareScannerPort` exposes only a signed snapshot and clean/infected result.
+- `MalwareScannerPort` exposes only an independently verified upstream-signed
+  snapshot and clean/infected result.
 - `IsolatedDocumentWorkerPort` has no storage, queue, database, or cloud access.
 - `NormalizedDocumentPublisherPort` idempotently publishes the validated
   internal artifact and returns a text-free opaque reference for durable state.
@@ -28,13 +29,17 @@ diagnostics, and the `scan-detect-v1` candidate-page classification.
 Concrete trusted-side adapters now include bounded Alibaba OSS quarantine reads,
 overwrite-protected internal artifact writes, exclusive private-file staging, a
 content-addressed immutable normalized-document publisher, and a ClamAV adapter
-that verifies the exact D-GH-96 P-256 detached-signature profile and every
-database file before accepting a snapshot. The maintenance publisher validates
-each CVD/CLD with ClamAV 1.4.5, signs the exact immutable manifest through the
-Alibaba KMS `AsymmetricSign` digest adapter, and writes the readiness marker
-last. Activation still requires the D-GH-96 real-KMS golden vector for the
-provisioned key. The scanner checks the runtime is exactly ClamAV 1.4.5 and
-treats only its documented clean/infected exit statuses as results.
+implementing ADR 0035's `upstream-clamav-cloud-demo-v1` profile. The connected
+maintenance publisher verifies each official CVD/CLD upstream signature with
+the pinned ClamAV 1.4.5 `sigtool`, records the exact closed filename set,
+database versions, build/publication times, byte lengths, hashes, and toolchain
+identity, publishes at an immutable content-addressed OSS prefix, and writes the
+readiness marker last. Runtime admission independently repeats the upstream
+signature, hash, length, filename-set, toolchain, content-address, and 24-hour
+freshness checks before mounting the databases read-only into the networkless
+scanner. This bounded demo profile has no Reflo signing key, KMS adapter, or
+detached Reflo signature. The scanner treats only ClamAV's documented
+clean/infected exit statuses as results.
 `@reflo/db` provides the production RDS operation store: it claims only a
 pre-existing `ingestion_operation` binding, rechecks active scope ownership and
 source retention under a least-privilege RLS role, bounds leases to five

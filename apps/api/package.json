@@ -23,6 +23,7 @@
     "@reflo/db": "workspace:*",
     "@reflo/dev-smoke": "workspace:*",
     "@reflo/delivery": "workspace:*",
+    "@reflo/ingestion": "workspace:*",
     "@reflo/knowledge-model": "workspace:*",
     "@reflo/model-router": "workspace:*",
     "@reflo/observability": "workspace:*",

@@ -3,106 +3,113 @@ import { describe, expect, it } from "vitest";
 import {
   FLOW_B_ASSERTION_VERSION,
   FLOW_B_RUN_RECORD_VERSION,
-  assertFlowBRunRecord,
+  type FlowBRunRecord,
   finalizeFlowBRunRecord,
-  readFlowBAssertionConfig,
 } from "./contracts";
+import {
+  FLOW_B_REHEARSAL_MAX_DURATION_MS,
+  FLOW_B_REHEARSAL_RECORD_VERSION,
+  assertFlowBRehearsalRecord,
+  finalizeFlowBRehearsalRecord,
+  verifyFlowBRehearsalSources,
+} from "./rehearsal";
 
-describe("Flow B browser assertion contracts", () => {
-  it("requires runtime-only target, staff authentication, and seeded responses", () => {
-    const config = readFlowBAssertionConfig({
-      REFLO_FLOW_B_API_BASE_URL: "http://127.0.0.1:3001",
-      REFLO_FLOW_B_APP_BASE_URL: "http://127.0.0.1:3000",
-      REFLO_FLOW_B_AUTH_INBOX_ACCESS_KEY: "a".repeat(32),
-      REFLO_FLOW_B_AUTH_MODE: "local-inbox",
-      REFLO_FLOW_B_BROWSER_EXECUTABLE: "/opt/browser/chrome",
-      REFLO_FLOW_B_INITIAL_RESPONSE: "An incomplete synthetic response.",
-      REFLO_FLOW_B_MODE: "development-connected",
-      REFLO_FLOW_B_RETEST_RESPONSE: "A complete synthetic response.",
-      REFLO_FLOW_B_RUN_ID: `demo-${"1".repeat(32)}`,
-      REFLO_FLOW_B_STAFF_EMAIL: "staff@example.test",
-      REFLO_FLOW_B_TELEGRAM_DESTINATION: "100164000",
-      REFLO_FLOW_B_TELEGRAM_WEBHOOK_SECRET: "a".repeat(32),
-      REFLO_FLOW_B_TRACE_PROBE_URL: "http://127.0.0.1:4000/__reflo/traces",
+describe("Flow B repeated rehearsal evidence", () => {
+  it("content-addresses ten sequential sub-six-minute runs without overstating reliability", () => {
+    const runs = Array.from({ length: 10 }, (_, index) =>
+      runFixture(index, 4_000 + index * 100),
+    );
+
+    const record = finalizeFlowBRehearsalRecord(runs);
+
+    expect(record).toMatchObject({
+      assertionVersion: FLOW_B_ASSERTION_VERSION,
+      duration: {
+        maximumMs: 4_900,
+        medianMs: 4_400,
+        minimumMs: 4_000,
+        p95Ms: 4_900,
+      },
+      fixes: [],
+      observedFailureCount: 0,
+      productionReliabilityClaimed: false,
+      recordVersion: FLOW_B_REHEARSAL_RECORD_VERSION,
+      runCount: 10,
+      tenConsecutiveRunsCompleted: true,
     });
-
-    expect(config).toMatchObject({
-      auth: { mode: "local-inbox" },
-      mode: "development-connected",
-      timeoutMs: 45_000,
-    });
-    expect(JSON.stringify(config)).toContain("staff@example.test");
-  });
-
-  it("rejects unsafe target origins and malformed browser configuration", () => {
-    expect(() =>
-      readFlowBAssertionConfig({
-        REFLO_FLOW_B_API_BASE_URL: "http://remote.example/v1",
-        REFLO_FLOW_B_APP_BASE_URL: "https://app.example",
-        REFLO_FLOW_B_AUTH_MODE: "login-url",
-        REFLO_FLOW_B_BROWSER_EXECUTABLE: "chrome",
-        REFLO_FLOW_B_INITIAL_RESPONSE: "incomplete",
-        REFLO_FLOW_B_LOGIN_URL:
-          "https://app.example/auth/callback?token=temporary",
-        REFLO_FLOW_B_MODE: "authorized-connected",
-        REFLO_FLOW_B_RETEST_RESPONSE: "complete",
-        REFLO_FLOW_B_RUN_ID: `demo-${"2".repeat(32)}`,
-        REFLO_FLOW_B_TELEGRAM_DESTINATION: "100164000",
-        REFLO_FLOW_B_TELEGRAM_WEBHOOK_SECRET: "a".repeat(32),
-        REFLO_FLOW_B_TRACE_PROBE_URL: "http://127.0.0.1:4000/__reflo/traces",
-      }),
-    ).toThrow("base URL is unsafe");
-  });
-
-  it("content-addresses a closed sanitized successful run record", () => {
-    const record = finalizeFlowBRunRecord(runFixture());
-
     expect(record.recordDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(assertFlowBRunRecord(record)).toEqual(record);
-    expect(JSON.stringify(record)).not.toContain("@");
-    expect(JSON.stringify(record)).not.toContain("https://");
+    expect(assertFlowBRehearsalRecord(record)).toEqual(record);
+    expect(verifyFlowBRehearsalSources(record, runs)).toEqual(record);
   });
 
-  it("fails closed when a persisted invariant or digest changes", () => {
-    const record = finalizeFlowBRunRecord(runFixture());
+  it("rejects target drift and any run over the six-minute demo limit", () => {
+    const runs = Array.from({ length: 10 }, (_, index) =>
+      runFixture(index, 5_000),
+    );
+    const record = finalizeFlowBRehearsalRecord(runs);
+    const drifted = [
+      ...runs.slice(0, 9),
+      finalizeFlowBRunRecord({
+        ...unsignedRun(9, 5_000),
+        targetOriginDigest: `sha256:${"f".repeat(64)}`,
+      }),
+    ];
+
+    expect(() => verifyFlowBRehearsalSources(record, drifted)).toThrow(
+      "flow_b_rehearsal_source_drift",
+    );
+    expect(() =>
+      finalizeFlowBRehearsalRecord([
+        ...runs.slice(0, 9),
+        runFixture(9, FLOW_B_REHEARSAL_MAX_DURATION_MS + 1),
+      ]),
+    ).toThrow("flow_b_rehearsal_record_invalid");
+  });
+
+  it("rejects duplicate or overlapping run evidence and changed aggregates", () => {
+    const runs = Array.from({ length: 10 }, (_, index) =>
+      runFixture(index, 5_000),
+    );
+    const record = finalizeFlowBRehearsalRecord(runs);
 
     expect(() =>
-      assertFlowBRunRecord({
+      finalizeFlowBRehearsalRecord([...runs.slice(0, 9), runs[0]!]),
+    ).toThrow("flow_b_rehearsal_record_invalid");
+    expect(() =>
+      finalizeFlowBRehearsalRecord([
+        runs[0]!,
+        runFixture(1, 5_000, Date.parse(runs[0]!.startedAt) + 1_000),
+        ...runs.slice(2),
+      ]),
+    ).toThrow("flow_b_rehearsal_record_invalid");
+    expect(() =>
+      assertFlowBRehearsalRecord({
         ...record,
-        lesson: { ...record.lesson, semanticSimilarity: "0.85000" },
+        duration: { ...record.duration, p95Ms: record.duration.p95Ms - 1 },
       }),
-    ).toThrow();
-    expect(() =>
-      assertFlowBRunRecord({ ...record, durationMs: record.durationMs + 1 }),
-    ).toThrow();
-    expect(() =>
-      finalizeFlowBRunRecord({
-        ...runFixture(),
-        evidence: {
-          ...runFixture().evidence,
-          masteryDelta: "0.10713",
-        },
-      }),
-    ).toThrow("flow_b_assertion_invariant_failed");
-    expect(() =>
-      finalizeFlowBRunRecord({
-        ...runFixture(),
-        trace: {
-          ...runFixture().trace,
-          observedFieldSet: [
-            ...runFixture().trace.observedFieldSet,
-            "learnerId" as never,
-          ],
-        },
-      }),
-    ).toThrow("flow_b_assertion_invariant_failed");
+    ).toThrow("flow_b_rehearsal_record_invalid");
   });
 });
 
-function runFixture() {
+function runFixture(
+  index: number,
+  durationMs: number,
+  startedAtMs = Date.UTC(2026, 6, 25, 2, index),
+): FlowBRunRecord {
+  return finalizeFlowBRunRecord(unsignedRun(index, durationMs, startedAtMs));
+}
+
+function unsignedRun(
+  index: number,
+  durationMs: number,
+  startedAtMs = Date.UTC(2026, 6, 25, 2, index),
+) {
+  const uniqueHex = (index + 1).toString(16);
+  const startedAt = new Date(startedAtMs).toISOString();
+  const completedAt = new Date(startedAtMs + durationMs).toISOString();
   return {
     assertionVersion: FLOW_B_ASSERTION_VERSION,
-    completedAt: "2026-07-25T01:00:10.000Z",
+    completedAt,
     dependencyPreflight: {
       attempts: [
         {
@@ -135,7 +142,7 @@ function runFixture() {
         vector: "litellm-dev-embedding-v1-1234567890abcdef",
       },
     },
-    durationMs: 10_000,
+    durationMs,
     delivery: {
       attemptDigest: `sha256:${"6".repeat(64)}`,
       deliveryDigest: `sha256:${"7".repeat(64)}`,
@@ -176,8 +183,8 @@ function runFixture() {
       initialAttemptReplayed: true as const,
       retestAttemptReplayed: true as const,
     },
-    runId: `demo-${"4".repeat(32)}`,
-    startedAt: "2026-07-25T01:00:00.000Z",
+    runId: `demo-${uniqueHex.padStart(32, "0")}`,
+    startedAt,
     targetOriginDigest: `sha256:${"5".repeat(64)}`,
     trace: {
       allowlistValidated: true as const,

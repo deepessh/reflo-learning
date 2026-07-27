@@ -121,6 +121,7 @@ Release work: scripts/work-item.sh release --handoff "<status and exact next ste
 Build:        corepack pnpm build
 Package:      corepack pnpm package
 Flow B proof: REFLO_FLOW_B_BROWSER_EXECUTABLE="/absolute/path/to/chrome" scripts/flow-b-assertion.sh .reflo/evidence/flow-b-connected-run-v1.json
+Voice clip:   corepack pnpm demo:voice-clip
 DB migrate:   DATABASE_URL="..." corepack pnpm --filter @reflo/db db:migrate
 DB snapshot:  REFLO_POSTGRES_CONTAINER_ID="..." corepack pnpm --filter @reflo/db db:dump
 App profile:  scripts/local-apps.sh up

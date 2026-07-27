@@ -1,0 +1,68 @@
+{
+  "answer": "Because seeing an explanation is exposure, not assessment evidence. Mastery changes only after the learner retrieves the idea in a distinct check.",
+  "artifact": {
+    "byteLength": 998444,
+    "channels": 1,
+    "codec": "pcm_s16le",
+    "container": "wav",
+    "durationSeconds": 22.639455782312925,
+    "file": "voice-tutoring-recorded-prototype.wav",
+    "sampleRateHz": 22050,
+    "sha256": "5d93685aeeada7535c114a1506dadfe5edfa65fbb3c985bd4ce10d314b520fb8"
+  },
+  "artifactClass": "recorded-prototype",
+  "citation": {
+    "label": "Synthetic Connected Flow B › Evidence and retention",
+    "sourceSpanIds": ["16400000-0000-4000-8000-00000000000b"]
+  },
+  "contractVersion": "voice-tutoring-recorded-clip-v1",
+  "displayLabel": "Recorded prototype · not live voice tutoring",
+  "featureGate": {
+    "key": "p1.tutor.voice",
+    "liveRuntimeEligible": false,
+    "runtimeDefault": false
+  },
+  "nonClaims": [
+    "shipped voice runtime",
+    "live streaming chat",
+    "live tutor-answer generation",
+    "runtime trace evidence",
+    "Piper production activation",
+    "external learner readiness"
+  ],
+  "provenance": {
+    "answerOrigin": "frozen-source-backed-prototype-script",
+    "adapterContractUsed": "piper-tts-adapter-v1",
+    "liveTutorRouteUsed": false,
+    "mediaTaskContract": "media.tts.v1",
+    "runtimeTraceEmitted": false,
+    "synthesisClass": "development-only-recording"
+  },
+  "question": "Why doesn't viewing a lesson immediately raise mastery?",
+  "source": {
+    "class": "synthetic-staff-controlled",
+    "course": "Synthetic Connected Flow B",
+    "sourceTextSha256": "5abe8e8a259e6d92ab90edbb383f891dd9c6e5307ca31533cce41e9b7f5861da",
+    "span": "Evidence and retention"
+  },
+  "synthesis": {
+    "activationBlockers": [
+      "human GPL packaging and deployment clearance is not recorded",
+      "final reproducible image digest and SBOM are not recorded",
+      "target-environment five-course concurrency benchmark is not recorded",
+      "two-reviewer listening evidence is not recorded",
+      "the pinned base image requires a current security review before activation"
+    ],
+    "engine": "piper",
+    "engineVersion": "1.4.2",
+    "piperManifestActivationStatus": "blocked",
+    "settingsVersion": "piper-settings-v1",
+    "voiceArtifactRevision": "5b44ec7bab7c5822cfec48fbd5aa99db71a823d6",
+    "voiceArtifactVersion": "piper-voice-en-us-ljspeech-high-v1",
+    "voiceConfigSha256": "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14",
+    "voiceId": "en_US-ljspeech-high",
+    "voiceModelSha256": "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a",
+    "voiceProfileId": "en-US/reflo-narrator-v1"
+  },
+  "transcript": "Recorded prototype, not live voice tutoring. Staff question: Why doesn't viewing a lesson immediately raise mastery? Reflo answer: Because seeing an explanation is exposure, not assessment evidence. Mastery changes only after the learner retrieves the idea in a distinct check. Citation: Synthetic Connected Flow B, Evidence and retention."
+}

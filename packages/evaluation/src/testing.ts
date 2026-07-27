@@ -35,13 +35,13 @@ export function manifestFixture(
 ): DatasetManifest {
   return {
     authority: "fixture",
-    contractVersion: "evaluation-contract-v1",
+    contractVersion: "evaluation-contract-v2",
     datasetId: "fixture.dataset",
     datasetVersion: "fixture-v1",
     heldOut: true,
     intendedGates: ["week1.upload-security"],
     items: [],
-    manifestSchemaVersion: "dataset-manifest-v1",
+    manifestSchemaVersion: "dataset-manifest-v2",
     preRunExclusions: [],
     protocols: {
       adjudication: "fixture-adjudication-v1",

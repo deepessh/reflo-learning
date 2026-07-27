@@ -12,6 +12,13 @@ it satisfies `normalized-document-v1`, including exact parser/config/classifier
 versions, native locators, text hashes, a digest-pinned worker image, bounded
 diagnostics, and the `scan-detect-v1` candidate-page classification.
 
+The Demo Day product surface admits only the configured, human-approved PDF.
+EPUB and DOCX parsing remains inactive groundwork behind the internal
+`isolated-ingestion-v1` boundary for post–Demo Day fast-follow work. Keeping
+their parser and contract fixtures does not advertise those formats as
+Demo Day-supported, and the demo API must reject them before quarantine or
+processing.
+
 `IngestionSupervisor` is intentionally composed from narrow ports:
 
 - `IngestionOperationStore` owns authorization rechecks and D-GH-12 claim/CAS
@@ -56,8 +63,9 @@ licenses, SBOM, vulnerability report, tessdata checksum, and frozen-fixture
 report are recorded together; contract tests and deterministic fakes do not
 satisfy that gate.
 
-EPUB and DOCX never receive invented page numbers. Their byte, archive,
-content, and resource ceilings are enforced, but their PRD 200/800-page
-requirement remains unresolved as recorded in D-GH-8 and must not be reported
-as passing. EPUB blocks do carry the normalized OPF resource path and actual
-zero-based spine item.
+EPUB and DOCX never receive invented page numbers. Their dormant groundwork
+continues to enforce byte, archive, content, and resource ceilings, and EPUB
+blocks carry the normalized OPF resource path and actual zero-based spine item.
+Future product exposure requires approved deterministic format-native limits,
+representative rights-cleared security and latency evidence, and an updated
+product support contract.

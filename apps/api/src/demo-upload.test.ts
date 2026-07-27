@@ -29,7 +29,7 @@ const approval = Object.freeze({
   approvalId: "approved-pdf-v1",
   attribution: "Synthetic fixture author",
   byteSize: bytes.byteLength,
-  contractVersion: "demo-upload-v1",
+  contractVersion: "demo-upload-v2",
   extension: "pdf",
   humanApprovalReference: "issue-36-owner-verdict",
   licenseLabel: "CC0-1.0",
@@ -127,6 +127,29 @@ describe("approved staff demo upload service", () => {
       operationId: ids.operation,
       sourceDocumentId: ids.upload,
     });
+  });
+
+  it("rejects dormant EPUB and DOCX formats before storage or processing", async () => {
+    for (const mediaType of [
+      "application/epub+zip",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]) {
+      const fixture = createFixture();
+      const rejected = await fixture.service.create(authorization, {
+        approvalId: approval.approvalId,
+        bytes,
+        mediaType,
+      });
+
+      expect(rejected).toMatchObject({
+        courseId: null,
+        failure: { code: "unsupported_type", retryable: false },
+        state: "failed",
+      });
+      expect(fixture.objects.putIfAbsent).not.toHaveBeenCalled();
+      expect(fixture.repository.create).not.toHaveBeenCalled();
+      expect(fixture.processing.schedule).not.toHaveBeenCalled();
+    }
   });
 
   it("projects asynchronous, failure, and owner-scoped outline states honestly", async () => {
@@ -230,7 +253,7 @@ describe("approved staff demo upload service", () => {
       fixture.service.loadOutline(authorization, ids.upload),
     ).resolves.toMatchObject({
       chapters: [{ concepts: [{ sourceSpanCount: 2 }] }],
-      contractVersion: "demo-upload-v1",
+      contractVersion: "demo-upload-v2",
       uploadId: ids.upload,
     });
   });

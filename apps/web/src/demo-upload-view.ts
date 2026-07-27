@@ -54,7 +54,7 @@ export function demoUploadPresentation(
     case "large_document":
       return {
         detail:
-          "This supported source is using the asynchronous large-document path; the two-minute standard-profile target does not apply.",
+          "This supported PDF is using the asynchronous large-document path; the 16-minute standard-profile target does not apply.",
         label: "Large-document path",
         poll: true,
         tone: "attention",
@@ -91,7 +91,7 @@ function failureCopy(code: DemoUploadFailureCode | null): string {
       return "This file does not match a human-approved rights-cleared demo source.";
     case "unsupported_type":
     case "mime_mismatch":
-      return "Use the exact approved PDF, EPUB, or DOCX source; the file type or signature did not match.";
+      return "Use the exact approved PDF source. EPUB and DOCX are post–Demo Day, and this file type or signature did not match.";
     case "over_limit":
     case "archive_limit":
       return "The source exceeded a declared compressed, expanded, or page limit.";

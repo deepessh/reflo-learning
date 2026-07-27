@@ -1,10 +1,10 @@
-export const EVALUATION_CONTRACT_VERSION = "evaluation-contract-v1" as const;
-export const DATASET_MANIFEST_VERSION = "dataset-manifest-v1" as const;
-export const EVIDENCE_BUNDLE_VERSION = "evidence-bundle-v1" as const;
-export const GATE_ATTESTATION_VERSION = "gate-attestation-v1" as const;
+export const EVALUATION_CONTRACT_VERSION = "evaluation-contract-v2" as const;
+export const DATASET_MANIFEST_VERSION = "dataset-manifest-v2" as const;
+export const EVIDENCE_BUNDLE_VERSION = "evidence-bundle-v2" as const;
+export const GATE_ATTESTATION_VERSION = "gate-attestation-v2" as const;
 export const AUDIO_LISTENING_REVIEW_VERSION =
   "audio-listening-review-v1" as const;
-export const SCORER_VERSION = "release-gate-scorer-v1" as const;
+export const SCORER_VERSION = "release-gate-scorer-v2" as const;
 
 export const RELEASE_GATE_IDS = [
   "week1.performance",
@@ -44,11 +44,11 @@ interface DatasetItemBase {
 export interface DocumentDatasetItem extends DatasetItemBase {
   readonly byteLength: number;
   readonly complexity: "complex" | "simple";
-  readonly format: "docx" | "epub" | "pdf";
+  readonly format: "pdf";
   readonly hasImages: boolean;
   readonly hasTables: boolean;
   readonly kind: "document";
-  readonly pageCount: number | null;
+  readonly pageCount: number;
   readonly standardProfileEligibilityReference: string;
 }
 

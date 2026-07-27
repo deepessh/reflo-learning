@@ -255,7 +255,7 @@ describe("auth, library, and session-history API", () => {
     const approval = {
       approvalId: "hf-agents-course-core-v1",
       attribution: "Hugging Face Agents Course contributors",
-      contractVersion: "demo-upload-v1" as const,
+      contractVersion: "demo-upload-v2" as const,
       extension: "pdf" as const,
       licenseLabel: "Apache-2.0",
       mediaType: "application/pdf" as const,
@@ -264,7 +264,7 @@ describe("auth, library, and session-history API", () => {
     };
     const upload = {
       approvalId: approval.approvalId,
-      contractVersion: "demo-upload-v1" as const,
+      contractVersion: "demo-upload-v2" as const,
       courseId,
       failure: null,
       processingLane: "standard" as const,
@@ -287,7 +287,7 @@ describe("auth, library, and session-history API", () => {
           title: "Agent foundations",
         },
       ],
-      contractVersion: "demo-upload-v1" as const,
+      contractVersion: "demo-upload-v2" as const,
       courseId,
       generatedAt: "2026-07-25T20:01:00.000Z",
       title: approval.title,
@@ -430,18 +430,29 @@ describe("auth, library, and session-history API", () => {
     expect(denied.status).toBe(404);
     expect(await denied.json()).toEqual({ error: "demo_upload_not_found" });
 
-    const invalidMedia = await fetch(`${baseUrl}/v1/demo/uploads`, {
-      body: new Uint8Array([1]),
-      headers: {
-        "content-type": "text/plain",
-        cookie: cookie.header,
-        origin: "https://app.reflo.example",
-        "x-reflo-csrf": cookie.csrf,
-        "x-reflo-demo-source-approval": "approved-source-v1",
-      },
-      method: "POST",
-    });
-    expect(invalidMedia.status).toBe(400);
+    for (const mediaType of [
+      "application/epub+zip",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]) {
+      const invalidMedia = await fetch(`${baseUrl}/v1/demo/uploads`, {
+        body: new Uint8Array([1]),
+        headers: {
+          "content-type": mediaType,
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+          "x-reflo-demo-source-approval": "approved-source-v1",
+        },
+        method: "POST",
+      });
+      expect(invalidMedia.status).toBe(415);
+      expect(await invalidMedia.json()).toEqual({
+        detail:
+          "Demo Day uploads accept only an approved digitally generated PDF.",
+        error: "unsupported_demo_upload_format",
+        supportedMediaType: "application/pdf",
+      });
+    }
     expect(demoUploads.create).not.toHaveBeenCalled();
   });
 

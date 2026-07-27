@@ -4,7 +4,6 @@ import type {
   DemoCourseOutline,
   DemoSourceApproval,
   DemoUploadFailureCode,
-  DemoUploadMediaType,
   DemoUploadState,
   DemoUploadView,
 } from "@reflo/contracts";
@@ -155,11 +154,19 @@ export class ApprovedDemoUploadService {
     input: {
       readonly approvalId: string;
       readonly bytes: Uint8Array;
-      readonly mediaType: DemoUploadMediaType;
+      readonly mediaType: string;
     },
   ): Promise<DemoUploadView> {
     this.#assertOperator(authorization);
     const uploadId = this.#createId();
+    if (input.mediaType !== "application/pdf") {
+      return failedUpload(
+        uploadId,
+        input.approvalId,
+        "unsupported_type",
+        this.#clock(),
+      );
+    }
     const approval = this.#approvals.get(input.approvalId);
     const actualSha256 = sha256(input.bytes);
     if (
@@ -425,6 +432,8 @@ function validateApproval(approval: ApprovedDemoSource): ApprovedDemoSource {
   if (
     !/^[a-z0-9][a-z0-9._-]{2,127}$/.test(approval.approvalId) ||
     approval.contractVersion !== DEMO_UPLOAD_CONTRACT_VERSION ||
+    approval.extension !== "pdf" ||
+    approval.mediaType !== "application/pdf" ||
     !/^[a-f0-9]{40}$/.test(approval.sourceRevision) ||
     !/^[a-f0-9]{64}$/.test(approval.sha256) ||
     !Number.isSafeInteger(approval.byteSize) ||

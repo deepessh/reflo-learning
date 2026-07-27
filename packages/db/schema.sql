@@ -2184,9 +2184,8 @@ CREATE TABLE public.release_gate_attestation (
     published_at timestamp with time zone NOT NULL,
     superseded_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT release_gate_attestation_attestation_version_check CHECK ((attestation_version = 'gate-attestation-v1'::text)),
     CONSTRAINT release_gate_attestation_check CHECK (((superseded_at IS NULL) OR (superseded_at >= published_at))),
-    CONSTRAINT release_gate_attestation_contract_version_check CHECK ((contract_version = 'evaluation-contract-v1'::text)),
+    CONSTRAINT release_gate_attestation_contract_pair_check CHECK ((((attestation_version = 'gate-attestation-v1'::text) AND (contract_version = 'evaluation-contract-v1'::text) AND (superseded_at IS NOT NULL)) OR ((attestation_version = 'gate-attestation-v2'::text) AND (contract_version = 'evaluation-contract-v2'::text)))),
     CONSTRAINT release_gate_attestation_dependency_fingerprints_check CHECK (((jsonb_typeof(dependency_fingerprints) = 'object'::text) AND (dependency_fingerprints <> '{}'::jsonb))),
     CONSTRAINT release_gate_attestation_deployable_artifact_digest_check CHECK ((deployable_artifact_digest ~ '^sha256:[a-f0-9]{64}$'::text)),
     CONSTRAINT release_gate_attestation_environment_check CHECK ((environment = ANY (ARRAY['staging'::text, 'pilot'::text]))),
@@ -6323,4 +6322,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260724000300'),
     ('20260726000100'),
     ('20260727000100'),
-    ('20260727000200');
+    ('20260727000200'),
+    ('20260727000300');

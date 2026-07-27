@@ -12,7 +12,7 @@ export const CONNECTED_DEMO_PREFLIGHT_VERSION =
   "connected-demo-preflight-v1" as const;
 export const CONNECTED_DEMO_BOUNDARY_VERSION =
   "connected-demo-boundary-v1" as const;
-export const DEMO_UPLOAD_CONTRACT_VERSION = "demo-upload-v1" as const;
+export const DEMO_UPLOAD_CONTRACT_VERSION = "demo-upload-v2" as const;
 
 export type ConnectedDemoDependencyName =
   "delivery" | "model" | "postgres" | "storage" | "vector";
@@ -36,16 +36,13 @@ export interface ConnectedDemoPreflightView {
   readonly status: "ready" | "unavailable";
 }
 
-export type DemoUploadMediaType =
-  | "application/epub+zip"
-  | "application/pdf"
-  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+export type DemoUploadMediaType = "application/pdf";
 
 export interface DemoSourceApproval {
   readonly approvalId: string;
   readonly attribution: string;
   readonly contractVersion: typeof DEMO_UPLOAD_CONTRACT_VERSION;
-  readonly extension: "docx" | "epub" | "pdf";
+  readonly extension: "pdf";
   readonly licenseLabel: string;
   readonly mediaType: DemoUploadMediaType;
   readonly sourceRevision: string;

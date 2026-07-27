@@ -39,7 +39,7 @@ const DIGEST = "a".repeat(64);
 const START = "2026-07-21T16:00:00.000Z";
 const END = "2026-07-21T17:00:00.000Z";
 
-describe("evaluation-contract-v1 schemas and manifests", () => {
+describe("evaluation-contract-v2 schemas and manifests", () => {
   it("checks in the versioned JSON schemas", () => {
     for (const [name, title] of [
       [
@@ -47,14 +47,64 @@ describe("evaluation-contract-v1 schemas and manifests", () => {
         "Reflo audio-listening-review-v1",
       ],
       ["dataset-manifest-v1.schema.json", "Reflo dataset-manifest-v1"],
+      ["dataset-manifest-v2.schema.json", "Reflo dataset-manifest-v2"],
       ["evidence-bundle-v1.schema.json", "Reflo evidence-bundle-v1"],
+      ["evidence-bundle-v2.schema.json", "Reflo evidence-bundle-v2"],
       ["gate-attestation-v1.schema.json", "Reflo gate-attestation-v1"],
+      ["gate-attestation-v2.schema.json", "Reflo gate-attestation-v2"],
     ]) {
       const schema = JSON.parse(
         readFileSync(new URL(`../schemas/${name}`, import.meta.url), "utf8"),
       ) as { readonly title: string };
       expect(schema.title).toBe(title);
     }
+  });
+
+  it("keeps v1 manifests historical and makes v2 performance documents PDF-only", () => {
+    const v1 = JSON.parse(
+      readFileSync(
+        new URL("../schemas/dataset-manifest-v1.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      readonly $defs: {
+        readonly document: {
+          readonly properties: {
+            readonly format: { readonly enum: readonly string[] };
+          };
+        };
+      };
+    };
+    const v2 = JSON.parse(
+      readFileSync(
+        new URL("../schemas/dataset-manifest-v2.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      readonly $defs: {
+        readonly document: {
+          readonly properties: {
+            readonly format: { readonly const: string };
+            readonly pageCount: {
+              readonly maximum: number;
+              readonly minimum: number;
+              readonly type: string;
+            };
+          };
+        };
+      };
+    };
+    expect(v1.$defs.document.properties.format.enum).toEqual([
+      "docx",
+      "epub",
+      "pdf",
+    ]);
+    expect(v2.$defs.document.properties.format.const).toBe("pdf");
+    expect(v2.$defs.document.properties.pageCount).toEqual({
+      maximum: 200,
+      minimum: 5,
+      type: "integer",
+    });
   });
 
   it("rejects duplicate membership, digest drift, and absent rights", () => {
@@ -87,6 +137,21 @@ describe("evaluation-contract-v1 schemas and manifests", () => {
       reasons: expect.arrayContaining(["fixture_dataset_is_not_authoritative"]),
       status: "indeterminate",
     });
+  });
+
+  it("rejects EPUB, DOCX, and missing stable page counts from the PDF-only performance profile", () => {
+    const base = performanceItems()[0]!;
+    for (const item of [
+      { ...base, format: "epub", pageCount: null },
+      { ...base, format: "docx", pageCount: null },
+      { ...base, pageCount: null },
+    ]) {
+      expect(
+        validateDatasetManifest(
+          manifest("week1.performance", [item as unknown as DatasetItem]),
+        ),
+      ).toContain("standard_document_profile_invalid");
+    }
   });
 });
 
@@ -198,6 +263,11 @@ describe("deterministic Week 1 scoring", () => {
 
   it("enforces every upload route, owner scope, isolation, and idempotent retry", () => {
     const items = uploadItems();
+    for (const route of ["route:unsupported-docx", "route:unsupported-epub"]) {
+      expect(
+        items.find((item) => item.strata.includes(route))?.expectedOutcome,
+      ).toBe("unsupported_type");
+    }
     const input = manifest("week1.upload-security", items);
     const observations: UploadSecurityObservation[] = items.map((item) => ({
       actualOutcome: item.expectedOutcome,
@@ -402,13 +472,13 @@ function manifest(
 ): DatasetManifest {
   return {
     authority: "authoritative",
-    contractVersion: "evaluation-contract-v1",
+    contractVersion: "evaluation-contract-v2",
     datasetId: `${gateId}.dataset`,
     datasetVersion: "2026-07-21-v1",
     heldOut: true,
     intendedGates: [gateId],
     items,
-    manifestSchemaVersion: "dataset-manifest-v1",
+    manifestSchemaVersion: "dataset-manifest-v2",
     preRunExclusions: [],
     protocols: {
       adjudication: "adjudication-v1",
@@ -484,15 +554,19 @@ function performanceRun(
 }
 
 function performanceItems(): readonly DatasetItem[] {
-  const required = GATE_CONTRACTS["week1.performance"].requiredStrata;
   return Array.from({ length: 40 }, (_, index) => {
-    const format = (["pdf", "epub", "docx"] as const)[index % 3]!;
     const byteLength = 512 * 1_024 + index * 500_000;
-    const pageCount = format === "pdf" ? Math.min(200, 5 + index * 5) : null;
+    const bandIndex = Math.floor(index / 3);
+    const pageCount =
+      index % 3 === 0
+        ? 5 + bandIndex * 3
+        : index % 3 === 1
+          ? 50 + bandIndex * 7
+          : 150 + bandIndex * 4;
     return {
       byteLength,
       complexity: index % 2 === 0 ? "simple" : "complex",
-      format,
+      format: "pdf" as const,
       hasImages: index % 3 === 0,
       hasTables: index % 4 === 0,
       id: `performance-document-${String(index).padStart(3, "0")}`,
@@ -500,11 +574,10 @@ function performanceItems(): readonly DatasetItem[] {
       pageCount,
       rightsApprovalReference: "issue:36-content-rights",
       sha256: index.toString(16).padStart(64, "0"),
-      standardProfileEligibilityReference: "prd:standard-profile-v1",
+      standardProfileEligibilityReference: "prd:pdf-standard-profile-v2",
       strata: [
         ...new Set([
-          ...(index === 0 ? required : []),
-          `format:${format}`,
+          "format:pdf",
           `structure:${index % 2 === 0 ? "simple" : "complex"}`,
           ...(index % 3 === 0 ? ["content:images"] : []),
           ...(index % 4 === 0 ? ["content:tables"] : []),
@@ -513,13 +586,11 @@ function performanceItems(): readonly DatasetItem[] {
             : byteLength < 15 * 1_024 * 1_024
               ? ["size:5-14.9mb"]
               : ["size:15-20mb"]),
-          ...(pageCount === null
-            ? []
-            : pageCount < 50
-              ? ["pages:5-49"]
-              : pageCount < 150
-                ? ["pages:50-149"]
-                : ["pages:150-200"]),
+          pageCount < 50
+            ? "pages:5-49"
+            : pageCount < 150
+              ? "pages:50-149"
+              : "pages:150-200",
         ]),
       ],
     };
@@ -541,7 +612,13 @@ function audioItems(): readonly AudioScriptDatasetItem[] {
 function uploadItems(): readonly UploadSecurityDatasetItem[] {
   return GATE_CONTRACTS["week1.upload-security"].requiredStrata.map(
     (stratum, index) => ({
-      expectedOutcome: stratum.startsWith("format:") ? "parsed" : stratum,
+      expectedOutcome:
+        stratum === "format:pdf"
+          ? "parsed"
+          : stratum === "route:unsupported-docx" ||
+              stratum === "route:unsupported-epub"
+            ? "unsupported_type"
+            : stratum,
       id: `upload-case-${String(index).padStart(3, "0")}`,
       kind: "upload-security",
       rightsApprovalReference: "fixture:synthetic-rights",

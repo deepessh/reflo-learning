@@ -510,7 +510,7 @@ function validatePolicy(policy: FrozenGradingPolicy): void {
     policy.gradingPolicyVersion !== GRADING_POLICY_VERSION ||
     policy.ratingMappingVersion !== RATING_MAPPING_VERSION ||
     policy.calibrationEvidenceId.length === 0 ||
-    policy.expectedModelProvenance.routePolicyVersion !== "route-policy-v4" ||
+    policy.expectedModelProvenance.routePolicyVersion !== "route-policy-v5" ||
     policy.expectedModelProvenance.inputSchemaVersion !==
       "short-answer-grading-input-v2" ||
     policy.expectedModelProvenance.promptId !==

@@ -1,9 +1,16 @@
 import {
   materializeCurriculumOutline,
+  canonicalJson,
   type AuthorizedSourceAccess,
   type ContentRepositoryPort,
   type CurriculumGenerationRecord,
   type CurriculumOutline,
+  type CurriculumPartitionManifest,
+  type CurriculumSegmentClaim,
+  type CurriculumSegmentCompletion,
+  type CurriculumSegmentFailure,
+  type CurriculumSegmentManifestEntry,
+  type PersistedCurriculumSegmentResult,
   type EmbeddingGenerationRecord,
   type RetrievedSourceSpan,
   type ScopeAuthorizationContext,
@@ -16,6 +23,20 @@ import {
 export class InMemoryContentRepository implements ContentRepositoryPort {
   activeGeneration: EmbeddingGenerationRecord | null = null;
   readonly curriculumGenerations: CurriculumGenerationRecord[] = [];
+  readonly curriculumPartitions = new Map<
+    string,
+    CurriculumPartitionManifest
+  >();
+  readonly curriculumSegments = new Map<
+    string,
+    {
+      attempts: number;
+      inputHash: string;
+      persisted?: PersistedCurriculumSegmentResult;
+      state:
+        "failed" | "processing" | "queued" | "retry_scheduled" | "succeeded";
+    }
+  >();
   readonly embeddingGenerations: EmbeddingGenerationRecord[] = [];
   readonly sourceSpans = new Map<string, SourceSpanRecord>();
 
@@ -95,11 +116,127 @@ export class InMemoryContentRepository implements ContentRepositoryPort {
     });
   }
 
+  async persistCurriculumPartition(
+    access: AuthorizedSourceAccess,
+    manifest: CurriculumPartitionManifest,
+  ): Promise<void> {
+    this.#assertAccess(access);
+    const existing = this.curriculumPartitions.get(manifest.parentGenerationId);
+    if (
+      existing !== undefined &&
+      canonicalJson(existing) !== canonicalJson(manifest)
+    ) {
+      throw new Error("curriculum partition changed");
+    }
+    this.curriculumPartitions.set(manifest.parentGenerationId, manifest);
+    for (const segment of manifest.segments) {
+      const key = segmentKey(manifest.parentGenerationId, segment.id);
+      const current = this.curriculumSegments.get(key);
+      if (current !== undefined && current.inputHash !== segment.inputHash) {
+        throw new Error("curriculum segment changed");
+      }
+      this.curriculumSegments.set(
+        key,
+        current ?? {
+          attempts: 0,
+          inputHash: segment.inputHash,
+          state: "queued",
+        },
+      );
+    }
+  }
+
+  async claimCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    parentGenerationId: string,
+    segment: CurriculumSegmentManifestEntry,
+  ): Promise<CurriculumSegmentClaim> {
+    this.#assertAccess(access);
+    const state = this.curriculumSegments.get(
+      segmentKey(parentGenerationId, segment.id),
+    );
+    if (state === undefined || state.inputHash !== segment.inputHash) {
+      throw new Error("unknown curriculum segment");
+    }
+    if (state.state === "succeeded" && state.persisted !== undefined) {
+      return { kind: "completed", persisted: state.persisted };
+    }
+    if (state.state === "processing") {
+      return { kind: "active" };
+    }
+    if (state.state === "failed") {
+      return { kind: "failed" };
+    }
+    state.attempts += 1;
+    state.state = "processing";
+    return { attemptCount: state.attempts, kind: "claimed" };
+  }
+
+  async completeCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    completion: CurriculumSegmentCompletion,
+  ): Promise<void> {
+    this.#assertAccess(access);
+    const state = this.curriculumSegments.get(
+      segmentKey(completion.parentGenerationId, completion.segmentId),
+    );
+    if (
+      state === undefined ||
+      state.state !== "processing" ||
+      state.attempts !== completion.attemptCount ||
+      state.inputHash !== completion.inputHash
+    ) {
+      throw new Error("curriculum segment completion rejected");
+    }
+    state.persisted = {
+      attemptCount: state.attempts,
+      inputHash: completion.inputHash,
+      modelProvenance: completion.modelProvenance,
+      result: completion.result,
+      resultHash: completion.resultHash,
+      segmentId: completion.segmentId,
+    };
+    state.state = "succeeded";
+  }
+
+  async failCurriculumSegment(
+    access: AuthorizedSourceAccess,
+    failure: CurriculumSegmentFailure,
+  ): Promise<void> {
+    this.#assertAccess(access);
+    const state = this.curriculumSegments.get(
+      segmentKey(failure.parentGenerationId, failure.segmentId),
+    );
+    if (
+      state === undefined ||
+      state.state !== "processing" ||
+      state.attempts !== failure.attemptCount ||
+      state.inputHash !== failure.inputHash
+    ) {
+      throw new Error("curriculum segment failure rejected");
+    }
+    state.state =
+      failure.retryable && state.attempts < 3 ? "retry_scheduled" : "failed";
+  }
+
   async persistCurriculum(
     access: AuthorizedSourceAccess,
     generation: CurriculumGenerationRecord,
+    _deadlineMs: number,
   ): Promise<CurriculumOutline> {
     this.#assertAccess(access);
+    const existing = this.curriculumGenerations.find(
+      (entry) => entry.generationId === generation.generationId,
+    );
+    if (
+      existing !== undefined &&
+      canonicalJson(existing) !== canonicalJson(generation)
+    ) {
+      throw new Error("curriculum generation changed");
+    }
+    if (existing !== undefined) {
+      return materializeCurriculumOutline(access, existing);
+    }
     this.curriculumGenerations.push(generation);
     return materializeCurriculumOutline(access, generation);
   }
@@ -115,6 +252,10 @@ export class InMemoryContentRepository implements ContentRepositoryPort {
       throw new Error("authorization denied");
     }
   }
+}
+
+function segmentKey(parentGenerationId: string, segmentId: string): string {
+  return `${parentGenerationId}/${segmentId}`;
 }
 
 export class InMemoryVectorStore implements VectorStorePort {

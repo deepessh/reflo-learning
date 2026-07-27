@@ -136,7 +136,7 @@ function unsignedRun(
       contractVersion: "connected-demo-preflight-v1",
       versions: {
         delivery: "demo-delivery-v1",
-        model: "route-policy-v4/test-v1",
+        model: "route-policy-v5/test-v1",
         postgres: "reflo-schema-20260724000300",
         storage: "local-smoke-object-store-v1",
         vector: "litellm-dev-embedding-v1-1234567890abcdef",

@@ -733,7 +733,7 @@ describe("auth, library, and session-history API", () => {
           },
           {
             code: "available",
-            contractVersion: "route-policy-v4/test-adapter-v1",
+            contractVersion: "route-policy-v5/test-adapter-v1",
             name: "model",
           },
           {

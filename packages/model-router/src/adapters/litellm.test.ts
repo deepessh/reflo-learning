@@ -90,7 +90,7 @@ describe("LiteLLM development adapters", () => {
         stream: false,
       });
       const responseFormat = requests[0]?.body.response_format;
-      if (task === "tutor.answer.v1") {
+      if (task === "curriculum.segment.v1" || task === "tutor.answer.v1") {
         expect(responseFormat).toEqual({ type: "json_object" });
       } else {
         expect(responseFormat).toMatchObject({
@@ -150,7 +150,9 @@ describe("LiteLLM development adapters", () => {
       }
       expect(system).not.toHaveProperty("sourceMaterial");
       expect(user.sourceMaterial).toEqual(
-        "sourceSpans" in input ? input.sourceSpans : [],
+        "sourceSpans" in input
+          ? input.sourceSpans.map((span) => ({ id: span.id, text: span.text }))
+          : [],
       );
       expect(user.typedInput).not.toHaveProperty("sourceSpans");
       expect(user.typedInput).not.toHaveProperty("answer");
@@ -473,6 +475,45 @@ function textFixtures(): readonly {
             sourceSpanIds: ["span-1"],
           },
         ],
+      },
+    },
+    {
+      capability: "segmented curriculum generation",
+      input: {
+        courseTitle: "Cloud",
+        sectionPath: ["Networking"],
+        segmentId: "00000000-0000-5000-8000-000000000701",
+        segmentOrdinal: 0,
+        sourceOrderEnd: 0,
+        sourceOrderStart: 0,
+        sourceSpans: [
+          {
+            id: "span-1",
+            inputHash: "a".repeat(64),
+            sourceOrder: 0,
+            text: "A VPC is isolated.",
+          },
+        ],
+      },
+      task: "curriculum.segment.v1",
+      value: {
+        chapters: [
+          {
+            concepts: [
+              {
+                key: "vpc",
+                name: "VPC",
+                prerequisiteKeys: [],
+                sourceSpanIds: ["span-1"],
+              },
+            ],
+            sourceSpanIds: ["span-1"],
+            title: "Networking",
+          },
+        ],
+        kind: "instructional",
+        segmentId: "00000000-0000-5000-8000-000000000701",
+        segmentOrdinal: 0,
       },
     },
   ];

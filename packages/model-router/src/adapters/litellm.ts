@@ -41,6 +41,7 @@ const TEXT_TASKS = {
   ]),
   structured: new Set<ModelTaskId>([
     "assessment.quiz.v1",
+    "curriculum.segment.v1",
     "curriculum.structure.v1",
   ]),
 } as const;
@@ -592,6 +593,11 @@ function outputJsonSchema(
       return curriculumJsonSchema(
         invocation.input as ModelTaskInput<"curriculum.structure.v1">,
       );
+    case "curriculum.segment.v1":
+      // The OpenAI-compatible strict schema dialect rejects a root union.
+      // Keep the closed segment union in JSON mode and enforce it in
+      // RESULT_VALIDATORS.
+      return undefined;
     case "lesson.audio-script.v1":
       return audioScriptJsonSchema(
         invocation.input as ModelTaskInput<"lesson.audio-script.v1">,
@@ -621,34 +627,38 @@ function curriculumJsonSchema(
     input.sourceSpans.map((span) => span.id),
   );
   return exactObject({
-    chapters: {
-      items: exactObject({
-        concepts: {
-          items: exactObject({
-            key: {
+    chapters: curriculumChaptersJsonSchema(sourceSpanId),
+  });
+}
+
+function curriculumChaptersJsonSchema(sourceSpanId: JsonSchema): JsonSchema {
+  return {
+    items: exactObject({
+      concepts: {
+        items: exactObject({
+          key: {
+            pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+            type: "string",
+          },
+          name: nonEmptyStringSchema(),
+          prerequisiteKeys: {
+            items: {
               pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
               type: "string",
             },
-            name: nonEmptyStringSchema(),
-            prerequisiteKeys: {
-              items: {
-                pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
-                type: "string",
-              },
-              type: "array",
-            },
-            sourceSpanIds: nonEmptyArray(sourceSpanId),
-          }),
-          minItems: 1,
-          type: "array",
-        },
-        sourceSpanIds: nonEmptyArray(sourceSpanId),
-        title: nonEmptyStringSchema(),
-      }),
-      minItems: 1,
-      type: "array",
-    },
-  });
+            type: "array",
+          },
+          sourceSpanIds: nonEmptyArray(sourceSpanId),
+        }),
+        minItems: 1,
+        type: "array",
+      },
+      sourceSpanIds: nonEmptyArray(sourceSpanId),
+      title: nonEmptyStringSchema(),
+    }),
+    minItems: 1,
+    type: "array",
+  };
 }
 
 function lessonJsonSchema(

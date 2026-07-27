@@ -55,7 +55,7 @@ describe("typed model router", () => {
       effectiveModel: "qwen-plus",
       promptId: "curriculum-structure",
       requestedSelector: "qwen.structured",
-      routePolicyVersion: "route-policy-v4",
+      routePolicyVersion: "route-policy-v5",
       validationOutcome: "passed",
     });
     expect(result.provenance.promptDigest).toMatch(/^[a-f0-9]{64}$/);
@@ -71,6 +71,105 @@ describe("typed model router", () => {
     expect(traces.traces).toHaveLength(1);
     expect(traces.traces[0]?.attempts).toHaveLength(1);
     expect(traces.traces[0]?.promptVersion).toBe("2");
+  });
+
+  it("validates both closed curriculum segment variants and their identity", async () => {
+    const baseInput = {
+      courseTitle: "Course",
+      sectionPath: ["Unit 1"],
+      segmentId: "00000000-0000-5000-8000-000000000701",
+      segmentOrdinal: 0,
+      sourceOrderEnd: 0,
+      sourceOrderStart: 0,
+      sourceSpans: [
+        {
+          id: "span-1",
+          inputHash: "a".repeat(64),
+          sourceOrder: 0,
+          text: "Grounded source",
+        },
+      ],
+    } as const;
+    for (const value of [
+      {
+        chapters: [
+          {
+            concepts: [
+              {
+                key: "concept",
+                name: "Concept",
+                prerequisiteKeys: [],
+                sourceSpanIds: ["span-1"],
+              },
+            ],
+            sourceSpanIds: ["span-1"],
+            title: "Unit 1",
+          },
+        ],
+        kind: "instructional",
+        segmentId: baseInput.segmentId,
+        segmentOrdinal: 0,
+      },
+      {
+        kind: "non_instructional",
+        reason: "front_matter",
+        segmentId: baseInput.segmentId,
+        segmentOrdinal: 0,
+        sourceSpanIds: ["span-1"],
+      },
+    ]) {
+      const scripted = createScriptedAdapterRegistry({
+        "curriculum.segment.v1": [{ type: "result", value }],
+      });
+      await expect(
+        createModelRouter({
+          adapters: scripted.adapters,
+          traceSink: new InMemoryTraceSink(),
+        }).execute("curriculum.segment.v1", baseInput, { deadlineMs: 1_000 }),
+      ).resolves.toMatchObject({
+        provenance: {
+          inputSchemaVersion: "curriculum-segment-input-v1",
+          promptId: "curriculum-segment",
+          resultSchemaVersion: "curriculum-segment-result-v1",
+          task: "curriculum.segment.v1",
+        },
+        value,
+      });
+    }
+
+    for (const value of [
+      {
+        kind: "non_instructional",
+        reason: "front_matter",
+        segmentId: "foreign-segment",
+        segmentOrdinal: 0,
+        sourceSpanIds: ["span-1"],
+      },
+      {
+        kind: "non_instructional",
+        reason: "unknown",
+        segmentId: baseInput.segmentId,
+        segmentOrdinal: 0,
+        sourceSpanIds: ["span-1"],
+      },
+      {
+        kind: "non_instructional",
+        reason: "navigation",
+        segmentId: baseInput.segmentId,
+        segmentOrdinal: 0,
+        sourceSpanIds: [],
+      },
+    ]) {
+      const scripted = createScriptedAdapterRegistry({
+        "curriculum.segment.v1": [{ type: "result", value }],
+      });
+      await expect(
+        createModelRouter({
+          adapters: scripted.adapters,
+          traceSink: new InMemoryTraceSink(),
+        }).execute("curriculum.segment.v1", baseInput, { deadlineMs: 1_000 }),
+      ).rejects.toMatchObject({ code: "invalid_result" });
+    }
   });
 
   it("retries one normalized transient language failure without tracing diagnostics", async () => {
@@ -625,7 +724,7 @@ describe("trace allowlist", () => {
           durationMs: 1,
           finishedAt: "2026-07-19T00:00:00.001Z",
           outcome: "success",
-          routePolicyVersion: "route-policy-v4",
+          routePolicyVersion: "route-policy-v5",
           startedAt: "2026-07-19T00:00:00.000Z",
           task: "curriculum.structure.v1",
           [field]: "secret",
@@ -642,7 +741,7 @@ describe("trace allowlist", () => {
         durationMs: 1,
         finishedAt: "2026-07-19T00:00:00.001Z",
         outcome: "success",
-        routePolicyVersion: "route-policy-v4",
+        routePolicyVersion: "route-policy-v5",
         startedAt: "2026-07-19T00:00:00.000Z",
         task: "curriculum.structure.v1",
       },
@@ -664,7 +763,7 @@ describe("trace allowlist", () => {
         durationMs: 1,
         finishedAt: "2026-07-19T00:00:00.001Z",
         outcome: "success",
-        routePolicyVersion: "route-policy-v4",
+        routePolicyVersion: "route-policy-v5",
         startedAt: "2026-07-19T00:00:00.000Z",
         task: "curriculum.structure.v1",
       },

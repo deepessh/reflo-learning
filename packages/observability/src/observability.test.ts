@@ -35,22 +35,37 @@ const logicalTrace: ModelLogicalCallTrace = {
   promptDigest: "a".repeat(64),
   promptId: "assessment-grade-short-answer",
   promptVersion: "2",
-  routePolicyVersion: "route-policy-v4",
+  routePolicyVersion: "route-policy-v5",
   startedAt: "2026-07-24T20:00:00.000Z",
   task: "assessment.grade-short-answer.v1",
 };
 
 const operationalTrace: DemoOperationalTrace = {
   attemptCount: 1,
+  chapterCount: 3,
   component: "api",
+  compositionFinalizationMs: 8,
+  conceptCount: 12,
+  deadlineBudgetMs: 120_000,
   demoRunId: `demo-${"a".repeat(32)}`,
   durationMs: 12,
   environment: "staging",
   eventId: `evt-${"b".repeat(32)}`,
+  finalizationReserveMs: 12_000,
   finishedAt: "2026-07-24T20:00:00.012Z",
   operation: "test_delivery_dispatch",
   outcome: "success",
+  retryCount: 1,
   schemaVersion: DEMO_TELEMETRY_SCHEMA_VERSION,
+  segmentCount: 4,
+  segmentLatencyMaxMs: 6_000,
+  segmentLatencyMinMs: 2_000,
+  segmentLatencyP50Ms: 3_000,
+  segmentLatencyP95Ms: 6_000,
+  segmentQueueMaxMs: 250,
+  segmentQueueMinMs: 0,
+  segmentQueueP50Ms: 25,
+  segmentQueueP95Ms: 250,
   stage: "test_delivery",
   startedAt: "2026-07-24T20:00:00.000Z",
 };
@@ -197,6 +212,9 @@ describe("SLS OTLP adapter and health projection", () => {
     const serialized = String(request?.body);
     expect(serialized).toContain("reflo_stage");
     expect(serialized).toContain("test_delivery");
+    expect(serialized).toContain("reflo_composition_finalization_ms");
+    expect(serialized).toContain("reflo_segment_latency_p95_ms");
+    expect(serialized).toContain("reflo_segment_queue_p95_ms");
     expect(serialized).not.toContain("ak-id");
     expect(serialized).not.toContain("ak-secret");
   });

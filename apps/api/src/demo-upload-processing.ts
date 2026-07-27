@@ -246,6 +246,11 @@ function normalizeGenerationFailure(error: unknown): {
   }
   if (error instanceof RetrievalError) {
     switch (error.code) {
+      case "deadline_exceeded":
+        return {
+          failureClass: "generation_deadline_exceeded",
+          retryable: false,
+        };
       case "persistence_failure":
         return {
           failureClass: "generation_dependency_unavailable",

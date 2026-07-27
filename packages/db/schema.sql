@@ -1163,12 +1163,83 @@ CREATE TABLE public.curriculum_generation (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     activated_at timestamp with time zone,
     CONSTRAINT curriculum_generation_check CHECK (((status = ANY (ARRAY['active'::text, 'retired'::text])) = (activated_at IS NOT NULL))),
-    CONSTRAINT curriculum_generation_generation_version_check CHECK ((generation_version = 'curriculum-v1'::text)),
+    CONSTRAINT curriculum_generation_generation_version_check CHECK ((generation_version = ANY (ARRAY['curriculum-v1'::text, 'curriculum-v2'::text]))),
     CONSTRAINT curriculum_generation_result_hash_check CHECK ((result_hash ~ '^[a-f0-9]{64}$'::text)),
     CONSTRAINT curriculum_generation_status_check CHECK ((status = ANY (ARRAY['building'::text, 'active'::text, 'retired'::text, 'failed'::text])))
 );
 
 ALTER TABLE ONLY public.curriculum_generation FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: curriculum_partition_manifest; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.curriculum_partition_manifest (
+    id uuid NOT NULL,
+    owner_scope_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    source_document_id uuid NOT NULL,
+    embedding_generation_id uuid NOT NULL,
+    partition_version text NOT NULL,
+    composition_version text NOT NULL,
+    generation_version text NOT NULL,
+    tokenizer_version text NOT NULL,
+    manifest_hash text NOT NULL,
+    manifest jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT curriculum_partition_manifest_composition_version_check CHECK ((composition_version = 'curriculum-compose-v1'::text)),
+    CONSTRAINT curriculum_partition_manifest_generation_version_check CHECK ((generation_version = 'curriculum-v2'::text)),
+    CONSTRAINT curriculum_partition_manifest_manifest_hash_check CHECK ((manifest_hash ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT curriculum_partition_manifest_partition_version_check CHECK ((partition_version = 'curriculum-partition-v1'::text)),
+    CONSTRAINT curriculum_partition_manifest_tokenizer_version_check CHECK ((tokenizer_version = 'reflo-unicode-tokenizer-v1'::text))
+);
+
+ALTER TABLE ONLY public.curriculum_partition_manifest FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: curriculum_segment_operation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.curriculum_segment_operation (
+    owner_scope_id uuid NOT NULL,
+    parent_generation_id uuid NOT NULL,
+    segment_id uuid NOT NULL,
+    segment_ordinal integer NOT NULL,
+    idempotency_key text NOT NULL,
+    task_version text NOT NULL,
+    input_schema_version text NOT NULL,
+    result_schema_version text NOT NULL,
+    input_hash text NOT NULL,
+    ordered_source_span_ids jsonb NOT NULL,
+    ordered_source_input_hashes jsonb NOT NULL,
+    state text NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    lease_owner text,
+    lease_expires_at timestamp with time zone,
+    result_hash text,
+    result jsonb,
+    model_provenance jsonb,
+    sanitized_failure jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT curriculum_segment_operation_attempt_count_check CHECK ((attempt_count >= 0)),
+    CONSTRAINT curriculum_segment_operation_check CHECK (((state = 'processing'::text) = ((lease_owner IS NOT NULL) AND (lease_expires_at IS NOT NULL)))),
+    CONSTRAINT curriculum_segment_operation_check1 CHECK (((state = 'succeeded'::text) = ((result_hash IS NOT NULL) AND (result IS NOT NULL) AND (model_provenance IS NOT NULL)))),
+    CONSTRAINT curriculum_segment_operation_check2 CHECK (((state = ANY (ARRAY['succeeded'::text, 'failed_permanent'::text, 'cancelled'::text, 'expired'::text])) = (completed_at IS NOT NULL))),
+    CONSTRAINT curriculum_segment_operation_idempotency_key_check CHECK ((idempotency_key ~ '^[a-z]+/curriculum[.]segment/v1/[0-9a-f-]{36}/[0-9a-f-]{36}$'::text)),
+    CONSTRAINT curriculum_segment_operation_input_hash_check CHECK ((input_hash ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT curriculum_segment_operation_input_schema_version_check CHECK ((input_schema_version = 'curriculum-segment-input-v1'::text)),
+    CONSTRAINT curriculum_segment_operation_result_hash_check CHECK (((result_hash IS NULL) OR (result_hash ~ '^[a-f0-9]{64}$'::text))),
+    CONSTRAINT curriculum_segment_operation_result_schema_version_check CHECK ((result_schema_version = 'curriculum-segment-result-v1'::text)),
+    CONSTRAINT curriculum_segment_operation_segment_ordinal_check CHECK ((segment_ordinal >= 0)),
+    CONSTRAINT curriculum_segment_operation_state_check CHECK ((state = ANY (ARRAY['queued'::text, 'processing'::text, 'retry_scheduled'::text, 'succeeded'::text, 'failed_permanent'::text, 'cancelled'::text, 'expired'::text]))),
+    CONSTRAINT curriculum_segment_operation_task_version_check CHECK ((task_version = 'curriculum.segment.v1'::text))
+);
+
+ALTER TABLE ONLY public.curriculum_segment_operation FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -2477,6 +2548,54 @@ ALTER TABLE ONLY public.curriculum_generation
 
 
 --
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_owner_scope_id_course_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_partition_manifest
+    ADD CONSTRAINT curriculum_partition_manifest_owner_scope_id_course_id_id_key UNIQUE (owner_scope_id, course_id, id);
+
+
+--
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_owner_scope_id_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_partition_manifest
+    ADD CONSTRAINT curriculum_partition_manifest_owner_scope_id_id_key UNIQUE (owner_scope_id, id);
+
+
+--
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_partition_manifest
+    ADD CONSTRAINT curriculum_partition_manifest_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: curriculum_segment_operation curriculum_segment_operation_owner_scope_id_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_segment_operation
+    ADD CONSTRAINT curriculum_segment_operation_owner_scope_id_idempotency_key_key UNIQUE (owner_scope_id, idempotency_key);
+
+
+--
+-- Name: curriculum_segment_operation curriculum_segment_operation_owner_scope_id_parent_generati_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_segment_operation
+    ADD CONSTRAINT curriculum_segment_operation_owner_scope_id_parent_generati_key UNIQUE (owner_scope_id, parent_generation_id, segment_ordinal);
+
+
+--
+-- Name: curriculum_segment_operation curriculum_segment_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_segment_operation
+    ADD CONSTRAINT curriculum_segment_operation_pkey PRIMARY KEY (owner_scope_id, parent_generation_id, segment_id);
+
+
+--
 -- Name: delivery_item delivery_item_owner_scope_id_delivery_id_item_order_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3195,6 +3314,13 @@ CREATE UNIQUE INDEX concept_chapter_order_idx ON public.concept USING btree (own
 --
 
 CREATE UNIQUE INDEX concept_generation_key_idx ON public.concept USING btree (owner_scope_id, curriculum_generation_id, concept_key) WHERE (curriculum_generation_id IS NOT NULL);
+
+
+--
+-- Name: curriculum_segment_operation_state_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX curriculum_segment_operation_state_idx ON public.curriculum_segment_operation USING btree (owner_scope_id, parent_generation_id, state, segment_ordinal);
 
 
 --
@@ -3931,6 +4057,38 @@ ALTER TABLE ONLY public.curriculum_generation
 
 ALTER TABLE ONLY public.curriculum_generation
     ADD CONSTRAINT curriculum_generation_owner_scope_id_source_document_id_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_owner_scope_id_course_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_partition_manifest
+    ADD CONSTRAINT curriculum_partition_manifest_owner_scope_id_course_id_fkey FOREIGN KEY (owner_scope_id, course_id) REFERENCES public.course(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_owner_scope_id_embedding_gen_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_partition_manifest
+    ADD CONSTRAINT curriculum_partition_manifest_owner_scope_id_embedding_gen_fkey FOREIGN KEY (owner_scope_id, embedding_generation_id) REFERENCES public.source_embedding_generation(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_owner_scope_id_source_docume_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_partition_manifest
+    ADD CONSTRAINT curriculum_partition_manifest_owner_scope_id_source_docume_fkey FOREIGN KEY (owner_scope_id, source_document_id) REFERENCES public.source_document(owner_scope_id, id);
+
+
+--
+-- Name: curriculum_segment_operation curriculum_segment_operation_owner_scope_id_parent_generat_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.curriculum_segment_operation
+    ADD CONSTRAINT curriculum_segment_operation_owner_scope_id_parent_generat_fkey FOREIGN KEY (owner_scope_id, parent_generation_id) REFERENCES public.curriculum_partition_manifest(owner_scope_id, id);
 
 
 --
@@ -4840,6 +4998,32 @@ CREATE POLICY curriculum_generation_active_membership ON public.curriculum_gener
 
 
 --
+-- Name: curriculum_partition_manifest; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.curriculum_partition_manifest ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: curriculum_partition_manifest curriculum_partition_manifest_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY curriculum_partition_manifest_active_membership ON public.curriculum_partition_manifest USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
+-- Name: curriculum_segment_operation; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.curriculum_segment_operation ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: curriculum_segment_operation curriculum_segment_operation_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY curriculum_segment_operation_active_membership ON public.curriculum_segment_operation USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: delivery_item; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -5424,4 +5608,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260724000100'),
     ('20260724000200'),
     ('20260724000300'),
-    ('20260726000100');
+    ('20260726000100'),
+    ('20260727000100');

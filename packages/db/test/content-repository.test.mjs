@@ -90,6 +90,15 @@ test(
         firstSegment,
       );
       assert.deepEqual(firstClaim, { attemptCount: 1, kind: "claimed" });
+      const lease = await client.query(
+        `SELECT round(extract(epoch FROM
+                  (lease_expires_at - updated_at)) * 1000)::integer AS lease_ms
+         FROM curriculum_segment_operation
+         WHERE owner_scope_id = $1 AND parent_generation_id = $2
+           AND segment_id = $3`,
+        [ids.scope, manifest.parentGenerationId, firstSegment.id],
+      );
+      assert.equal(lease.rows[0]?.lease_ms, 70_000);
       assert.deepEqual(
         await repository.claimCurriculumSegment(
           access,

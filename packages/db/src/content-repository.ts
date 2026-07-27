@@ -1,4 +1,5 @@
 import {
+  CURRICULUM_SEGMENT_DEADLINE_MS,
   RetrievalError,
   canonicalJson,
   materializeCurriculumOutline,
@@ -20,6 +21,7 @@ import {
 import pg, { type PoolClient } from "pg";
 
 const { Pool } = pg;
+const CURRICULUM_SEGMENT_LEASE_MS = CURRICULUM_SEGMENT_DEADLINE_MS + 10_000;
 
 interface AuthorizedRow extends Record<string, unknown> {
   course_id: string;
@@ -644,12 +646,18 @@ export class PostgresContentRepository implements ContentRepositoryPort {
          SET state = 'processing', attempt_count = attempt_count + 1,
              lease_owner = 'content_curriculum_segment_v1',
              lease_expires_at =
-               clock_timestamp() + interval '35 seconds',
+               clock_timestamp() +
+                 ($4::bigint * interval '1 millisecond'),
              sanitized_failure = NULL, updated_at = clock_timestamp()
          WHERE owner_scope_id = $1 AND parent_generation_id = $2
            AND segment_id = $3
          RETURNING attempt_count`,
-        [access.ownerScopeId, parentGenerationId, segment.id],
+        [
+          access.ownerScopeId,
+          parentGenerationId,
+          segment.id,
+          CURRICULUM_SEGMENT_LEASE_MS,
+        ],
       );
       const attemptCount = claimed.rows[0]?.attempt_count;
       if (attemptCount === undefined) {

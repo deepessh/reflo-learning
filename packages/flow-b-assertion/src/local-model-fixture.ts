@@ -109,9 +109,9 @@ const server = createServer(async (request, response) => {
           ? grade(user)
           : task === "curriculum.segment.v1"
             ? curriculumSegment(user)
-          : task === "lesson.reteach.v1"
-            ? reteach(user)
-            : null;
+            : task === "lesson.reteach.v1"
+              ? reteach(user)
+              : null;
       if (value === null) {
         sendJson(response, 400, { error: "unsupported_fixture_task" });
         return;

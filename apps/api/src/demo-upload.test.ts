@@ -285,7 +285,7 @@ function createFixture() {
 
 class FakeRepository implements DemoUploadPersistence {
   readonly claimCourseGeneration = vi.fn(async () => ({
-    deadlineMs: 120_000,
+    deadlineMs: 240_000,
     kind: "claimed" as const,
   }));
   readonly completeCourseGeneration = vi.fn(async () => undefined);

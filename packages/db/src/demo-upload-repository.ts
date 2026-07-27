@@ -1,9 +1,12 @@
-import type { ScopeAuthorizationContext } from "@reflo/retrieval";
+import {
+  CURRICULUM_PARENT_DEADLINE_MS,
+  type ScopeAuthorizationContext,
+} from "@reflo/retrieval";
 import pg, { type PoolClient } from "pg";
 
 const { Pool } = pg;
 const GENERATION_LEASE_OWNER = "api_demo_upload_generation_v1";
-const GENERATION_LEASE_MS = 150_000;
+const GENERATION_LEASE_MS = 300_000;
 const MAX_GENERATION_DELIVERIES = 3;
 
 export interface DemoUploadCreate {
@@ -173,11 +176,13 @@ export class PostgresDemoUploadRepository {
            (id, owner_scope_id, operation_name, operation_version,
             idempotency_key, state, deadline_at)
          VALUES ($1, $2, 'curriculum.generate', 1, $3, 'queued',
-                 clock_timestamp() + interval '2 minutes')`,
+                 clock_timestamp() +
+                   ($4::bigint * interval '1 millisecond'))`,
         [
           input.generationOperationId,
           input.authorization.ownerScopeId,
           `${this.#environment}/curriculum.generate/v1/${input.courseId}`,
+          CURRICULUM_PARENT_DEADLINE_MS,
         ],
       );
       await client.query(
@@ -356,7 +361,10 @@ export class PostgresDemoUploadRepository {
         ],
       );
       return {
-        deadlineMs: Math.min(120_000, Number(attempt.deadline_ms)),
+        deadlineMs: Math.min(
+          CURRICULUM_PARENT_DEADLINE_MS,
+          Number(attempt.deadline_ms),
+        ),
         kind: "claimed",
       };
     });

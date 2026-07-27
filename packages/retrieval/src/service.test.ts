@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 
 import { chunkNormalizedDocument } from "./chunker.js";
 import {
+  CURRICULUM_FINALIZATION_RESERVE_MS,
+  CURRICULUM_PARENT_DEADLINE_MS,
+  CURRICULUM_SEGMENT_DEADLINE_MS,
   EMBEDDING_DIMENSIONS,
   type CurriculumOrchestrationMetrics,
 } from "./contracts.js";
@@ -114,7 +117,7 @@ describe("retrieval vertical slice", () => {
     const result = await service.buildCurriculum({
       authorization,
       courseId: access.courseId,
-      deadlineMs: 120_000,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
       document,
       sourceDocumentId: access.sourceDocumentId,
     });
@@ -140,7 +143,7 @@ describe("retrieval vertical slice", () => {
     const replay = await service.buildCurriculum({
       authorization,
       courseId: access.courseId,
-      deadlineMs: 120_000,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
       document,
       sourceDocumentId: access.sourceDocumentId,
     });
@@ -251,15 +254,16 @@ describe("retrieval vertical slice", () => {
     const result = await service.buildCurriculum({
       authorization,
       courseId: access.courseId,
-      deadlineMs: 120_000,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
       document: multiSectionDocument(8),
       sourceDocumentId: access.sourceDocumentId,
     });
 
     expect(maximumActive).toBe(4);
     expect(result.orchestration.segmentCount).toBe(8);
-    expect(result.orchestration.finalizationReserveMs).toBe(12_000);
-    expect(result.orchestration.parentDeadlineMs).toBe(120_000);
+    expect(CURRICULUM_SEGMENT_DEADLINE_MS).toBe(60_000);
+    expect(result.orchestration.finalizationReserveMs).toBe(24_000);
+    expect(result.orchestration.parentDeadlineMs).toBe(240_000);
     expect(result.orchestration.segmentAttemptCounts).toEqual(
       Array.from({ length: 8 }, () => 1),
     );
@@ -315,7 +319,7 @@ describe("retrieval vertical slice", () => {
     const command = {
       authorization,
       courseId: access.courseId,
-      deadlineMs: 120_000,
+      deadlineMs: CURRICULUM_PARENT_DEADLINE_MS,
       document,
       sourceDocumentId: access.sourceDocumentId,
     } as const;
@@ -340,7 +344,7 @@ describe("retrieval vertical slice", () => {
     expect(repository.curriculumGenerations).toHaveLength(0);
   });
 
-  it("does not launch segment work inside the twelve-second reserve", async () => {
+  it("does not launch segment work inside the twenty-four-second reserve", async () => {
     const repository = new InMemoryContentRepository(access);
     const vectors = new InMemoryVectorStore();
     const scripted = createScriptedAdapterRegistry({
@@ -367,7 +371,7 @@ describe("retrieval vertical slice", () => {
       service.buildCurriculum({
         authorization,
         courseId: access.courseId,
-        deadlineMs: 12_000,
+        deadlineMs: CURRICULUM_FINALIZATION_RESERVE_MS,
         document,
         sourceDocumentId: access.sourceDocumentId,
       }),

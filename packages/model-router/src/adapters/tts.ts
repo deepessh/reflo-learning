@@ -18,7 +18,10 @@ import {
 export { NodePiperSynthesisProcess } from "./piper-process.js";
 export type { NodePiperProcessOptions } from "./piper-process.js";
 
-export const QWEN_TTS_ADAPTER_VERSION = "qwen-tts-adapter-v1" as const;
+export const QWEN_TTS_ADAPTER_VERSION = "qwen3-tts-flash-adapter-v2" as const;
+export const QWEN_3_TTS_FLASH_MODEL = "qwen3-tts-flash" as const;
+export const QWEN_3_TTS_FLASH_MODEL_VERSION =
+  "qwen3-tts-flash-2025-11-27" as const;
 export const PIPER_TTS_ADAPTER_VERSION = "piper-tts-adapter-v1" as const;
 export const PIPER_ENGINE_VERSION = "1.4.2" as const;
 export const PIPER_VOICE_ID = "en_US-ljspeech-high" as const;
@@ -92,19 +95,21 @@ export interface PiperVoiceProfile {
 
 export function createQwenTtsAdapter(options: {
   readonly client: ModelStudioTtsClient;
-  readonly effectiveModelVersion: string;
+  readonly driftCanaryPassed: boolean;
+  readonly effectiveModelVersion: typeof QWEN_3_TTS_FLASH_MODEL_VERSION;
+  readonly model: typeof QWEN_3_TTS_FLASH_MODEL;
 }): SpeechModelPort {
-  assertSafeVersion(options.effectiveModelVersion);
+  assertQwenTtsOptions(options);
   return {
     descriptor: {
       adapterVersion: QWEN_TTS_ADAPTER_VERSION,
       capability: "speech",
-      driftCanaryPassed: true,
-      effectiveModel: "qwen-tts",
+      driftCanaryPassed: options.driftCanaryPassed,
+      effectiveModel: options.model,
       effectiveModelVersion: options.effectiveModelVersion,
       maxImmediateAttempts: 1,
       mediaSubmissionIdempotent: false,
-      mutableAlias: false,
+      mutableAlias: true,
       selector: "qwen-tts.primary",
     },
     async synthesize(invocation): Promise<AdapterResponse> {
@@ -113,18 +118,26 @@ export function createQwenTtsAdapter(options: {
         const response = await options.client.synthesize(
           {
             idempotencyKey: input.operationId,
-            model: "qwen-tts",
+            model: options.model,
             narration: input.narration,
             speakingRate: input.speakingRate,
             voiceProfileId: input.voiceProfileId,
           },
           invocation.signal,
         );
+        if (response.engineVersion !== options.effectiveModelVersion) {
+          throw new ModelAdapterError({
+            safeCode: "request_rejected",
+            submissionState: "accepted",
+            transient: false,
+          });
+        }
         return {
+          identity: { effectiveModel: options.model },
           value: materializeAudioPayload(
             input,
             response,
-            "qwen-tts-settings-v1",
+            "qwen3-tts-flash-settings-v1",
           ),
         };
       } catch (error) {
@@ -335,6 +348,24 @@ function assertPiperProfile(profile: PiperVoiceProfile): void {
     !/^[a-f0-9]{64}$/.test(profile.configSha256) ||
     !/^[a-f0-9]{40}$/.test(profile.artifactRevision) ||
     !/^piper-voice-[a-z0-9.-]+$/.test(profile.voiceArtifactVersion)
+  ) {
+    throw new ModelAdapterError({
+      safeCode: "invalid_request",
+      submissionState: "not_accepted",
+      transient: false,
+    });
+  }
+}
+
+function assertQwenTtsOptions(options: {
+  readonly driftCanaryPassed: boolean;
+  readonly effectiveModelVersion: string;
+  readonly model: string;
+}): void {
+  if (
+    typeof options.driftCanaryPassed !== "boolean" ||
+    options.model !== QWEN_3_TTS_FLASH_MODEL ||
+    options.effectiveModelVersion !== QWEN_3_TTS_FLASH_MODEL_VERSION
   ) {
     throw new ModelAdapterError({
       safeCode: "invalid_request",

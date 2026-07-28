@@ -8,6 +8,6 @@ OpenTofu 1.12.0 with `aliyun/alicloud` 1.283.0 is the effective infrastructure p
 - `environments/pilot/`: isolated pilot root
 - `modules/`: reusable Alibaba Cloud modules
 
-Issue #199 introduces the first HCL for the bootstrap control plane and the non-compute dev foundation. It follows ADR 0043's protected-GitHub-secret exception, OIDC-to-STS identity, private OSS/TableStore state boundary, explicit roots, and no-workspace rule. Paid runtime classes and deployable services remain gated on the human approvals listed in issue #199; the presence of configuration never authorizes a plan or apply.
+Issue #199 introduces the first HCL for the bootstrap control plane and the non-compute dev foundation. It follows ADR 0043's protected-GitHub-secret exception, OIDC-to-STS identity, private OSS/TableStore state boundary, explicit roots, and no-workspace rule. The minimal bounded dev deployment excludes Alibaba KMS Secrets Manager, SLS, and Alibaba Container Registry. Paid runtime classes and deployable services that remain in scope are gated on the human approvals listed in issue #199; the presence of configuration never authorizes a plan or apply.
 
 Repository checks already reject committed state, plans, variable-value files, crash logs, unpinned declared core/provider versions, local backends outside bootstrap, and workspace-based environment selection.

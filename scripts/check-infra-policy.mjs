@@ -168,6 +168,16 @@ export function checkInfraPolicy(rootDirectory) {
       "bounded Demo Day dev must not retain a KMS Secrets Manager dependency",
     );
   }
+  if (/alicloud_(?:log|sls)(?:_|")/i.test(devSource)) {
+    errors.push(
+      "bounded Demo Day dev must not provision SLS-specific observability infrastructure",
+    );
+  }
+  if (/alicloud_cr(?:_|")/i.test(devSource)) {
+    errors.push(
+      "bounded Demo Day dev must not provision Alibaba Container Registry",
+    );
+  }
 
   const bucketModule = readInfrastructureTree(
     root,

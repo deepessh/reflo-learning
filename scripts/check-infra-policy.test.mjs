@@ -39,13 +39,15 @@ test("infrastructure policy rejects backend and provider drift", () => {
   });
 });
 
-test("infrastructure policy rejects credentials, KMS dev custody, and public buckets", () => {
+test("infrastructure policy rejects excluded dev services, credentials, and public buckets", () => {
   withInfrastructureFixture((fixture) => {
     const devPath = path.join(fixture, "infra/environments/dev/main.tf");
     writeFileSync(
       devPath,
       `${readFileSync(devPath, "utf8")}
 resource "alicloud_kms_secret" "forbidden" {}
+resource "alicloud_log_project" "forbidden" {}
+resource "alicloud_cr_ee_instance" "forbidden" {}
 `,
     );
 
@@ -75,6 +77,8 @@ resource "alicloud_kms_secret" "forbidden" {}
     const errors = checkInfraPolicy(fixture).join("\n");
     assert.match(errors, /credentials must come only from the protected OIDC/);
     assert.match(errors, /must not retain a KMS Secrets Manager dependency/);
+    assert.match(errors, /must not provision SLS-specific observability/);
+    assert.match(errors, /must not provision Alibaba Container Registry/);
     assert.match(errors, /private OSS module is missing required control/);
   });
 });

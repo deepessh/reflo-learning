@@ -28,7 +28,7 @@ module "state_bucket" {
 resource "alicloud_ots_instance" "state_lock" {
   name               = var.lock_instance_name
   description        = "Reflo OpenTofu state locking"
-  instance_type      = "Capacity"
+  instance_type      = "HighPerformance"
   network_type_acl   = ["INTERNET"]
   network_source_acl = ["TRUST_PROXY"]
   resource_group_id  = alicloud_resource_manager_resource_group.bootstrap.id

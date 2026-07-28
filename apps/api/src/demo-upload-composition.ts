@@ -33,6 +33,10 @@ import {
   type DemoUploadProcessingWork,
 } from "./demo-upload.js";
 import { DemoUploadProcessingService } from "./demo-upload-processing.js";
+import {
+  createAliOssConnectedObjectStore,
+  type ConnectedObjectStore,
+} from "./ali-oss-object-store.js";
 
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
@@ -140,7 +144,20 @@ export async function createDemoUploadRuntime(
     environment: deployment,
   });
   const vectorPool = new PostgresAnalyticDbPool(vectorDatabaseUrl);
-  const objects = new LocalSmokeObjectStore(artifactRoot);
+  const storageMode =
+    input.REFLO_CONNECTED_DEMO_OBJECT_STORE?.trim() ?? "local-filesystem-v1";
+  const objects: ConnectedObjectStore =
+    storageMode === "local-filesystem-v1"
+      ? new LocalSmokeObjectStore(artifactRoot)
+      : storageMode === "alibaba-private-oss-v1"
+        ? await createAliOssConnectedObjectStore({
+            artifactBucket: required(input, "REFLO_OSS_ARTIFACT_BUCKET"),
+            deliveryBucket: required(input, "REFLO_OSS_DELIVERY_BUCKET"),
+            quarantineBucket: required(input, "REFLO_OSS_QUARANTINE_BUCKET"),
+            region: required(input, "REFLO_ALIBABA_REGION"),
+            roleName: required(input, "REFLO_OSS_RUNTIME_ROLE_NAME"),
+          })
+        : failObjectStoreMode();
   const liteLlm = createLiteLlmDevAdapters(input);
   const tracing = createDemoTraceRuntime(input, {
     component: "api-demo-upload",
@@ -279,6 +296,10 @@ export async function createDemoUploadRuntime(
     await runtime.close().catch(() => undefined);
     throw error;
   }
+}
+
+function failObjectStoreMode(): never {
+  throw new Error("REFLO_CONNECTED_DEMO_OBJECT_STORE is not allowlisted");
 }
 
 function distribution(values: readonly number[]): {

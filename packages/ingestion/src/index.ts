@@ -16,3 +16,7 @@ export * from "./adapters/normalized-output-file.js";
 export * from "./adapters/ephemeral-workspace.js";
 export * from "./adapters/object-artifact-publisher.js";
 export * from "./adapters/quarantine-staging.js";
+export {
+  createEcsRamRoleCredentialLoader,
+  type TemporaryCloudCredentials,
+} from "./adapters/ecs-ram-role-credentials.js";

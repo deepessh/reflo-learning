@@ -54,12 +54,17 @@ import {
 } from "@reflo/tutor-agent";
 
 import { ConnectedStudyService } from "./connected-study.js";
+import {
+  createAliOssConnectedObjectStore,
+  type ConnectedObjectStore,
+} from "./ali-oss-object-store.js";
 
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
 const MODEL_ADAPTER = "litellm-dev";
 const POSTGRES_CONTRACT_VERSION = "reflo-schema-20260724000300";
-const STORAGE_CONTRACT_VERSION = "local-smoke-object-store-v1";
+const LOCAL_STORAGE_CONTRACT_VERSION = "local-smoke-object-store-v1";
+const ALIBABA_STORAGE_CONTRACT_VERSION = "alibaba-private-oss-v1";
 
 export interface ConnectedAssessmentRuntime {
   gradeReplacement(input: {
@@ -106,10 +111,10 @@ export interface ConnectedDemoRuntime {
   close(): Promise<void>;
 }
 
-export function createConnectedDemoRuntime(
+export async function createConnectedDemoRuntime(
   input: NodeJS.ProcessEnv,
   deployment: Deployment,
-): ConnectedDemoRuntime {
+): Promise<ConnectedDemoRuntime> {
   const mode = input.REFLO_CONNECTED_DEMO_MODE;
   if (mode === undefined || mode === "disabled") {
     if (deployment !== "dev") {
@@ -140,10 +145,12 @@ export function createConnectedDemoRuntime(
 
   const databaseUrl = required(input, "DATABASE_URL");
   const vectorDatabaseUrl = required(input, "REFLO_VECTOR_DATABASE_URL");
-  const artifactRoot = requiredAbsolute(
-    input,
-    "REFLO_CONNECTED_DEMO_ARTIFACT_ROOT",
-  );
+  const storageMode =
+    input.REFLO_CONNECTED_DEMO_OBJECT_STORE?.trim() ?? "local-filesystem-v1";
+  const artifactRoot =
+    storageMode === "local-filesystem-v1"
+      ? requiredAbsolute(input, "REFLO_CONNECTED_DEMO_ARTIFACT_ROOT")
+      : undefined;
   const tracing = createDemoTraceRuntime(input, {
     component: "api",
     deployment,
@@ -172,7 +179,18 @@ export function createConnectedDemoRuntime(
     retestItemTypes: ["short_answer"],
   });
   const connectedRepository = new PostgresConnectedDemoRepository(databaseUrl);
-  const objects = new LocalSmokeObjectStore(artifactRoot);
+  const objects: ConnectedObjectStore =
+    artifactRoot !== undefined
+      ? new LocalSmokeObjectStore(artifactRoot)
+      : storageMode === "alibaba-private-oss-v1"
+        ? await createAliOssConnectedObjectStore({
+            artifactBucket: required(input, "REFLO_OSS_ARTIFACT_BUCKET"),
+            deliveryBucket: required(input, "REFLO_OSS_DELIVERY_BUCKET"),
+            quarantineBucket: required(input, "REFLO_OSS_QUARANTINE_BUCKET"),
+            region: required(input, "REFLO_ALIBABA_REGION"),
+            roleName: required(input, "REFLO_OSS_RUNTIME_ROLE_NAME"),
+          })
+        : failObjectStoreMode();
   const tutorArtifacts = new AuthorizedLocalTutorArtifacts(objects);
   const tutorAgent = new TutorAgentService({
     artifacts: tutorArtifacts,
@@ -195,7 +213,6 @@ export function createConnectedDemoRuntime(
   return {
     assessment,
     preflight: new RuntimePreflight({
-      artifactRoot,
       boundary: {
         contractVersion: CONNECTED_DEMO_BOUNDARY_VERSION,
         destinationClass: "staff-controlled-test",
@@ -207,11 +224,24 @@ export function createConnectedDemoRuntime(
         delivery: DEMO_DELIVERY_CONTRACT_VERSION,
         model: `${ROUTE_POLICY_VERSION}/${LITELLM_DEV_ADAPTER_VERSION}`,
         postgres: POSTGRES_CONTRACT_VERSION,
-        storage: STORAGE_CONTRACT_VERSION,
+        storage:
+          artifactRoot === undefined
+            ? ALIBABA_STORAGE_CONTRACT_VERSION
+            : LOCAL_STORAGE_CONTRACT_VERSION,
         vector: liteLlm.embeddingProfileVersion,
       },
       liteLlmApiKey: required(input, "REFLO_LITELLM_API_KEY"),
       liteLlmBaseUrl: new URL(required(input, "REFLO_LITELLM_BASE_URL")),
+      storage: async () => {
+        if (artifactRoot !== undefined) {
+          await mkdir(artifactRoot, { mode: 0o700, recursive: true });
+          await access(artifactRoot, fsConstants.R_OK | fsConstants.W_OK);
+          return;
+        }
+        await objects.exists(
+          "owners/00000000-0000-4000-8000-000000000000/ingestion-artifacts/v1/preflight.json",
+        );
+      },
       vector: vectorPool,
     }),
     sessions: {
@@ -319,7 +349,7 @@ class ConnectedDemoSeedService {
 }
 
 class AuthorizedLocalTutorArtifacts implements TutorArtifactStorePort {
-  constructor(private readonly objects: LocalSmokeObjectStore) {}
+  constructor(private readonly objects: ConnectedObjectStore) {}
 
   putImmutable(
     input: Parameters<TutorArtifactStorePort["putImmutable"]>[0],
@@ -348,7 +378,6 @@ class AuthorizedLocalTutorArtifacts implements TutorArtifactStorePort {
 class RuntimePreflight implements ConnectedDemoPreflight {
   constructor(
     private readonly dependencies: {
-      readonly artifactRoot: string;
       readonly boundary: ConnectedDemoPreflightView["boundary"];
       readonly database: Pick<PostgresConnectedDemoRepository, "ping">;
       readonly dependencyVersions: Readonly<
@@ -356,6 +385,7 @@ class RuntimePreflight implements ConnectedDemoPreflight {
       >;
       readonly liteLlmApiKey: string;
       readonly liteLlmBaseUrl: URL;
+      readonly storage: () => Promise<void>;
       readonly vector: Pick<AnalyticDbPoolPort, "connect">;
     },
   ) {}
@@ -426,14 +456,7 @@ class RuntimePreflight implements ConnectedDemoPreflight {
   }
 
   async #storage(): Promise<void> {
-    await mkdir(this.dependencies.artifactRoot, {
-      mode: 0o700,
-      recursive: true,
-    });
-    await access(
-      this.dependencies.artifactRoot,
-      fsConstants.R_OK | fsConstants.W_OK,
-    );
+    await this.dependencies.storage();
   }
 
   async #vector(): Promise<void> {
@@ -449,6 +472,10 @@ class RuntimePreflight implements ConnectedDemoPreflight {
       session.release();
     }
   }
+}
+
+function failObjectStoreMode(): never {
+  throw new Error("REFLO_CONNECTED_DEMO_OBJECT_STORE is not allowlisted");
 }
 
 function assessmentEvidence(

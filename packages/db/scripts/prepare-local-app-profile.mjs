@@ -14,6 +14,7 @@ const packageRoot = path.resolve(
   "..",
 );
 const LOCAL_API_ROLE = "reflo_api";
+const LOCAL_VECTOR_API_ROLE = "reflo_vector_api";
 
 export function resolveLocalSchemaPaths() {
   const retrievalEntry = fileURLToPath(import.meta.resolve("@reflo/retrieval"));
@@ -54,6 +55,10 @@ export async function prepareLocalApplicationProfile(
   await provisionLocalApiRole(databaseUrl, apiPassword);
   await applySql(vectorDatabaseUrl, paths.vector);
   await applySql(vectorDatabaseUrl, paths.developmentVector);
+  const vectorPassword = environment.REFLO_LOCAL_API_VECTOR_PASSWORD;
+  if (vectorPassword !== undefined) {
+    await provisionLocalVectorApiRole(vectorDatabaseUrl, vectorPassword);
+  }
 
   const vector = new pg.Client(clientConfiguration(vectorDatabaseUrl));
   try {
@@ -79,6 +84,54 @@ export async function prepareLocalApplicationProfile(
     outcome: "ready",
     runtimeDatabaseRole: "dml_only",
   });
+}
+
+export async function provisionLocalVectorApiRole(connectionString, password) {
+  if (!/^[a-f0-9]{48}$/.test(password)) {
+    throw new Error("local vector API database password is invalid");
+  }
+  const client = new pg.Client(clientConfiguration(connectionString));
+  try {
+    await client.connect();
+    const role = await client.query(
+      `SELECT rolname
+       FROM pg_roles
+       WHERE rolname = $1`,
+      [LOCAL_VECTOR_API_ROLE],
+    );
+    await executeFormatted(
+      client,
+      role.rowCount === 0
+        ? "CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
+        : "ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS",
+      [LOCAL_VECTOR_API_ROLE, password],
+    );
+    const database = await client.query(
+      "SELECT current_database() AS database_name",
+    );
+    const databaseName = database.rows[0]?.database_name;
+    if (typeof databaseName !== "string" || databaseName === "") {
+      throw new Error("local vector application database name is unavailable");
+    }
+    await executeFormatted(client, "GRANT CONNECT ON DATABASE %I TO %I", [
+      databaseName,
+      LOCAL_VECTOR_API_ROLE,
+    ]);
+    await executeFormatted(client, "GRANT USAGE ON SCHEMA public TO %I", [
+      LOCAL_VECTOR_API_ROLE,
+    ]);
+    for (const table of [
+      "reflo_source_span_embedding_v1",
+      "reflo_source_span_embedding_litellm_dev_v1",
+    ]) {
+      await executeFormatted(client, "GRANT SELECT, INSERT ON TABLE %I TO %I", [
+        table,
+        LOCAL_VECTOR_API_ROLE,
+      ]);
+    }
+  } finally {
+    await client.end();
+  }
 }
 
 export async function provisionLocalApiRole(connectionString, password) {

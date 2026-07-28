@@ -8,3 +8,8 @@ output "foundation" {
     bucket_names       = { for name, bucket in module.private_bucket : name => bucket.bucket_name }
   }
 }
+
+output "runtime" {
+  description = "Non-secret runtime identities used for deployment evidence and DNS preparation."
+  value       = module.runtime.runtime
+}

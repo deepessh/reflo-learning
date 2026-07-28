@@ -1,7 +1,36 @@
 # Development environment root
 
-The issue #199 root uses a partial OSS backend so credentials remain in the protected GitHub OIDC execution context. Initialization must provide the bootstrap output values for `bucket`, `region`, `tablestore_endpoint`, and `tablestore_table`; the committed configuration fixes the environment prefix/key, encryption, and private ACL.
+This issue #199 root declares the minimum bounded Alibaba Cloud dev topology:
 
-The current slice declares the isolated resource group, segmented VPC/VSwitch/security-group foundation, and distinct private buckets for deployment artifacts, ClamAV snapshots, quarantine, validated delivery assets, and web artifacts. All buckets block public access and use AES-256 server-side encryption. Artifact and scanner-snapshot buckets retain version history.
+- an isolated resource group and application/data/parser network boundaries;
+- private OSS buckets for artifacts, ClamAV snapshots, quarantine, delivery,
+  and web assets;
+- one API/orchestrator ECS host and one dedicated parser-supervisor ECS host;
+- RDS PostgreSQL, AnalyticDB for PostgreSQL, and private RocketMQ;
+- Function Compute jobs with zero provisioned concurrency;
+- optional overseas web and private-delivery CDN domains, enabled only after
+  the owner supplies the approved hostname boundary; and
+- action-scoped ECS, Function Compute, and deployment identities.
 
-Compute, database, vector-store, queue, CDN, Function Compute, DNS, and messaging resources remain deliberately undeclared until issue #199 records the required region, resource-class/spending, identity, hostname, and dedicated-destination approvals. The bounded Demo Day dev environment intentionally excludes Alibaba KMS Secrets Manager, SLS, and Alibaba Container Registry: it must satisfy the repository trace contract without SLS-specific infrastructure and deploy exact immutable artifacts without an Alibaba private registry. No plan or apply from this root is authorized before the remaining approvals are recorded.
+Every paid class is a required value inside
+`approved_runtime_configuration`; there are no SKU defaults. A valid issue
+#199 approval-comment URL is also required. Singapore `ap-southeast-1` is the
+only authorized dev region. This configuration does not authorize an account,
+resource class, spend, bootstrap identity, hostname, messaging destination,
+plan, or apply.
+
+The partial OSS backend receives `bucket`, `region`,
+`tablestore_endpoint`, and `tablestore_table` only from the protected workflow.
+Credentials remain in its repository/environment-bound OIDC context. Dev
+runtime secrets arrive as the one protected JSON object `runtime_secrets` and
+become secret-bearing encrypted state under ADR 0043. No raw plan or state is
+uploaded as a GitHub artifact.
+
+The bounded dev root contains no Alibaba KMS Secrets Manager, SLS, or Alibaba
+Container Registry. Deployment artifacts use SHA-256-addressed private OSS
+keys. ECS consumes the API archive and parser OCI archive by exact digest; FC
+consumes a content-addressed ZIP. Operational traces use the repository's
+closed structured-log contract rather than SLS.
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for bootstrap, protected deployment,
+recovery, rollback, and teardown procedures.

@@ -31,6 +31,7 @@
     "package:api": "node scripts/prepare-artifact.mjs api && pnpm --filter @reflo/api --prod deploy .artifacts/api",
     "package:jobs": "node scripts/prepare-artifact.mjs jobs && pnpm --filter @reflo/jobs --prod deploy .artifacts/jobs",
     "package:web": "node scripts/prepare-artifact.mjs web apps/web/out",
+    "package:dev-deployment": "scripts/prepare-dev-deployment-artifacts.sh",
     "toolchain:check": "node scripts/check-toolchain-policy.mjs",
     "workflows:check": "node scripts/check-required-checks.mjs",
     "test": "pnpm governance:check && turbo run test && node --test scripts/*.test.mjs && scripts/governance-python.sh -m unittest scripts/test_validate_adrs.py scripts/test_validate_architecture.py scripts/test_validate_problem_docs.py scripts/test_adr_skills.py scripts/test_work_item.py scripts/test_agent_improvements.py"

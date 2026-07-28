@@ -83,6 +83,37 @@ resource "alicloud_cr_ee_instance" "forbidden" {}
   });
 });
 
+test("infrastructure policy rejects mutable-name GitHub OIDC subjects", () => {
+  withInfrastructureFixture((fixture) => {
+    const mainPath = path.join(fixture, "infra/bootstrap/main.tf");
+    writeFileSync(
+      mainPath,
+      readFileSync(mainPath, "utf8").replace(
+        '"${var.github_oidc_subject_prefix}:environment:dev"',
+        '"repo:${var.github_repository}:environment:dev"',
+      ),
+    );
+
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /exact repository, protected dev environment/);
+  });
+});
+
+test("infrastructure policy rejects an unprotected or artifact-exporting dev apply", () => {
+  withInfrastructureFixture((fixture) => {
+    const workflow = path.join(fixture, ".github/workflows/deploy-dev.yml");
+    writeFileSync(
+      workflow,
+      readFileSync(workflow, "utf8")
+        .replace("environment: dev", "environment: staging")
+        .concat("\n# actions/upload-artifact\npull_request:\n"),
+    );
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /missing required control: environment: dev/);
+    assert.match(errors, /plans, and apply out of pull-request/);
+  });
+});
+
 function withInfrastructureFixture(run) {
   const fixture = mkdtempSync(path.join(tmpdir(), "reflo-infra-policy-"));
   try {
@@ -93,6 +124,12 @@ function withInfrastructureFixture(run) {
     cpSync(path.join(root, "infra"), path.join(fixture, "infra"), {
       recursive: true,
       filter: (source) => !source.includes(`${path.sep}.terraform${path.sep}`),
+    });
+    cpSync(path.join(root, ".github"), path.join(fixture, ".github"), {
+      recursive: true,
+    });
+    cpSync(path.join(root, "scripts"), path.join(fixture, "scripts"), {
+      recursive: true,
     });
     run(fixture);
   } finally {

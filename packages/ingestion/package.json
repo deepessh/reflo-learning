@@ -24,6 +24,9 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@alicloud/credentials": "2.4.5"
+  },
   "devDependencies": {
     "@types/node": "24.13.3",
     "typescript": "5.9.3",

@@ -1,5 +1,25 @@
 variable "region" {
-  description = "Human-approved Alibaba Cloud region for the dev environment."
+  description = "Owner-approved Alibaba Cloud region for the bounded dev environment."
+  type        = string
+
+  validation {
+    condition     = var.region == "ap-southeast-1"
+    error_message = "Issue #199 authorizes only Singapore ap-southeast-1 for bounded dev."
+  }
+}
+
+variable "deployment_oidc_provider_arn" {
+  description = "Bootstrap-created GitHub OIDC provider ARN supplied only by the protected workflow."
+  type        = string
+}
+
+variable "deployment_oidc_token_file" {
+  description = "Ephemeral protected-runner path containing the short-lived GitHub OIDC token."
+  type        = string
+}
+
+variable "deployment_role_arn" {
+  description = "Bootstrap-created repository/environment-bound deployment role ARN."
   type        = string
 }
 
@@ -52,4 +72,125 @@ variable "tags" {
     ManagedBy   = "opentofu"
     Project     = "reflo"
   }
+}
+
+variable "approved_spend_reference" {
+  description = "Sanitized issue #199 comment URL authorizing the exact paid classes in this plan."
+  type        = string
+
+  validation {
+    condition     = can(regex("^https://github\\.com/deepessh/reflo-learning/issues/199#issuecomment-[0-9]+$", var.approved_spend_reference))
+    error_message = "approved_spend_reference must be an exact issue #199 approval comment URL."
+  }
+}
+
+variable "approved_runtime_configuration" {
+  description = "Exact owner-approved, non-secret runtime classes and artifact/hostname identities."
+  type = object({
+    ecs = object({
+      api_image_id                = string
+      api_ingress_cidrs           = list(string)
+      api_instance_type           = string
+      api_system_disk_category    = string
+      api_system_disk_size_gib    = number
+      api_public_bandwidth_mbps   = number
+      parser_image_id             = string
+      parser_instance_type        = string
+      parser_system_disk_category = string
+      parser_system_disk_size_gib = number
+    })
+    rds = object({
+      engine_version       = string
+      instance_type        = string
+      instance_storage_gib = number
+      storage_type         = string
+    })
+    analyticdb = object({
+      db_instance_category       = string
+      db_instance_class          = string
+      db_instance_mode           = string
+      engine_version             = string
+      instance_spec              = string
+      seg_node_num               = number
+      seg_storage_type           = string
+      seg_disk_performance_level = string
+      storage_size_gib           = number
+    })
+    rocketmq = object({
+      message_retention_hours = number
+      msg_process_spec        = string
+      send_receive_ratio      = string
+      series_code             = string
+      sub_series_code         = string
+    })
+    function_compute = object({
+      cpu             = number
+      disk_size_mb    = number
+      memory_size_mb  = number
+      timeout_seconds = number
+    })
+    cdn = object({
+      delivery_domain_name = optional(string)
+      web_domain_name      = optional(string)
+    })
+  })
+}
+
+variable "deployment_manifest" {
+  description = "Freshly generated, non-secret immutable artifact identities for the exact deployed commit."
+  type = object({
+    artifacts = object({
+      api = object({
+        key    = string
+        sha256 = string
+      })
+      jobs = object({
+        key    = string
+        sha256 = string
+      })
+      parser = object({
+        key    = string
+        sha256 = string
+      })
+    })
+    commit          = string
+    contractVersion = string
+  })
+
+  validation {
+    condition = (
+      var.deployment_manifest.contractVersion == "reflo-dev-deployment-artifacts-v1" &&
+      can(regex("^[a-f0-9]{40}$", var.deployment_manifest.commit)) &&
+      alltrue([
+        for artifact in values(var.deployment_manifest.artifacts) :
+        can(regex("^[a-f0-9]{64}$", artifact.sha256))
+      ])
+    )
+    error_message = "deployment_manifest must be the exact v1 manifest generated for one immutable commit."
+  }
+}
+
+variable "runtime_secrets" {
+  description = "Protected dev-only runtime values accepted into encrypted OpenTofu state under ADR 0043."
+  type = object({
+    analyticdb_account_password = string
+    analyticdb_runtime_password = string
+    api_environment             = map(string)
+    api_tls_certificate         = string
+    api_tls_private_key         = string
+    cdn_certificates = optional(object({
+      delivery = optional(object({
+        private_key        = string
+        server_certificate = string
+      }))
+      web = optional(object({
+        private_key        = string
+        server_certificate = string
+      }))
+    }), {})
+    function_environment = map(string)
+    rds_admin_password   = string
+    rds_runtime_password = string
+  })
+  sensitive = true
 }

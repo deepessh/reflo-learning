@@ -37,8 +37,8 @@ export class DemoDeliveryService {
   constructor(
     private readonly dependencies: {
       readonly destinations: readonly DemoDeliveryDestination[];
-      readonly emailLinkOrigin: string;
-      readonly emailLinkSigningKey: Uint8Array;
+      readonly emailLinkOrigin?: string;
+      readonly emailLinkSigningKey?: Uint8Array;
       readonly knowledge: DeliveryKnowledgePort;
       readonly messagePorts: readonly DemoMessagePort[];
       readonly repository: DemoDeliveryRepository;
@@ -48,9 +48,13 @@ export class DemoDeliveryService {
     this.#ports = new Map(
       dependencies.messagePorts.map((port) => [port.provider, port]),
     );
+    const hasEmail = this.#destinations.some(
+      (destination) => destination.provider === "email",
+    );
     if (
-      dependencies.emailLinkSigningKey.byteLength !== 32 ||
-      !validHttpsOrigin(dependencies.emailLinkOrigin) ||
+      (hasEmail &&
+        (dependencies.emailLinkSigningKey?.byteLength !== 32 ||
+          !validHttpsOrigin(dependencies.emailLinkOrigin ?? ""))) ||
       new Set(dependencies.messagePorts.map((port) => port.provider)).size !==
         dependencies.messagePorts.length
     ) {
@@ -101,7 +105,7 @@ export class DemoDeliveryService {
     let emailLink: string | null = null;
     if (delivery.provider === "email") {
       const token = this.#emailToken(delivery, destination);
-      emailLink = `${this.dependencies.emailLinkOrigin}/demo/review?token=${encodeURIComponent(token)}`;
+      emailLink = `${this.#emailLinkOrigin()}/demo/review?token=${encodeURIComponent(token)}`;
       await this.dependencies.repository.bindEmailToken(
         command.authorization,
         delivery.deliveryId,
@@ -359,9 +363,21 @@ export class DemoDeliveryService {
   }
 
   #sign(payload: string): string {
-    return createHmac("sha256", this.dependencies.emailLinkSigningKey)
+    return createHmac("sha256", this.#emailSigningKey())
       .update(payload)
       .digest("base64url");
+  }
+
+  #emailLinkOrigin(): string {
+    const origin = this.dependencies.emailLinkOrigin;
+    if (origin === undefined) throw new DeliveryError("invalid_configuration");
+    return origin;
+  }
+
+  #emailSigningKey(): Uint8Array {
+    const key = this.dependencies.emailLinkSigningKey;
+    if (key === undefined) throw new DeliveryError("invalid_configuration");
+    return key;
   }
 }
 

@@ -148,7 +148,7 @@ export function checkInfraPolicy(rootDirectory) {
   const bootstrapMain = readIfPresent(root, "infra/bootstrap/main.tf");
   if (
     !bootstrapMain.includes(
-      '"repo:${var.github_repository}:environment:dev"',
+      '"${var.github_oidc_subject_prefix}:environment:dev"',
     ) ||
     !bootstrapMain.includes('"oidc:sub"') ||
     !bootstrapMain.includes('"oidc:aud"') ||
@@ -158,11 +158,25 @@ export function checkInfraPolicy(rootDirectory) {
       "bootstrap OIDC trust must bind the exact repository, protected dev environment, issuer, audience, and subject",
     );
   }
-
-  const devSource = readInfrastructureTree(
+  const bootstrapVariables = readIfPresent(
     root,
-    path.join("infra", "environments", "dev"),
+    "infra/bootstrap/variables.tf",
   );
+  if (
+    !bootstrapVariables.includes('variable "github_oidc_subject_prefix"') ||
+    !bootstrapVariables.includes(
+      "^repo:[A-Za-z0-9_.-]+@[0-9]+/[A-Za-z0-9_.-]+@[0-9]+$",
+    )
+  ) {
+    errors.push(
+      "bootstrap must require GitHub's exact immutable repository OIDC subject prefix",
+    );
+  }
+
+  const devSource = [
+    readInfrastructureTree(root, path.join("infra", "environments", "dev")),
+    readInfrastructureTree(root, path.join("infra", "modules", "demo-runtime")),
+  ].join("\n");
   if (/alicloud_(?:kms|kms_secret|kms_key)|secretsmanager/i.test(devSource)) {
     errors.push(
       "bounded Demo Day dev must not retain a KMS Secrets Manager dependency",
@@ -176,6 +190,61 @@ export function checkInfraPolicy(rootDirectory) {
   if (/alicloud_cr(?:_|")/i.test(devSource)) {
     errors.push(
       "bounded Demo Day dev must not provision Alibaba Container Registry",
+    );
+  }
+  for (const requiredResource of [
+    'resource "alicloud_instance"',
+    'resource "alicloud_db_instance"',
+    'resource "alicloud_gpdb_instance"',
+    'resource "alicloud_rocketmq_instance"',
+    'resource "alicloud_fcv3_function"',
+    'resource "alicloud_cdn_domain_new"',
+    'resource "alicloud_oss_bucket_object"',
+  ]) {
+    if (!devSource.includes(requiredResource)) {
+      errors.push(
+        `bounded dev runtime is missing required minimal service declaration: ${requiredResource}`,
+      );
+    }
+  }
+  if (
+    !devSource.includes('var.region == "ap-southeast-1"') ||
+    !devSource.includes('variable "approved_spend_reference"') ||
+    !devSource.includes('variable "approved_runtime_configuration"')
+  ) {
+    errors.push(
+      "bounded dev must fail closed on the approved Singapore region and exact paid-class approval inputs",
+    );
+  }
+
+  const deployWorkflow = readIfPresent(
+    root,
+    ".github/workflows/deploy-dev.yml",
+  );
+  for (const requiredControl of [
+    "workflow_dispatch:",
+    "id-token: write",
+    "environment: dev",
+    "github.ref == 'refs/heads/main'",
+    "reflo-protected-dev-apply",
+    "tofu -chdir=infra/environments/dev plan",
+    "tofu -chdir=infra/environments/dev apply",
+    'rm -f "$plan_path"',
+  ]) {
+    if (!deployWorkflow.includes(requiredControl)) {
+      errors.push(
+        `protected dev workflow is missing required control: ${requiredControl}`,
+      );
+    }
+  }
+  if (
+    deployWorkflow.includes("pull_request:") ||
+    deployWorkflow.includes("actions/upload-artifact") ||
+    !deployWorkflow.includes("scripts/write-github-oidc-token.mjs") ||
+    !deployWorkflow.includes("TF_VAR_runtime_secrets")
+  ) {
+    errors.push(
+      "protected dev workflow must keep OIDC, environment secrets, plans, and apply out of pull-request and artifact boundaries",
     );
   }
 

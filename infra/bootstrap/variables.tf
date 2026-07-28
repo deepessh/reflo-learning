@@ -31,12 +31,25 @@ variable "lock_table_name" {
 }
 
 variable "github_repository" {
-  description = "Exact owner/repository allowed to assume the dev deployment role."
+  description = "Human-readable owner/repository used for audit metadata only."
   type        = string
 
   validation {
     condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
     error_message = "github_repository must be an exact owner/repository pair."
+  }
+}
+
+variable "github_oidc_subject_prefix" {
+  description = "Exact immutable sub_claim_prefix returned by GitHub for this repository."
+  type        = string
+
+  validation {
+    condition = can(regex(
+      "^repo:[A-Za-z0-9_.-]+@[0-9]+/[A-Za-z0-9_.-]+@[0-9]+$",
+      var.github_oidc_subject_prefix,
+    ))
+    error_message = "github_oidc_subject_prefix must be GitHub's exact immutable repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID prefix."
   }
 }
 

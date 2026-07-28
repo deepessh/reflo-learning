@@ -1,0 +1,136 @@
+name: Deploy protected dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_reference:
+        description: Sanitized issue #199 account, region, resource-class, and spend approval reference
+        required: true
+        type: string
+      expected_commit:
+        description: Exact 40-character main commit approved for deployment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: reflo-protected-dev-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/main'
+    environment: dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      ALIBABA_CLOUD_ROLE_ARN: ${{ vars.REFLO_ALIBABA_DEV_DEPLOYMENT_ROLE_ARN }}
+      ALIBABA_CLOUD_OIDC_PROVIDER_ARN: ${{ vars.REFLO_ALIBABA_OIDC_PROVIDER_ARN }}
+      ALIBABA_CLOUD_ROLE_SESSION_NAME: reflo-github-dev
+      REFLO_ALIBABA_OIDC_AUDIENCE: ${{ vars.REFLO_ALIBABA_OIDC_AUDIENCE }}
+      REFLO_OIDC_TOKEN_FILE: ${{ runner.temp }}/reflo-github-oidc.jwt
+      ALIBABA_CLOUD_OIDC_TOKEN_FILE: ${{ runner.temp }}/reflo-github-oidc.jwt
+      REFLO_BACKEND_BUCKET: ${{ vars.REFLO_DEV_STATE_BUCKET }}
+      REFLO_BACKEND_REGION: ${{ vars.REFLO_ALIBABA_REGION }}
+      REFLO_BACKEND_TABLESTORE_ENDPOINT: ${{ vars.REFLO_DEV_LOCK_ENDPOINT }}
+      REFLO_BACKEND_TABLESTORE_TABLE: ${{ vars.REFLO_DEV_LOCK_TABLE }}
+      TF_VAR_region: ${{ vars.REFLO_ALIBABA_REGION }}
+      TF_VAR_deployment_oidc_provider_arn: ${{ vars.REFLO_ALIBABA_OIDC_PROVIDER_ARN }}
+      TF_VAR_deployment_oidc_token_file: ${{ runner.temp }}/reflo-github-oidc.jwt
+      TF_VAR_deployment_role_arn: ${{ vars.REFLO_ALIBABA_DEV_DEPLOYMENT_ROLE_ARN }}
+      TF_VAR_bucket_names: ${{ vars.REFLO_DEV_BUCKET_NAMES }}
+      TF_VAR_subnets: ${{ vars.REFLO_DEV_SUBNETS }}
+      TF_VAR_approved_spend_reference: ${{ inputs.approval_reference }}
+      TF_VAR_approved_runtime_configuration: ${{ vars.REFLO_DEV_RUNTIME_CONFIGURATION }}
+      TF_VAR_runtime_secrets: ${{ secrets.REFLO_DEV_RUNTIME_SECRETS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.expected_commit }}
+      - name: Enforce the exact protected main revision
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          test "$GITHUB_SHA" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse "$EXPECTED_COMMIT")" = "$(git rev-parse origin/main)"
+          test "$(git rev-parse "$EXPECTED_COMMIT^{commit}")" = "$EXPECTED_COMMIT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Install exact OpenTofu
+        env:
+          TOFU_LINUX_AMD64_SHA256: 8d7650fd42b6d790f9f747604393ccd0a9035376bccc4f1688b905d7c5bb1137
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/tofu.zip" \
+            https://github.com/opentofu/opentofu/releases/download/v1.12.0/tofu_1.12.0_linux_amd64.zip
+          echo "$TOFU_LINUX_AMD64_SHA256  $RUNNER_TEMP/tofu.zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$RUNNER_TEMP/reflo-tofu"
+          echo "$RUNNER_TEMP/reflo-tofu" >> "$GITHUB_PATH"
+      - name: Obtain repository-bound Alibaba OIDC token
+        run: node scripts/write-github-oidc-token.mjs
+      - name: Build immutable registry-free deployment artifacts
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.34.5 --activate
+          pnpm install --frozen-lockfile
+          pnpm package:dev-deployment
+      - name: Validate deployment boundary
+        run: |
+          node scripts/check-infra-policy.mjs
+          tofu -chdir=infra/environments/dev init \
+            -backend-config="bucket=$REFLO_BACKEND_BUCKET" \
+            -backend-config="region=$REFLO_BACKEND_REGION" \
+            -backend-config="tablestore_endpoint=$REFLO_BACKEND_TABLESTORE_ENDPOINT" \
+            -backend-config="tablestore_table=$REFLO_BACKEND_TABLESTORE_TABLE"
+          tofu -chdir=infra/environments/dev validate
+      - name: Create and apply one fresh exact plan
+        run: |
+          plan_path="$RUNNER_TEMP/reflo-dev.tfplan"
+          plan_log="$RUNNER_TEMP/reflo-dev-plan.log"
+          apply_log="$RUNNER_TEMP/reflo-dev-apply.log"
+          if ! tofu -chdir=infra/environments/dev plan \
+            -lock=true \
+            -var-file="$GITHUB_WORKSPACE/.artifacts/deployment/deployment.tfvars.json" \
+            -out="$plan_path" >"$plan_log" 2>&1; then
+            echo "::error::Protected dev plan failed; inspect only on the ephemeral runner."
+            exit 1
+          fi
+          plan_digest="$(sha256sum "$plan_path" | cut -d' ' -f1)"
+          echo "::notice title=Sanitized dev plan identity::sha256:$plan_digest commit:$GITHUB_SHA approval:${{ inputs.approval_reference }}"
+          if ! tofu -chdir=infra/environments/dev apply \
+            -lock=true \
+            "$plan_path" >"$apply_log" 2>&1; then
+            echo "::error::Protected dev apply failed; inspect only on the ephemeral runner."
+            exit 1
+          fi
+          rm -f "$plan_path" "$plan_log" "$apply_log"
+      - name: Verify post-apply convergence
+        run: |
+          convergence_log="$RUNNER_TEMP/reflo-dev-convergence.log"
+          set +e
+          tofu -chdir=infra/environments/dev plan \
+            -lock=true \
+            -detailed-exitcode \
+            -var-file="$GITHUB_WORKSPACE/.artifacts/deployment/deployment.tfvars.json" \
+            >"$convergence_log" 2>&1
+          convergence_status="$?"
+          set -e
+          if test "$convergence_status" -ne 0; then
+            echo "::error::Protected dev did not converge to a no-change plan; inspect only on the ephemeral runner."
+            exit 1
+          fi
+          rm -f "$convergence_log"
+      - name: Destroy local secret-bearing material
+        if: always()
+        run: |
+          rm -f "$REFLO_OIDC_TOKEN_FILE"
+          find "$RUNNER_TEMP" -maxdepth 1 -type f \
+            \( -name 'reflo-dev.tfplan' -o -name 'reflo-dev-*.log' \) \
+            -delete

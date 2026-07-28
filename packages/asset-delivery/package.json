@@ -23,7 +23,11 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
+  "dependencies": {
+    "ali-oss": "6.23.0"
+  },
   "devDependencies": {
+    "@types/ali-oss": "6.23.3",
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
     "vitest": "4.1.10"

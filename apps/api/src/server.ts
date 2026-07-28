@@ -1,6 +1,7 @@
 import {
   createServer,
   type IncomingMessage,
+  type RequestListener,
   type Server,
   type ServerResponse,
 } from "node:http";
@@ -127,7 +128,14 @@ export function createApiServer(
   environment: ServerEnvironment,
   dependencies: ApiDependencies = {},
 ): Server {
-  return createServer(async (request, response) => {
+  return createServer(createApiRequestListener(environment, dependencies));
+}
+
+export function createApiRequestListener(
+  environment: ServerEnvironment,
+  dependencies: ApiDependencies = {},
+): RequestListener {
+  return async (request, response) => {
     if (request.method === "GET" && request.url === "/health") {
       const body: HealthResponse = {
         contractVersion: HEALTH_CONTRACT_VERSION,
@@ -762,7 +770,7 @@ export function createApiServer(
       "content-type": "application/json; charset=utf-8",
     });
     response.end(JSON.stringify({ error: "not_found" }));
-  });
+  };
 }
 
 function currentTime(dependencies: ApiDependencies): string {

@@ -18,4 +18,11 @@ terraform {
 
 provider "alicloud" {
   region = var.region
+
+  assume_role_with_oidc {
+    oidc_provider_arn = var.deployment_oidc_provider_arn
+    oidc_token_file   = var.deployment_oidc_token_file
+    role_arn          = var.deployment_role_arn
+    role_session_name = "reflo-github-dev"
+  }
 }

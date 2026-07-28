@@ -8,6 +8,18 @@ resource "alicloud_resource_manager_resource_group" "dev" {
   }
 }
 
+locals {
+  artifact_identity = {
+    api_archive_key       = var.deployment_manifest.artifacts.api.key
+    api_archive_sha256    = var.deployment_manifest.artifacts.api.sha256
+    parser_archive_key    = var.deployment_manifest.artifacts.parser.key
+    parser_archive_sha256 = var.deployment_manifest.artifacts.parser.sha256
+  }
+  function_compute = merge(var.approved_runtime_configuration.function_compute, {
+    code_object_key = var.deployment_manifest.artifacts.jobs.key
+  })
+}
+
 module "network" {
   source = "../../modules/dev-network"
 
@@ -33,4 +45,40 @@ module "private_bucket" {
   resource_group_id  = alicloud_resource_manager_resource_group.dev.id
   tags               = merge(var.tags, { Boundary = each.key })
   versioning_enabled = contains(["artifacts", "clamav_snapshots"], each.key)
+}
+
+module "runtime" {
+  source = "../../modules/demo-runtime"
+
+  name_prefix        = var.name_prefix
+  resource_group_id  = alicloud_resource_manager_resource_group.dev.id
+  vpc_id             = module.network.vpc_id
+  vpc_cidr           = var.vpc_cidr
+  vswitch_ids        = module.network.vswitch_ids
+  security_group_ids = module.network.security_group_ids
+  bucket_names       = { for name, bucket in module.private_bucket : name => bucket.bucket_name }
+  ecs                = var.approved_runtime_configuration.ecs
+  artifact_identity  = local.artifact_identity
+  api_environment = merge(var.runtime_secrets.api_environment, {
+    API_HOST                       = "0.0.0.0"
+    API_PORT                       = "443"
+    REFLO_API_TLS_CERTIFICATE_FILE = "/etc/reflo/tls/api.crt"
+    REFLO_API_TLS_PRIVATE_KEY_FILE = "/etc/reflo/tls/api.key"
+  })
+  api_tls_certificate         = var.runtime_secrets.api_tls_certificate
+  api_tls_private_key         = var.runtime_secrets.api_tls_private_key
+  rds                         = var.approved_runtime_configuration.rds
+  rds_admin_password          = var.runtime_secrets.rds_admin_password
+  rds_runtime_password        = var.runtime_secrets.rds_runtime_password
+  analyticdb                  = var.approved_runtime_configuration.analyticdb
+  analyticdb_account_password = var.runtime_secrets.analyticdb_account_password
+  analyticdb_runtime_password = var.runtime_secrets.analyticdb_runtime_password
+  rocketmq                    = var.approved_runtime_configuration.rocketmq
+  function_compute            = local.function_compute
+  function_environment        = var.runtime_secrets.function_environment
+  cdn                         = var.approved_runtime_configuration.cdn
+  cdn_certificates            = var.runtime_secrets.cdn_certificates
+  tags = merge(var.tags, {
+    Approval = var.approved_spend_reference
+  })
 }

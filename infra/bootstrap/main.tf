@@ -1,6 +1,9 @@
 locals {
-  github_oidc_issuer  = "https://token.actions.githubusercontent.com"
-  github_oidc_subject = "repo:${var.github_repository}:environment:dev"
+  github_oidc_issuer = "https://token.actions.githubusercontent.com"
+  # GitHub returns this immutable prefix from the repository OIDC
+  # customization endpoint. Do not reconstruct it from a mutable repository
+  # name or hard-code one repository's numeric identity in this module.
+  github_oidc_subject = "${var.github_oidc_subject_prefix}:environment:dev"
 }
 
 resource "alicloud_resource_manager_resource_group" "bootstrap" {
@@ -132,5 +135,117 @@ resource "alicloud_ram_policy" "dev_state" {
 resource "alicloud_ram_role_policy_attachment" "dev_state" {
   policy_name = alicloud_ram_policy.dev_state.policy_name
   policy_type = alicloud_ram_policy.dev_state.type
+  role_name   = alicloud_ram_role.dev_deployment.role_name
+}
+
+resource "alicloud_ram_policy" "dev_infrastructure" {
+  policy_name     = "reflo-dev-infrastructure"
+  description     = "Action-scoped mutation for the issue 199 minimal dev service families"
+  rotate_strategy = "DeleteOldestNonDefaultVersionWhenLimitExceeded"
+  tags            = var.tags
+
+  policy_document = jsonencode({
+    Version = "1"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "resourcemanager:CreateResourceGroup",
+          "resourcemanager:DeleteResourceGroup",
+          "resourcemanager:GetResourceGroup",
+          "resourcemanager:ListResourceGroups",
+          "resourcemanager:UpdateResourceGroup",
+          "vpc:CreateVpc",
+          "vpc:DeleteVpc",
+          "vpc:Describe*",
+          "vpc:ModifyVpcAttribute",
+          "vpc:CreateVSwitch",
+          "vpc:DeleteVSwitch",
+          "vpc:ModifyVSwitchAttribute",
+          "ecs:AuthorizeSecurityGroup",
+          "ecs:CreateSecurityGroup",
+          "ecs:DeleteSecurityGroup",
+          "ecs:Describe*",
+          "ecs:ModifySecurityGroupAttribute",
+          "ecs:RevokeSecurityGroup",
+          "ecs:RunInstances",
+          "ecs:DeleteInstances",
+          "ecs:ModifyInstanceAttribute",
+          "ecs:ModifyInstanceNetworkSpec",
+          "ecs:AttachInstanceRamRole",
+          "ecs:DetachInstanceRamRole",
+          "rds:CreateDBInstance",
+          "rds:DeleteDBInstance",
+          "rds:Describe*",
+          "rds:ModifyDBInstance*",
+          "rds:CreateAccount",
+          "rds:DeleteAccount",
+          "rds:ResetAccountPassword",
+          "rds:CreateDatabase",
+          "rds:DeleteDatabase",
+          "gpdb:CreateDBInstance",
+          "gpdb:DeleteDBInstance",
+          "gpdb:Describe*",
+          "gpdb:ModifyDBInstance*",
+          "gpdb:CreateAccount",
+          "gpdb:DeleteAccount",
+          "gpdb:ResetAccountPassword",
+          "rocketmq:CreateInstance",
+          "rocketmq:DeleteInstance",
+          "rocketmq:Get*",
+          "rocketmq:List*",
+          "rocketmq:UpdateInstance",
+          "rocketmq:CreateTopic",
+          "rocketmq:DeleteTopic",
+          "rocketmq:UpdateTopic",
+          "rocketmq:CreateConsumerGroup",
+          "rocketmq:DeleteConsumerGroup",
+          "rocketmq:UpdateConsumerGroup",
+          "fc:CreateFunction",
+          "fc:DeleteFunction",
+          "fc:GetFunction",
+          "fc:ListFunctions",
+          "fc:UpdateFunction",
+          "cdn:AddCdnDomain",
+          "cdn:BatchSetCdnDomainConfig",
+          "cdn:DeleteCdnDomain",
+          "cdn:Describe*",
+          "cdn:ModifyCdnDomain",
+          "cdn:SetCdnDomainCSRCertificate",
+          "ram:AttachPolicyToRole",
+          "ram:CreatePolicy",
+          "ram:CreateRole",
+          "ram:DeletePolicy",
+          "ram:DeleteRole",
+          "ram:DetachPolicyFromRole",
+          "ram:GetPolicy",
+          "ram:GetRole",
+          "ram:ListPoliciesForRole",
+          "ram:SetDefaultPolicyVersion",
+          "ram:UpdatePolicyDescription",
+          "ram:UpdateRole",
+          "ram:CreatePolicyVersion",
+          "ram:DeletePolicyVersion",
+          "oss:GetBucket",
+          "oss:GetObject",
+          "oss:ListObjects",
+          "oss:PutBucket",
+          "oss:PutBucketACL",
+          "oss:PutBucketEncryption",
+          "oss:PutBucketPublicAccessBlock",
+          "oss:PutBucketVersioning",
+          "oss:PutObject",
+          "oss:DeleteObject",
+          "oss:DeleteBucket",
+        ]
+        Resource = ["*"]
+      },
+    ]
+  })
+}
+
+resource "alicloud_ram_role_policy_attachment" "dev_infrastructure" {
+  policy_name = alicloud_ram_policy.dev_infrastructure.policy_name
+  policy_type = alicloud_ram_policy.dev_infrastructure.type
   role_name   = alicloud_ram_role.dev_deployment.role_name
 }

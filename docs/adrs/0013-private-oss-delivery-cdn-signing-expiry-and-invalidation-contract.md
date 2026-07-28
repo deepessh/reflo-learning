@@ -1,7 +1,7 @@
 ---
 id: "0013"
 title: "Private OSS delivery, CDN signing, expiry, and invalidation contract"
-status: Accepted
+status: Superseded
 date: "2026-07-19"
 aliases: [D-GH-13]
 prd_references: "`prds/reflo-prd.md` §6 F2 and F7, §9, §10, and §11"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/13#issuecomment-5017044157
   record_pr: https://github.com/deepessh/reflo-learning/pull/75
 supersedes: []
-superseded_by: null
+superseded_by: "0043"
 deprecation: null
 maintenance: []
 ---

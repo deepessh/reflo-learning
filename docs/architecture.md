@@ -20,7 +20,6 @@ Detailed rules live in the linked records.
 | [ADR 0002](adrs/0002-workspace-tooling-and-deployable-service-boundaries.md) | Workspace tooling and deployable service boundaries | `D-GH-2` | ADR |
 | [ADR 0003](adrs/0003-sql-migrations-schema-ownership-and-write-boundaries.md) | SQL migrations, schema ownership, and write boundaries | `D-GH-3` | ADR |
 | [ADR 0004](adrs/0004-provider-capability-ports-and-adapter-rollout.md) | Provider capability ports and adapter rollout | `D-GH-4` | ADR |
-| [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md) | OpenTofu infrastructure, environment, secret, and promotion controls | `D-GH-5` | ADR |
 | [ADR 0006](adrs/0006-passwordless-email-authentication-and-revocable-server-sessions.md) | Passwordless email authentication and revocable server sessions | `D-GH-6` | ADR |
 | [ADR 0007](adrs/0007-layered-owner-scope-enforcement.md) | Layered owner-scope enforcement | `D-GH-7` | ADR |
 | [ADR 0008](adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md) | Isolated local document parsing, scanning, and OCR | `D-GH-8` | ADR |
@@ -28,7 +27,6 @@ Detailed rules live in the linked records.
 | [ADR 0010](adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md) | Typed model routing, prompt, provenance, retry, and trace contract | `D-GH-10` | ADR |
 | [ADR 0011](adrs/0011-cpu-fallback-tts-and-layered-audio-asset-contract.md) | CPU fallback TTS and layered audio-asset contract | `D-GH-11` | ADR |
 | [ADR 0012](adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md) | Durable event, idempotency, retry, DLQ, and finalization contract | `D-GH-12` | ADR |
-| [ADR 0013](adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md) | Private OSS delivery, CDN signing, expiry, and invalidation contract | `D-GH-13` | ADR |
 | [ADR 0014](adrs/0014-p1-feature-flags-and-default-off-enforcement.md) | P1 feature flags and default-off enforcement | `D-GH-14` | ADR |
 | [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md) | Provisional Bayesian mastery and reproducibility contract | `D-GH-16` | ADR |
 | [ADR 0017](adrs/0017-worktree-based-issue-pickup-and-claim-labels.md) | Worktree-based issue pickup and claim labels | `D-GH-67` | ADR |
@@ -51,6 +49,7 @@ Detailed rules live in the linked records.
 | [ADR 0039](adrs/0039-third-doubling-of-bounded-curriculum-deadlines.md) | Third doubling of bounded curriculum deadlines | `D-GH-191` | ADR |
 | [ADR 0040](adrs/0040-versioned-exam-readiness-scoring-and-eligibility-profile.md) | Versioned exam-readiness scoring and eligibility profile | `D-GH-174` | ADR |
 | [ADR 0042](adrs/0042-deferred-release-qualification-activation-and-retained-v2-evidence.md) | Deferred release qualification activation and retained v2 evidence | `D-GH-202` | ADR |
+| [ADR 0043](adrs/0043-protected-github-dev-secrets-and-private-delivery-custody.md) | Protected GitHub dev secrets and private-delivery custody | `D-GH-203` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 
@@ -58,14 +57,14 @@ Detailed rules live in the linked records.
 
 - Repository, delivery, and infrastructure boundaries:
   [ADR 0002](adrs/0002-workspace-tooling-and-deployable-service-boundaries.md),
-  [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md),
+  [ADR 0043](adrs/0043-protected-github-dev-secrets-and-private-delivery-custody.md),
   [ADR 0012](adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md),
   and [ADR 0042](adrs/0042-deferred-release-qualification-activation-and-retained-v2-evidence.md).
 - Content trust, scope, and retrieval:
   [ADR 0007](adrs/0007-layered-owner-scope-enforcement.md),
   [ADR 0008](adrs/0008-isolated-local-document-parsing-scanning-and-ocr.md),
   [ADR 0009](adrs/0009-versioned-source-span-embedding-and-vector-namespace-contract.md),
-  [ADR 0013](adrs/0013-private-oss-delivery-cdn-signing-expiry-and-invalidation-contract.md),
+  [ADR 0043](adrs/0043-protected-github-dev-secrets-and-private-delivery-custody.md),
   [ADR 0023](adrs/0023-analyticdb-for-postgresql-sprint-vector-store.md),
   and [ADR 0035](adrs/0035-upstream-signed-clamav-cloud-demo-snapshot-admission.md).
 - Model and media capabilities:
@@ -123,7 +122,7 @@ deployment, capacity, release-gate, or pilot-readiness evidence.
 | Versioned weighted exam-readiness gating, immutable reviewed mappings, generation invalidation, reproducible score snapshots, calibration disclosure, and honest Knowledge Map fallback slice | [fixed-point profile](../packages/accounts/src/readiness.ts), [forward-only schema](../packages/db/migrations/20260727000200_add_exam_readiness_profile.sql), [PostgreSQL projection](../packages/db/src/index.ts), [repository integration test](../packages/db/test/account-repository.test.mjs), and [Knowledge Map presentation](../apps/web/src/knowledge-map.tsx) | [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md), [ADR 0030](adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md), and [ADR 0040](adrs/0040-versioned-exam-readiness-scoring-and-eligibility-profile.md) |
 | Development-only connected Demo Day composition with a PDF-only approved-source upload boundary, resettable synthetic weak-state seed, dependency preflight, and bounded jobs execution slice | [PDF-only upload service](../apps/api/src/demo-upload.ts), [API composition](../apps/api/src/connected-composition.ts), [connected PostgreSQL adapter](../packages/db/src/connected-demo-repository.ts), [live PostgreSQL integration test](../packages/db/test/connected-demo-repository.test.mjs), [private development auth inbox](../packages/accounts/src/adapters/local-inbox.ts), and [bounded jobs handler](../apps/jobs/src/bounded-handler.ts) | [ADR 0002](adrs/0002-workspace-tooling-and-deployable-service-boundaries.md), [ADR 0006](adrs/0006-passwordless-email-authentication-and-revocable-server-sessions.md), [ADR 0007](adrs/0007-layered-owner-scope-enforcement.md), [ADR 0010](adrs/0010-typed-model-routing-prompt-provenance-retry-and-trace-contract.md), [ADR 0012](adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md), [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md), [ADR 0024](adrs/0024-shared-traced-model-routing-module.md), and [ADR 0034](adrs/0034-connected-online-demo-day-scope.md) |
 | Staff-only Telegram and authenticated email ambient-review delivery slice | [delivery package guide](../packages/delivery/README.md), [delivery service](../packages/delivery/src/service.ts), [PostgreSQL adapter](../packages/db/src/delivery-repository.ts), [repository integration test](../packages/db/test/delivery-repository.test.mjs), and [mobile review surface](../apps/web/src/email-quiz.tsx) | [ADR 0004](adrs/0004-provider-capability-ports-and-adapter-rollout.md), [ADR 0007](adrs/0007-layered-owner-scope-enforcement.md), [ADR 0012](adrs/0012-durable-event-idempotency-retry-dlq-and-finalization-contract.md), [ADR 0016](adrs/0016-provisional-bayesian-mastery-and-reproducibility-contract.md), [ADR 0025](adrs/0025-versioned-bayesian-mastery-and-fsrs-scheduling.md), [ADR 0030](adrs/0030-versioned-grading-abstention-fallback-and-fsrs-rating-contract.md), [ADR 0033](adrs/0033-pinned-fsrs6-scheduler-profile-and-deterministic-replay.md), and [ADR 0034](adrs/0034-connected-online-demo-day-scope.md) |
-| Environment and module source-boundary scaffold | [infrastructure guide](../infra/README.md), [environment roots](../infra/environments), and [policy check](../scripts/check-infra-policy.mjs) | [ADR 0005](adrs/0005-opentofu-infrastructure-environment-secret-and-promotion-controls.md) |
+| Environment and module source-boundary scaffold | [infrastructure guide](../infra/README.md), [environment roots](../infra/environments), and [policy check](../scripts/check-infra-policy.mjs) | [ADR 0043](adrs/0043-protected-github-dev-secrets-and-private-delivery-custody.md) |
 | Authoritative ADR, problem-document, and architecture-view governance checks | [ADR validator](../scripts/validate_adrs.py), [problem validator](../scripts/validate_problem_docs.py), [architecture validator](../scripts/validate_architecture.py), and [required validation workflow](../.github/workflows/validate-decisions.yml) | [ADR 0026](adrs/0026-file-per-decision-adr-storage-and-lifecycle.md), [ADR 0027](adrs/0027-immutable-sequential-canonical-adr-identifiers.md), [ADR 0028](adrs/0028-product-requirements-and-architecture-document-authority.md), [ADR 0029](adrs/0029-adr-authority-and-enforcement-guarantees.md) |
 <!-- END IMPLEMENTED STATE -->
 <!-- prettier-ignore-end -->

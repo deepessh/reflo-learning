@@ -1,7 +1,7 @@
 ---
 id: "0008"
 title: "Isolated local document parsing, scanning, and OCR"
-status: Accepted
+status: Superseded
 date: "2026-07-20"
 aliases: [D-GH-8]
 prd_references: "`prds/reflo-prd.md` §6 F1, §9, §11, and §13; D-GH-4, D-GH-9, and D-GH-12"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/8#issuecomment-5026852220
   record_pr: https://github.com/deepessh/reflo-learning/pull/90
 supersedes: []
-superseded_by: null
+superseded_by: "0044"
 deprecation: null
 maintenance: []
 ---

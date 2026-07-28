@@ -20,7 +20,7 @@ authorization:
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/203
-  verdict_comment: https://github.com/deepessh/reflo-learning/issues/203#issuecomment-5108020443
+  verdict_comment: https://github.com/deepessh/reflo-learning/issues/203#issuecomment-5108142320
   record_pr: https://github.com/deepessh/reflo-learning/pull/204
 supersedes: ["0005", "0013"]
 superseded_by: null

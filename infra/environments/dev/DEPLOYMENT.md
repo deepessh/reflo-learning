@@ -26,6 +26,8 @@ Require a reviewer, restrict deployments to `main`, and configure:
 Environment variables:
 
 - `REFLO_ALIBABA_REGION=ap-southeast-1`
+- `REFLO_ALIBABA_ACCOUNT_ID`: the non-secret numeric account ID that owns the
+  Function Compute function
 - `REFLO_ALIBABA_OIDC_AUDIENCE`
 - `REFLO_ALIBABA_OIDC_PROVIDER_ARN`
 - `REFLO_ALIBABA_DEV_DEPLOYMENT_ROLE_ARN`
@@ -38,6 +40,14 @@ Environment variables:
   `approved_runtime_configuration`, copied exactly from the approved BOM. The
   protected workflow derives artifact keys and digests directly from its
   freshly generated immutable manifest.
+
+The dev root writes the non-secret parser client contract into the API ECS
+environment. It fixes the processor mode to
+`serverless-isolated-ingestion-v1`, the function qualifier to `LATEST`, the
+affinity header to `reflo-session-id`, the session idle timeout to 300 seconds,
+and the session TTL to 2,400 seconds. Function name, API role name, account ID,
+and a deterministic aggregate digest of the exact parser code and three layer
+hashes are derived by OpenTofu rather than entered in `runtime_secrets`.
 
 Environment secret:
 
@@ -75,17 +85,20 @@ The bootstrap state is a recovery boundary and is never uploaded to GitHub.
 ## 4. Package immutable artifacts
 
 The protected workflow runs `pnpm package:dev-deployment`. It produces, under
-`.artifacts/deployment/`, an API tarball, jobs ZIP, parser OCI archive, and
-`manifest.json`. A generated `deployment.tfvars.json` passes the same non-secret
-manifest to OpenTofu. The manifest records the exact Git commit, SHA-256
-digests, and content-addressed OSS keys. The directory is ignored and must
-never contain runtime configuration or secrets.
+`.artifacts/deployment/`, an API tarball, jobs ZIP, parser custom-runtime code
+ZIP, Java-worker layer, native-tools layer, independently admitted ClamAV
+snapshot layer, and `manifest.json`. A generated `deployment.tfvars.json`
+passes the same non-secret manifest to OpenTofu. The v2 manifest records the
+exact Git commit, `custom.debian11` runtime, compressed sizes, SHA-256 digests,
+and content-addressed OSS keys. The directory is ignored and must never contain
+runtime configuration or secrets.
 
-The parser archive is built from the exact-pinned Containerfile and loaded
-directly from private OSS with `podman load`; no registry is involved. The ECS
-base images approved in the BOM must already contain `ossutil`, and the parser
-base image must contain rootless Podman. Do not substitute mutable artifact
-keys or image tags for the recorded digests.
+The parser archives are exported from the exact-pinned build without publishing
+the build image. Function Compute loads the private code and layer objects
+through its control plane; the parser receives no OSS role, mount, VPC path, or
+registry access. The API ECS image approved in the BOM must already contain
+`ossutil`. Do not substitute mutable artifact keys, layers, or image tags for
+the recorded identities.
 
 ## 5. Protected plan and apply
 

@@ -424,6 +424,15 @@ importers:
       "@alicloud/credentials":
         specifier: 2.4.5
         version: 2.4.5
+      "@alicloud/fc20230330":
+        specifier: 4.7.9
+        version: 4.7.9
+      "@alicloud/openapi-core":
+        specifier: 1.0.8
+        version: 1.0.8
+      "@darabonba/typescript":
+        specifier: 1.0.5
+        version: 1.0.5
     devDependencies:
       "@types/node":
         specifier: 24.13.3
@@ -575,6 +584,12 @@ packages:
     resolution:
       {
         integrity: sha512-+pH7/KEXup84cHzIL6UJAaPqETvln4yXlD9JzlrqioyCSaWxbug5FUobsiI6fuUOpw5WwoB3fWAtGbFnJ1K3Yg==,
+      }
+
+  "@alicloud/fc20230330@4.7.9":
+    resolution:
+      {
+        integrity: sha512-fHAmt0P/1rLXWiDSPtBgS/GF+BhbFr2FdV42eebYSGnqwFGrp5ZWIeRZFZ6Lj73eeTYGNvhTkv74mOS/NlXl5A==,
       }
 
   "@alicloud/gateway-pop@0.0.6":
@@ -5234,6 +5249,15 @@ snapshots:
       kitx: 2.2.0
     transitivePeerDependencies:
       - supports-color
+
+  "@alicloud/fc20230330@4.7.9":
+    dependencies:
+      "@alicloud/openapi-core": 1.0.8
+      "@darabonba/typescript": 1.0.5
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
 
   "@alicloud/gateway-pop@0.0.6":
     dependencies:

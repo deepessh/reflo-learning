@@ -1,0 +1,119 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+FROM --platform=linux/amd64 debian:11.11-slim@sha256:de70627667ac77b32ab6858f1acddfb04a4ff3acc1095ac17dbc19fe5725bcb6
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential=12.9 \
+      ca-certificates=20230311+deb12u1~deb11u1 \
+      cmake=3.18.4-2+deb11u1 \
+      curl=7.74.0-1.3+deb11u16 \
+      libleptonica-dev=1.79.0-1.1+deb11u1 \
+      pkg-config=0.29.2-1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/build
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.2.tar.gz \
+      --output tesseract-5.5.2.tar.gz \
+    && echo '6235ea0dae45ea137f59c09320406f5888383741924d98855bd2ce0d16b54f21  tesseract-5.5.2.tar.gz' | sha256sum --check --strict \
+    && tar --extract --gzip --file tesseract-5.5.2.tar.gz \
+    && cmake -S tesseract-5.5.2 -B tesseract-build \
+      -DBUILD_TESTS=OFF \
+      -DBUILD_TRAINING_TOOLS=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/opt/reflo/native \
+      -DDISABLE_ARCHIVE=ON \
+      -DDISABLE_CURL=ON \
+      -DDISABLE_TIFF=ON \
+      -DGRAPHICS_DISABLED=ON \
+      -DSW_BUILD=OFF \
+    && cmake --build tesseract-build --parallel 2 \
+    && cmake --install tesseract-build \
+    && install -D -m 0644 \
+      tesseract-5.5.2/LICENSE \
+      /opt/reflo/native/licenses/tesseract/LICENSE \
+    && rm -rf \
+      /opt/reflo/native/include \
+      /opt/reflo/native/lib/cmake \
+      /opt/reflo/native/lib/libtesseract.a \
+      /opt/reflo/native/lib/pkgconfig \
+      /opt/reflo/native/share \
+    && rm -rf tesseract-5.5.2 tesseract-5.5.2.tar.gz tesseract-build
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.4.5/clamav-1.4.5.linux.x86_64.deb \
+      --output clamav-1.4.5.linux.x86_64.deb \
+    && echo '49b7d9592c13e8834fd1e2339bf22b2fabe378317393b51b3879de8520c5b01f  clamav-1.4.5.linux.x86_64.deb' | sha256sum --check --strict \
+    && dpkg-deb --extract \
+      clamav-1.4.5.linux.x86_64.deb \
+      /opt/clamav-package \
+    && install -D -m 0755 \
+      /opt/clamav-package/usr/local/bin/clamscan \
+      /opt/reflo/native/bin/clamscan \
+    && install -D -m 0755 \
+      /opt/clamav-package/usr/local/bin/sigtool \
+      /opt/reflo/native/bin/sigtool \
+    && cp -a \
+      /opt/clamav-package/usr/local/lib/libclamav.so* \
+      /opt/clamav-package/usr/local/lib/libclammspack.so* \
+      /opt/reflo/native/lib/ \
+    && cp -a /usr/lib/x86_64-linux-gnu/liblept.so.5* /opt/reflo/native/lib/ \
+    && rm -rf clamav-1.4.5.linux.x86_64.deb /opt/clamav-package
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.4.5/clamav-1.4.5.tar.gz \
+      --output clamav-1.4.5.tar.gz \
+    && echo '2c555fc448b0ad2db950c65f0a7a1a060cf0a0fb9e4ed1d61b222a94293b95e1  clamav-1.4.5.tar.gz' | sha256sum --check --strict \
+    && tar --extract --gzip --file clamav-1.4.5.tar.gz \
+    && install -D -m 0644 \
+      clamav-1.4.5/COPYING.txt \
+      /opt/reflo/native/licenses/clamav/COPYING.txt \
+    && cp -a \
+      clamav-1.4.5/COPYING \
+      /opt/reflo/native/licenses/clamav/COPYING \
+    && rm -rf clamav-1.4.5 clamav-1.4.5.tar.gz
+
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata \
+      --output eng.traineddata \
+    && echo '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2  eng.traineddata' | sha256sum --check --strict \
+    && install -D -m 0644 \
+      eng.traineddata \
+      /opt/reflo/native/tessdata/eng.traineddata \
+    && rm eng.traineddata \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+      https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/LICENSE \
+      --output tessdata-fast-LICENSE \
+    && echo 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30  tessdata-fast-LICENSE' | sha256sum --check --strict \
+    && install -D -m 0644 \
+      tessdata-fast-LICENSE \
+      /opt/reflo/native/licenses/tessdata-fast/LICENSE \
+    && rm tessdata-fast-LICENSE
+
+ENV LD_LIBRARY_PATH="/opt/reflo/native/lib" \
+    TESSDATA_PREFIX="/opt/reflo/native/tessdata"
+
+RUN find /opt/reflo/native/bin /opt/reflo/native/lib \
+      -type f -perm /0111 -o -type f -name '*.so*' \
+      | while IFS= read -r artifact; do \
+          ldd "${artifact}" 2>/dev/null || true; \
+        done \
+      | awk '/=> \// { print $3 } /^\// { print $1 }' \
+      | sort -u \
+      | while IFS= read -r library; do \
+          case "$(basename "${library}")" in \
+            ld-linux-*|libc.so.*|libdl.so.*|libgcc_s.so.*|libm.so.*|libpthread.so.*|librt.so.*|libstdc++.so.*) \
+              ;; \
+            *) \
+              cp -L "${library}" "/opt/reflo/native/lib/$(basename "${library}")"; \
+              ;; \
+          esac; \
+        done \
+    && /opt/reflo/native/bin/clamscan --version \
+    && /opt/reflo/native/bin/sigtool --version \
+    && /opt/reflo/native/bin/tesseract --version \
+    && test ! -e /opt/reflo/native/bin/freshclam \
+    && find /opt/reflo/native -xdev -type d -exec chmod 0755 {} + \
+    && find /opt/reflo/native -xdev -type f -exec chmod go-w {} +

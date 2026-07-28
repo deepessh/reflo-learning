@@ -2,10 +2,12 @@
 
 This issue #199 root declares the minimum bounded Alibaba Cloud dev topology:
 
-- an isolated resource group and application/data/parser network boundaries;
+- an isolated resource group and application/data network boundaries;
 - private OSS buckets for artifacts, ClamAV snapshots, quarantine, delivery,
   and web assets;
-- one API/orchestrator ECS host and one dedicated parser-supervisor ECS host;
+- one API/orchestrator ECS host and one session-isolated Function Compute
+  parser with no runtime role, VPC attachment, mount, trigger, or Internet
+  access;
 - RDS PostgreSQL, AnalyticDB for PostgreSQL, and private RocketMQ;
 - Function Compute jobs with zero provisioned concurrency;
 - optional overseas web and private-delivery CDN domains, enabled only after
@@ -15,9 +17,10 @@ This issue #199 root declares the minimum bounded Alibaba Cloud dev topology:
 Every paid class is a required value inside
 `approved_runtime_configuration`; there are no SKU defaults. A valid issue
 #199 approval-comment URL is also required. Singapore `ap-southeast-1` is the
-only authorized dev region. This configuration does not authorize an account,
-resource class, spend, bootstrap identity, hostname, messaging destination,
-plan, or apply.
+only authorized dev region. The protected deployment supplies the non-secret
+Alibaba account ID used by the API to address the parser function. This
+configuration does not authorize an account, resource class, spend, bootstrap
+identity, hostname, messaging destination, plan, or apply.
 
 The partial OSS backend receives `bucket`, `region`,
 `tablestore_endpoint`, and `tablestore_table` only from the protected workflow.
@@ -28,9 +31,10 @@ uploaded as a GitHub artifact.
 
 The bounded dev root contains no Alibaba KMS Secrets Manager, SLS, or Alibaba
 Container Registry. Deployment artifacts use SHA-256-addressed private OSS
-keys. ECS consumes the API archive and parser OCI archive by exact digest; FC
-consumes a content-addressed ZIP. Operational traces use the repository's
-closed structured-log contract rather than SLS.
+keys. ECS consumes the API archive by exact digest; Function Compute consumes
+the content-addressed jobs ZIP plus the parser code and three immutable parser
+layers. Operational traces use the repository's closed structured-log contract
+rather than SLS.
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for bootstrap, protected deployment,
 recovery, rollback, and teardown procedures.

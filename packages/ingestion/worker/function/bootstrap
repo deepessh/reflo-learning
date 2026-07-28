@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+umask 077
+
+export LD_LIBRARY_PATH="/opt/reflo/native/lib"
+exec /opt/java/openjdk/bin/java \
+  --add-modules=jdk.httpserver \
+  -Djava.awt.headless=true \
+  -Djava.io.tmpdir=/tmp \
+  -cp /opt/reflo/worker.jar \
+  com.reflo.ingestion.FunctionRuntimeMain

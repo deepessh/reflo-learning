@@ -1,4 +1,12 @@
 locals {
+  parser_function_name = "${var.name_prefix}-parser"
+  parser_artifact_digest = sha256(join(":", [
+    "serverless-isolated-ingestion-package-v1",
+    var.artifact_identity.parser_code_sha256,
+    var.artifact_identity.parser_java_worker_layer_sha256,
+    var.artifact_identity.parser_native_layer_sha256,
+    var.artifact_identity.parser_clamav_snapshot_sha256,
+  ]))
   ecs_trust = jsonencode({
     Version = "1"
     Statement = [{
@@ -65,50 +73,53 @@ resource "alicloud_ram_role_policy_attachment" "api" {
   role_name   = alicloud_ram_role.api.role_name
 }
 
-resource "alicloud_ram_role" "parser_supervisor" {
-  role_name                   = "${var.name_prefix}-parser"
-  description                 = "Trusted parser supervisor; untrusted workers receive no role"
-  assume_role_policy_document = local.ecs_trust
-  tags                        = var.tags
-}
-
-resource "alicloud_ram_policy" "parser_supervisor" {
-  policy_name     = "${var.name_prefix}-parser-oss"
-  description     = "Read-only parser input, snapshot, and artifact archive access"
+resource "alicloud_ram_policy" "api_parser_sessions" {
+  policy_name     = "${var.name_prefix}-api-parser-sessions"
+  description     = "Exact FC session lifecycle and synchronous invocation actions for the trusted API"
   rotate_strategy = "DeleteOldestNonDefaultVersionWhenLimitExceeded"
   tags            = var.tags
   policy_document = jsonencode({
     Version = "1"
     Statement = [{
       Effect = "Allow"
-      Action = ["oss:GetObject", "oss:ListObjects"]
-      Resource = [
-        "acs:oss:*:*:${var.bucket_names.artifacts}",
-        "acs:oss:*:*:${var.bucket_names.artifacts}/*",
-        "acs:oss:*:*:${var.bucket_names.clamav_snapshots}",
-        "acs:oss:*:*:${var.bucket_names.clamav_snapshots}/*",
-        "acs:oss:*:*:${var.bucket_names.quarantine}",
-        "acs:oss:*:*:${var.bucket_names.quarantine}/*",
+      Action = [
+        "fc:CreateSession",
+        "fc:DeleteSession",
+        "fc:GetSession",
+        "fc:InvokeFunction",
       ]
+      # FC's RAM matrix exposes these four data-plane operations only at
+      # all-resource scope. The action set and trusted API role are therefore
+      # the narrowest provider-supported grant.
+      Resource = "*"
     }]
   })
 }
 
-resource "alicloud_ram_role_policy_attachment" "parser_supervisor" {
-  policy_name = alicloud_ram_policy.parser_supervisor.policy_name
-  policy_type = alicloud_ram_policy.parser_supervisor.type
-  role_name   = alicloud_ram_role.parser_supervisor.role_name
+resource "alicloud_ram_role_policy_attachment" "api_parser_sessions" {
+  policy_name = alicloud_ram_policy.api_parser_sessions.policy_name
+  policy_type = alicloud_ram_policy.api_parser_sessions.type
+  role_name   = alicloud_ram_role.api.role_name
 }
 
 locals {
   api_environment = merge(var.api_environment, {
-    DATABASE_URL                = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
-    REFLO_ALIBABA_REGION        = data.alicloud_regions.current.regions[0].id
-    REFLO_OSS_ARTIFACT_BUCKET   = var.bucket_names.artifacts
-    REFLO_OSS_DELIVERY_BUCKET   = var.bucket_names.delivery
-    REFLO_OSS_QUARANTINE_BUCKET = var.bucket_names.quarantine
-    REFLO_OSS_RUNTIME_ROLE_NAME = alicloud_ram_role.api.role_name
-    REFLO_VECTOR_DATABASE_URL   = "postgresql://reflo_vector_api:${urlencode(var.analyticdb_runtime_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
+    DATABASE_URL                                  = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_ALIBABA_FC_ACCOUNT_ID                   = var.fc_account_id
+    REFLO_ALIBABA_FC_API_ROLE_NAME                = alicloud_ram_role.api.role_name
+    REFLO_ALIBABA_FC_PARSER_AFFINITY_HEADER       = "reflo-session-id"
+    REFLO_ALIBABA_FC_PARSER_ARTIFACT_DIGEST       = local.parser_artifact_digest
+    REFLO_ALIBABA_FC_PARSER_FUNCTION_NAME         = local.parser_function_name
+    REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER    = "LATEST"
+    REFLO_ALIBABA_FC_PARSER_SESSION_IDLE_SECONDS  = "300"
+    REFLO_ALIBABA_FC_PARSER_SESSION_TTL_SECONDS   = "2400"
+    REFLO_ALIBABA_REGION                          = data.alicloud_regions.current.regions[0].id
+    REFLO_DEMO_UPLOAD_PROCESSOR_MODE              = "serverless-isolated-ingestion-v1"
+    REFLO_OSS_ARTIFACT_BUCKET                     = var.bucket_names.artifacts
+    REFLO_OSS_DELIVERY_BUCKET                     = var.bucket_names.delivery
+    REFLO_OSS_QUARANTINE_BUCKET                   = var.bucket_names.quarantine
+    REFLO_OSS_RUNTIME_ROLE_NAME                   = alicloud_ram_role.api.role_name
+    REFLO_VECTOR_DATABASE_URL                     = "postgresql://reflo_vector_api:${urlencode(var.analyticdb_runtime_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
   })
   migration_environment = {
     DATABASE_URL                    = "postgresql://reflo_admin:${urlencode(var.rds_admin_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
@@ -228,31 +239,6 @@ resource "alicloud_ecs_invocation" "start_api" {
   repeat_mode = "Once"
 
   depends_on = [alicloud_ecs_invocation.migrate]
-}
-
-resource "alicloud_instance" "parser_supervisor" {
-  image_id                   = var.ecs.parser_image_id
-  instance_type              = var.ecs.parser_instance_type
-  instance_name              = "${var.name_prefix}-parser"
-  instance_charge_type       = "PostPaid"
-  internet_charge_type       = "PayByTraffic"
-  internet_max_bandwidth_out = 0
-  resource_group_id          = var.resource_group_id
-  security_groups            = [var.security_group_ids.parser_supervisor]
-  system_disk_category       = var.ecs.parser_system_disk_category
-  system_disk_size           = var.ecs.parser_system_disk_size_gib
-  vswitch_id                 = var.vswitch_ids.parser
-  tags                       = merge(var.tags, { Component = "parser-supervisor" })
-  user_data = base64encode(templatefile("${path.module}/templates/parser-cloud-init.yaml.tftpl", {
-    artifact_bucket = var.bucket_names.artifacts
-    artifact_key    = var.artifact_identity.parser_archive_key
-    artifact_sha256 = var.artifact_identity.parser_archive_sha256
-  }))
-}
-
-resource "alicloud_ecs_ram_role_attachment" "parser_supervisor" {
-  ram_role_name = alicloud_ram_role.parser_supervisor.role_name
-  instance_id   = alicloud_instance.parser_supervisor.id
 }
 
 resource "alicloud_db_instance" "postgres" {
@@ -378,12 +364,39 @@ resource "alicloud_oss_bucket_object" "api_artifact" {
   server_side_encryption = "AES256"
 }
 
-resource "alicloud_oss_bucket_object" "parser_artifact" {
+resource "alicloud_oss_bucket_object" "parser_code" {
   bucket                 = var.bucket_names.artifacts
-  key                    = var.artifact_identity.parser_archive_key
-  source                 = "${path.root}/../../../.artifacts/deployment/parser.tar"
+  key                    = var.artifact_identity.parser_code_key
+  source                 = "${path.root}/../../../.artifacts/deployment/parser-code.zip"
   acl                    = "private"
-  content_type           = "application/x-tar"
+  content_type           = "application/zip"
+  server_side_encryption = "AES256"
+}
+
+resource "alicloud_oss_bucket_object" "parser_runtime_layer" {
+  bucket                 = var.bucket_names.artifacts
+  key                    = var.artifact_identity.parser_java_worker_layer_key
+  source                 = "${path.root}/../../../.artifacts/deployment/parser-java-worker-layer.zip"
+  acl                    = "private"
+  content_type           = "application/zip"
+  server_side_encryption = "AES256"
+}
+
+resource "alicloud_oss_bucket_object" "parser_tools_layer" {
+  bucket                 = var.bucket_names.artifacts
+  key                    = var.artifact_identity.parser_native_layer_key
+  source                 = "${path.root}/../../../.artifacts/deployment/parser-native-layer.zip"
+  acl                    = "private"
+  content_type           = "application/zip"
+  server_side_encryption = "AES256"
+}
+
+resource "alicloud_oss_bucket_object" "parser_snapshot_layer" {
+  bucket                 = var.bucket_names.artifacts
+  key                    = var.artifact_identity.parser_clamav_snapshot_layer_key
+  source                 = "${path.root}/../../../.artifacts/deployment/parser-clamav-snapshot-layer.zip"
+  acl                    = "private"
+  content_type           = "application/zip"
   server_side_encryption = "AES256"
 }
 
@@ -426,6 +439,76 @@ resource "alicloud_fcv3_function" "jobs" {
     oss_object_name = alicloud_oss_bucket_object.jobs_artifact.key
   }
   tags = merge(var.tags, { Component = "jobs" })
+}
+
+resource "alicloud_fcv3_layer_version" "parser_runtime" {
+  layer_name         = "${var.name_prefix}-parser-runtime"
+  description        = "Content-addressed Java 25 and isolated parser worker runtime"
+  acl                = "0"
+  compatible_runtime = ["custom.debian11"]
+  code {
+    oss_bucket_name = var.bucket_names.artifacts
+    oss_object_name = alicloud_oss_bucket_object.parser_runtime_layer.key
+  }
+}
+
+resource "alicloud_fcv3_layer_version" "parser_tools" {
+  layer_name         = "${var.name_prefix}-parser-tools"
+  description        = "Content-addressed ClamAV, Tesseract, tessdata, and native dependencies"
+  acl                = "0"
+  compatible_runtime = ["custom.debian11"]
+  code {
+    oss_bucket_name = var.bucket_names.artifacts
+    oss_object_name = alicloud_oss_bucket_object.parser_tools_layer.key
+  }
+}
+
+resource "alicloud_fcv3_layer_version" "parser_snapshot" {
+  layer_name         = "${var.name_prefix}-parser-snapshot"
+  description        = "Independently admitted content-addressed read-only ClamAV snapshot"
+  acl                = "0"
+  compatible_runtime = ["custom.debian11"]
+  code {
+    oss_bucket_name = var.bucket_names.artifacts
+    oss_object_name = alicloud_oss_bucket_object.parser_snapshot_layer.key
+  }
+}
+
+resource "alicloud_fcv3_function" "parser" {
+  function_name          = local.parser_function_name
+  description            = "Credential-free session-isolated Reflo document parser"
+  cpu                    = 2
+  disk_size              = 10240
+  handler                = "bootstrap"
+  instance_concurrency   = 1
+  instance_isolation_mode = "SESSION_EXCLUSIVE"
+  internet_access        = false
+  memory_size            = 4096
+  resource_group_id      = var.resource_group_id
+  runtime                = "custom.debian11"
+  session_affinity       = "HEADER_FIELD"
+  session_affinity_config = jsonencode({
+    affinityHeaderFieldName        = "reflo-session-id"
+    disableSessionIdReuse          = true
+    sessionConcurrencyPerInstance  = 1
+    sessionIdleTimeoutInSeconds    = 300
+    sessionTTLInSeconds            = 2400
+  })
+  timeout = 1800
+  code {
+    oss_bucket_name = var.bucket_names.artifacts
+    oss_object_name = alicloud_oss_bucket_object.parser_code.key
+  }
+  custom_runtime_config {
+    command = ["/code/bootstrap"]
+    port    = 9000
+  }
+  layers = [
+    alicloud_fcv3_layer_version.parser_runtime.layer_version_arn,
+    alicloud_fcv3_layer_version.parser_tools.layer_version_arn,
+    alicloud_fcv3_layer_version.parser_snapshot.layer_version_arn,
+  ]
+  tags = merge(var.tags, { Component = "parser" })
 }
 
 resource "alicloud_cdn_domain_new" "web" {

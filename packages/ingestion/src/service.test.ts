@@ -169,6 +169,50 @@ describe("IngestionSupervisor", () => {
     expect(harness.worker.requests).toHaveLength(0);
   });
 
+  it("delegates scanning only to an explicitly isolated worker", async () => {
+    const harness = createHarness();
+    const delegated = new IngestionSupervisor({
+      clock: new FixedIngestionClock(NOW),
+      malwareScanPlacement: "isolated-worker",
+      operations: harness.operations,
+      publisher: harness.publisher,
+      quarantine: harness.quarantine,
+      worker: harness.worker,
+      workspaces: harness.workspaces,
+    });
+
+    await expect(delegated.execute(harness.command)).resolves.toMatchObject({
+      outcome: { kind: "parsed" },
+    });
+    expect(harness.scanner.scanCalls).toBe(0);
+    expect(harness.worker.requests).toHaveLength(1);
+  });
+
+  it("fails closed when trusted-supervisor scanning has no scanner", async () => {
+    const harness = createHarness();
+    const misconfigured = new IngestionSupervisor({
+      clock: new FixedIngestionClock(NOW),
+      operations: harness.operations,
+      publisher: harness.publisher,
+      quarantine: harness.quarantine,
+      worker: harness.worker,
+      workspaces: harness.workspaces,
+    });
+
+    await expect(misconfigured.execute(harness.command)).resolves.toMatchObject(
+      {
+        outcome: {
+          failure: {
+            code: "infrastructure_unavailable",
+            sanitizedDetail: "malware_scanner_missing",
+          },
+          kind: "failed",
+        },
+      },
+    );
+    expect(harness.worker.requests).toHaveLength(0);
+  });
+
   it("does not finalize success when ephemeral cleanup is incomplete", async () => {
     const harness = createHarness();
     harness.workspaces.failCleanup = true;

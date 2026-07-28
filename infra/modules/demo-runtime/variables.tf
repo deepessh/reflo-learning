@@ -6,6 +6,16 @@ variable "resource_group_id" {
   type = string
 }
 
+variable "fc_account_id" {
+  description = "Alibaba Cloud account ID used by the trusted API to address Function Compute."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{8,32}$", var.fc_account_id))
+    error_message = "fc_account_id must be an 8-32 digit Alibaba Cloud account ID."
+  }
+}
+
 variable "vpc_id" {
   type = string
 }
@@ -18,15 +28,13 @@ variable "vswitch_ids" {
   type = object({
     application = string
     data        = string
-    parser      = string
   })
 }
 
 variable "security_group_ids" {
   type = object({
-    application       = string
-    data              = string
-    parser_supervisor = string
+    application = string
+    data        = string
   })
 }
 
@@ -49,10 +57,6 @@ variable "ecs" {
     api_system_disk_category    = string
     api_system_disk_size_gib    = number
     api_public_bandwidth_mbps   = number
-    parser_image_id             = string
-    parser_instance_type        = string
-    parser_system_disk_category = string
-    parser_system_disk_size_gib = number
   })
 
   validation {
@@ -70,18 +74,30 @@ variable "ecs" {
 variable "artifact_identity" {
   description = "Immutable content-addressed artifact identities published outside a registry."
   type = object({
-    api_archive_key       = string
-    api_archive_sha256    = string
-    parser_archive_key    = string
-    parser_archive_sha256 = string
+    api_archive_key                 = string
+    api_archive_sha256              = string
+    parser_code_key                 = string
+    parser_code_sha256              = string
+    parser_java_worker_layer_key    = string
+    parser_java_worker_layer_sha256 = string
+    parser_native_layer_key         = string
+    parser_native_layer_sha256      = string
+    parser_clamav_snapshot_layer_key = string
+    parser_clamav_snapshot_sha256    = string
   })
 
   validation {
     condition = (
       can(regex("^deployments/[a-f0-9]{64}/api\\.tar\\.gz$", var.artifact_identity.api_archive_key)) &&
       can(regex("^[a-f0-9]{64}$", var.artifact_identity.api_archive_sha256)) &&
-      can(regex("^deployments/[a-f0-9]{64}/parser\\.tar$", var.artifact_identity.parser_archive_key)) &&
-      can(regex("^[a-f0-9]{64}$", var.artifact_identity.parser_archive_sha256))
+      can(regex("^deployments/[a-f0-9]{64}/parser-code\\.zip$", var.artifact_identity.parser_code_key)) &&
+      can(regex("^[a-f0-9]{64}$", var.artifact_identity.parser_code_sha256)) &&
+      can(regex("^deployments/[a-f0-9]{64}/parser-java-worker-layer\\.zip$", var.artifact_identity.parser_java_worker_layer_key)) &&
+      can(regex("^[a-f0-9]{64}$", var.artifact_identity.parser_java_worker_layer_sha256)) &&
+      can(regex("^deployments/[a-f0-9]{64}/parser-native-layer\\.zip$", var.artifact_identity.parser_native_layer_key)) &&
+      can(regex("^[a-f0-9]{64}$", var.artifact_identity.parser_native_layer_sha256)) &&
+      can(regex("^deployments/[a-f0-9]{64}/parser-clamav-snapshot-layer\\.zip$", var.artifact_identity.parser_clamav_snapshot_layer_key)) &&
+      can(regex("^[a-f0-9]{64}$", var.artifact_identity.parser_clamav_snapshot_sha256))
     )
     error_message = "deployment artifacts must use content-addressed keys and exact SHA-256 identities."
   }

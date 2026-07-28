@@ -43,6 +43,7 @@ jobs:
       TF_VAR_deployment_oidc_provider_arn: ${{ vars.REFLO_ALIBABA_OIDC_PROVIDER_ARN }}
       TF_VAR_deployment_oidc_token_file: ${{ runner.temp }}/reflo-github-oidc.jwt
       TF_VAR_deployment_role_arn: ${{ vars.REFLO_ALIBABA_DEV_DEPLOYMENT_ROLE_ARN }}
+      TF_VAR_fc_account_id: ${{ vars.REFLO_ALIBABA_ACCOUNT_ID }}
       TF_VAR_bucket_names: ${{ vars.REFLO_DEV_BUCKET_NAMES }}
       TF_VAR_subnets: ${{ vars.REFLO_DEV_SUBNETS }}
       TF_VAR_approved_spend_reference: ${{ inputs.approval_reference }}
@@ -81,6 +82,25 @@ jobs:
           corepack prepare pnpm@10.34.5 --activate
           pnpm install --frozen-lockfile
           pnpm package:dev-deployment
+      - name: Assert immutable parser Function Compute artifacts
+        run: |
+          artifact_root="$GITHUB_WORKSPACE/.artifacts/deployment"
+          test -s "$artifact_root/parser-code.zip"
+          test -s "$artifact_root/parser-java-worker-layer.zip"
+          test -s "$artifact_root/parser-native-layer.zip"
+          test -s "$artifact_root/parser-clamav-snapshot-layer.zip"
+          test ! -e "$artifact_root/parser.tar"
+          node --input-type=module - "$artifact_root/manifest.json" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const manifest = JSON.parse(await readFile(process.argv[2], "utf8"));
+          if (
+            manifest.contractVersion !== "reflo-dev-deployment-artifacts-v2" ||
+            manifest.artifacts?.parser?.runtime !== "custom.debian11" ||
+            Object.keys(manifest.artifacts?.parser?.layers ?? {}).length !== 3
+          ) {
+            throw new Error("unexpected parser deployment artifact contract");
+          }
+          NODE
       - name: Validate deployment boundary
         run: |
           node scripts/check-infra-policy.mjs

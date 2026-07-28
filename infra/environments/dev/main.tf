@@ -10,10 +10,16 @@ resource "alicloud_resource_manager_resource_group" "dev" {
 
 locals {
   artifact_identity = {
-    api_archive_key       = var.deployment_manifest.artifacts.api.key
-    api_archive_sha256    = var.deployment_manifest.artifacts.api.sha256
-    parser_archive_key    = var.deployment_manifest.artifacts.parser.key
-    parser_archive_sha256 = var.deployment_manifest.artifacts.parser.sha256
+    api_archive_key                  = var.deployment_manifest.artifacts.api.key
+    api_archive_sha256               = var.deployment_manifest.artifacts.api.sha256
+    parser_code_key                  = var.deployment_manifest.artifacts.parser.code.key
+    parser_code_sha256               = var.deployment_manifest.artifacts.parser.code.sha256
+    parser_java_worker_layer_key     = var.deployment_manifest.artifacts.parser.layers.javaWorker.key
+    parser_java_worker_layer_sha256  = var.deployment_manifest.artifacts.parser.layers.javaWorker.sha256
+    parser_clamav_snapshot_layer_key = var.deployment_manifest.artifacts.parser.layers.clamavSnapshot.key
+    parser_clamav_snapshot_sha256    = var.deployment_manifest.artifacts.parser.layers.clamavSnapshot.sha256
+    parser_native_layer_key          = var.deployment_manifest.artifacts.parser.layers.nativeTools.key
+    parser_native_layer_sha256       = var.deployment_manifest.artifacts.parser.layers.nativeTools.sha256
   }
   function_compute = merge(var.approved_runtime_configuration.function_compute, {
     code_object_key = var.deployment_manifest.artifacts.jobs.key
@@ -52,6 +58,7 @@ module "runtime" {
 
   name_prefix        = var.name_prefix
   resource_group_id  = alicloud_resource_manager_resource_group.dev.id
+  fc_account_id      = var.fc_account_id
   vpc_id             = module.network.vpc_id
   vpc_cidr           = var.vpc_cidr
   vswitch_ids        = module.network.vswitch_ids

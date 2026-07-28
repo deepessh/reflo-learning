@@ -2,7 +2,6 @@ locals {
   subnet_map = {
     application = var.subnets.application
     data        = var.subnets.data
-    parser      = var.subnets.parser
   }
 }
 
@@ -44,15 +43,6 @@ resource "alicloud_security_group" "application" {
 resource "alicloud_security_group" "data" {
   security_group_name = "${var.name_prefix}-data"
   description         = "Reflo dev private data-service boundary"
-  inner_access_policy = "Drop"
-  resource_group_id   = var.resource_group_id
-  vpc_id              = alicloud_vpc.this.id
-  tags                = var.tags
-}
-
-resource "alicloud_security_group" "parser_supervisor" {
-  security_group_name = "${var.name_prefix}-parser-supervisor"
-  description         = "Reflo dev trusted parser-supervisor host boundary"
   inner_access_policy = "Drop"
   resource_group_id   = var.resource_group_id
   vpc_id              = alicloud_vpc.this.id

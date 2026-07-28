@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   cpSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -19,6 +20,19 @@ const root = path.resolve(
 
 test("repository infrastructure satisfies the issue #199 control-plane policy", () => {
   assert.deepEqual(checkInfraPolicy(root), []);
+});
+
+test("infrastructure policy ignores generated deployment artifacts", () => {
+  withInfrastructureFixture((fixture) => {
+    mkdirSync(path.join(fixture, ".artifacts", "deployment"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(fixture, ".artifacts", "deployment", "deployment.tfvars.json"),
+      "{}",
+    );
+    assert.deepEqual(checkInfraPolicy(fixture), []);
+  });
 });
 
 test("infrastructure policy rejects backend and provider drift", () => {
@@ -96,6 +110,142 @@ test("infrastructure policy rejects mutable-name GitHub OIDC subjects", () => {
 
     const errors = checkInfraPolicy(fixture).join("\n");
     assert.match(errors, /exact repository, protected dev environment/);
+  });
+});
+
+test("infrastructure policy rejects parser host, network, trigger, and EventBridge drift", () => {
+  withInfrastructureFixture((fixture) => {
+    const runtimePath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/main.tf",
+    );
+    writeFileSync(
+      runtimePath,
+      `${readFileSync(runtimePath, "utf8")}
+resource "alicloud_instance" "parser_forbidden" {}
+resource "alicloud_fcv3_trigger" "parser_forbidden" {}
+resource "alicloud_event_bridge_event_bus" "parser_forbidden" {}
+`,
+    );
+
+    const networkPath = path.join(fixture, "infra/modules/dev-network/main.tf");
+    writeFileSync(
+      networkPath,
+      readFileSync(networkPath, "utf8").replace(
+        "data        = var.subnets.data",
+        "data        = var.subnets.data\n    parser      = var.subnets.data",
+      ),
+    );
+
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /must not provision or depend on EventBridge/);
+    assert.match(errors, /must not retain a parser ECS host/);
+    assert.match(errors, /must not retain a parser VSwitch or security group/);
+    assert.match(errors, /must have no trigger or provisioned/);
+  });
+});
+
+test("infrastructure policy rejects parser identity, egress, isolation, and permission drift", () => {
+  withInfrastructureFixture((fixture) => {
+    const runtimePath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/main.tf",
+    );
+    const altered = readFileSync(runtimePath, "utf8")
+      .replace(
+        "internet_access        = false",
+        "internet_access        = true",
+      )
+      .replace(
+        'instance_isolation_mode = "SESSION_EXCLUSIVE"',
+        'instance_isolation_mode = "NONE"',
+      )
+      .replace(
+        'description            = "Credential-free session-isolated Reflo document parser"',
+        'description            = "Credential-free session-isolated Reflo document parser"\n  role                   = alicloud_ram_role.jobs.arn\n  vpc_config {}',
+      )
+      .replace(
+        '"fc:InvokeFunction",',
+        '"fc:InvokeFunction",\n        "fc:ListFunctions",',
+      );
+    writeFileSync(runtimePath, altered);
+
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /missing required control: instance_isolation_mode/);
+    assert.match(errors, /missing required control: internet_access = false/);
+    assert.match(errors, /must not configure role/);
+    assert.match(errors, /must not configure vpc_config/);
+    assert.match(errors, /must receive only the exact FC/);
+  });
+});
+
+test("infrastructure policy rejects incomplete or mutable API parser client wiring", () => {
+  withInfrastructureFixture((fixture) => {
+    const runtimePath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/main.tf",
+    );
+    const altered = readFileSync(runtimePath, "utf8")
+      .replace(
+        'REFLO_DEMO_UPLOAD_PROCESSOR_MODE              = "serverless-isolated-ingestion-v1"',
+        'REFLO_DEMO_UPLOAD_PROCESSOR_MODE              = "disabled"',
+      )
+      .replace(
+        'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER    = "LATEST"',
+        'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER    = "mutable"',
+      )
+      .replace("var.artifact_identity.parser_clamav_snapshot_sha256,", "");
+    writeFileSync(runtimePath, altered);
+
+    const devPath = path.join(fixture, "infra/environments/dev/main.tf");
+    writeFileSync(
+      devPath,
+      readFileSync(devPath, "utf8").replace(
+        "fc_account_id      = var.fc_account_id",
+        "",
+      ),
+    );
+
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /missing parser client control: REFLO_DEMO/);
+    assert.match(
+      errors,
+      /missing parser client control: REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER/,
+    );
+    assert.match(errors, /aggregate artifact digest is missing identity input/);
+    assert.match(errors, /must receive the validated FC account ID/);
+  });
+});
+
+test("infrastructure policy rejects mutable or incomplete parser artifacts", () => {
+  withInfrastructureFixture((fixture) => {
+    const variablesPath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/variables.tf",
+    );
+    writeFileSync(
+      variablesPath,
+      readFileSync(variablesPath, "utf8").replace(
+        "parser-code\\\\.zip",
+        "parser-latest\\\\.zip",
+      ),
+    );
+
+    const runtimePath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/main.tf",
+    );
+    writeFileSync(
+      runtimePath,
+      readFileSync(runtimePath, "utf8").replace(
+        'resource "alicloud_fcv3_layer_version" "parser_snapshot"',
+        'resource "alicloud_fcv3_layer_version" "missing_snapshot"',
+      ),
+    );
+
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /missing content-address validation/);
+    assert.match(errors, /missing immutable code\/layer wiring/);
   });
 });
 

@@ -5,9 +5,11 @@ Trusted supervision and isolation contracts for `isolated-ingestion-v1`.
 The package validates PDF/EPUB/DOCX uploads before parser execution, rejects
 MIME/signature/container disagreement, encrypted or active content, unsafe XML,
 and archive expansion hazards, requires a verified ClamAV snapshot no older
-than 24 hours, and launches the parser through a digest-pinned rootless Podman
-image with no network, capabilities, inherited container environment, writable
-root, host socket, or service identity. The worker result is accepted only when
+than 24 hours, and launches the parser through one of two explicit isolation
+profiles. Local development uses the digest-pinned rootless Podman worker.
+Issue #199's Alibaba dev deployment uses the roleless, networkless
+`serverless-isolated-ingestion-v1` Function Compute session adapter and custom
+runtime from ADR 0044. The worker result is accepted only when
 it satisfies `normalized-document-v1`, including exact parser/config/classifier
 versions, native locators, text hashes, a digest-pinned worker image, bounded
 diagnostics, and the `scan-detect-v1` candidate-page classification.
@@ -26,7 +28,9 @@ processing.
 - `QuarantineObjectPort` alone stages the authorized object into job-scoped
   ephemeral storage.
 - `MalwareScannerPort` exposes only an independently verified upstream-signed
-  snapshot and clean/infected result.
+  snapshot and clean/infected result in the local profile. The serverless
+  profile explicitly delegates that same fail-closed admission and scan to the
+  isolated function before parsing.
 - `IsolatedDocumentWorkerPort` has no storage, queue, database, or cloud access.
 - `NormalizedDocumentPublisherPort` idempotently publishes the validated
   internal artifact and returns a text-free opaque reference for durable state.
@@ -47,6 +51,18 @@ freshness checks before mounting the databases read-only into the networkless
 scanner. This bounded demo profile has no Reflo signing key, KMS adapter, or
 detached Reflo signature. The scanner treats only ClamAV's documented
 clean/infected exit statuses as results.
+
+The Function Compute adapter creates one server-generated session, transfers
+binary input and output in serialized chunks no larger than 8 MiB, verifies
+monotonic sequences, lengths, and SHA-256 identities, reconciles ambiguous
+calls through the registered operation and input hash, and requests runtime
+cleanup before deleting the session on every terminal path. The Java custom
+runtime rejects cross-operation and replayed input, validates the exact
+read-only scanner layer, runs the parser with the retained standard/large
+timeouts, and exposes no OSS, queue, database, VPC, public trigger, or function
+role. Packaging emits content-addressed code plus Java-worker, native-tool, and
+fresh ClamAV layers; it does not use ACR or SLS.
+
 `@reflo/db` provides the production RDS operation store: it claims only a
 pre-existing `ingestion_operation` binding, rechecks active scope ownership and
 source retention under a least-privilege RLS role, bounds leases to five

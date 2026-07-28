@@ -1,3 +1,0 @@
-#cloud-config
-runcmd:
-  - [sh, -ceu, "umask 077; install -d /opt/reflo/images; ossutil cp oss://${artifact_bucket}/${artifact_key} /opt/reflo/images/parser.tar --config-file /dev/null --mode EcsRamRole; echo '${artifact_sha256}  /opt/reflo/images/parser.tar' | sha256sum -c -; podman load --input /opt/reflo/images/parser.tar"]

@@ -1,0 +1,23 @@
+{
+  "contractVersion": "serverless-isolated-ingestion-package-v1",
+  "runtime": "custom.debian11",
+  "architecture": "linux/amd64",
+  "components": {
+    "java": "temurin-25.0.3+9",
+    "parser": "apache-tika-3.3.1",
+    "scanner": "clamav-1.4.5",
+    "ocrEngine": "tesseract-5.5.2",
+    "ocrLanguage": "eng-tessdata_fast-87416418657359cb625c412a48b6e1d6d41c29bd",
+    "leptonica": "1.79.0-1.1+deb11u1"
+  },
+  "paths": {
+    "bootstrap": "/code/bootstrap",
+    "java": "/opt/java/openjdk/bin/java",
+    "worker": "/opt/reflo/worker.jar",
+    "nativeBin": "/opt/reflo/native/bin",
+    "nativeLib": "/opt/reflo/native/lib",
+    "tessdata": "/opt/reflo/native/tessdata",
+    "clamavSnapshots": "/opt/reflo/clamav"
+  },
+  "layers": ["java-worker", "native-tools", "clamav-snapshot"]
+}

@@ -19,17 +19,13 @@ variable "vpc_cidr" {
 }
 
 variable "subnets" {
-  description = "Explicit application, data, and parser-supervisor VSwitch definitions."
+  description = "Explicit application and data VSwitch definitions."
   type = object({
     application = object({
       cidr_block = string
       zone_id    = string
     })
     data = object({
-      cidr_block = string
-      zone_id    = string
-    })
-    parser = object({
       cidr_block = string
       zone_id    = string
     })

@@ -78,8 +78,8 @@ public final class WorkerMain {
 
     private static void run() throws Exception {
         Environment environment = Environment.read();
-        Path input = Path.of("/work/input/source");
-        Path output = Path.of("/work/output/normalized-document.json");
+        Path input = environment.inputPath;
+        Path output = environment.outputPath;
         if (!Files.isRegularFile(input) || Files.isSymbolicLink(input)) {
             throw new WorkerFailure("malformed_document");
         }
@@ -443,7 +443,9 @@ public final class WorkerMain {
     private record Environment(
             String documentKind,
             String inputSha256,
-            String workerImageDigest) {
+            String workerImageDigest,
+            Path inputPath,
+            Path outputPath) {
         private static Environment read() throws WorkerFailure {
             require("REFLO_INGESTION_PROFILE", PROFILE_VERSION);
             require("REFLO_TIKA_VERSION", PARSER_VERSION);
@@ -453,12 +455,46 @@ public final class WorkerMain {
             String kind = required("REFLO_DOCUMENT_KIND");
             String inputHash = required("REFLO_INPUT_SHA256");
             String imageDigest = required("REFLO_WORKER_IMAGE_DIGEST");
+            String runtimeProfile = System.getenv("REFLO_RUNTIME_PROFILE");
+            Path inputPath = Path.of("/work/input/source");
+            Path outputPath = Path.of("/work/output/normalized-document.json");
+            if (runtimeProfile != null) {
+                if (!"function-session-v1".equals(runtimeProfile)) {
+                    throw new WorkerFailure("invalid_output");
+                }
+                inputPath = functionPath(required("REFLO_INPUT_PATH"), "source");
+                outputPath = functionPath(
+                        required("REFLO_OUTPUT_PATH"),
+                        "normalized-document.json");
+                if (!inputPath.getParent().equals(outputPath.getParent())) {
+                    throw new WorkerFailure("invalid_output");
+                }
+            }
             if (!DOCUMENT_KINDS.contains(kind)
                     || !inputHash.matches("[a-f0-9]{64}")
                     || !imageDigest.matches("sha256:[a-f0-9]{64}")) {
                 throw new WorkerFailure("invalid_output");
             }
-            return new Environment(kind, inputHash, imageDigest);
+            return new Environment(kind, inputHash, imageDigest, inputPath, outputPath);
+        }
+
+        private static Path functionPath(String value, String expectedName)
+                throws WorkerFailure {
+            Path path;
+            try {
+                path = Path.of(value).toAbsolutePath().normalize();
+            } catch (RuntimeException error) {
+                throw new WorkerFailure("invalid_output");
+            }
+            Path parent = path.getParent();
+            if (parent == null
+                    || !Path.of("/tmp").equals(parent.getParent())
+                    || !parent.getFileName().toString().startsWith("reflo-session-")
+                    || !expectedName.equals(path.getFileName().toString())
+                    || path.getNameCount() < 3) {
+                throw new WorkerFailure("invalid_output");
+            }
+            return path;
         }
 
         private static String required(String name) throws WorkerFailure {

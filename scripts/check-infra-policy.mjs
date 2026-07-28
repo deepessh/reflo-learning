@@ -192,6 +192,11 @@ export function checkInfraPolicy(rootDirectory) {
       "bounded Demo Day dev must not provision Alibaba Container Registry",
     );
   }
+  if (/alicloud_event_bridge|eventbridge/i.test(devSource)) {
+    errors.push(
+      "bounded Demo Day parser must not provision or depend on EventBridge",
+    );
+  }
   for (const requiredResource of [
     'resource "alicloud_instance"',
     'resource "alicloud_db_instance"',
@@ -217,6 +222,203 @@ export function checkInfraPolicy(rootDirectory) {
     );
   }
 
+  const runtimeMain = readIfPresent(root, "infra/modules/demo-runtime/main.tf");
+  const runtimeVariables = readIfPresent(
+    root,
+    "infra/modules/demo-runtime/variables.tf",
+  );
+  const devMain = readIfPresent(root, "infra/environments/dev/main.tf");
+  const devVariables = readIfPresent(
+    root,
+    "infra/environments/dev/variables.tf",
+  );
+  const networkSource = readInfrastructureTree(
+    root,
+    path.join("infra", "modules", "dev-network"),
+  );
+  const parserFunction = extractNamedBlock(
+    runtimeMain,
+    'resource "alicloud_fcv3_function" "parser"',
+  );
+  const parserSessionPolicy = extractNamedBlock(
+    runtimeMain,
+    'resource "alicloud_ram_policy" "api_parser_sessions"',
+  );
+  const parserSessionAttachment = extractNamedBlock(
+    runtimeMain,
+    'resource "alicloud_ram_role_policy_attachment" "api_parser_sessions"',
+  );
+  const normalizedParser = normalizeWhitespace(parserFunction);
+  const normalizedRuntime = normalizeWhitespace(runtimeMain);
+  for (const requiredControl of [
+    "cpu = 2",
+    "disk_size = 10240",
+    'handler = "bootstrap"',
+    "instance_concurrency = 1",
+    'instance_isolation_mode = "SESSION_EXCLUSIVE"',
+    "internet_access = false",
+    "memory_size = 4096",
+    'runtime = "custom.debian11"',
+    'session_affinity = "HEADER_FIELD"',
+    'affinityHeaderFieldName = "reflo-session-id"',
+    "disableSessionIdReuse = true",
+    "sessionConcurrencyPerInstance = 1",
+    "sessionIdleTimeoutInSeconds = 300",
+    "sessionTTLInSeconds = 2400",
+    "timeout = 1800",
+    'command = ["/code/bootstrap"]',
+    "port = 9000",
+  ]) {
+    if (!normalizedParser.includes(requiredControl)) {
+      errors.push(
+        `session-isolated parser function is missing required control: ${requiredControl}`,
+      );
+    }
+  }
+  for (const forbiddenControl of [
+    "role",
+    "vpc_config",
+    "oss_mount_config",
+    "nas_config",
+    "log_config",
+    "environment_variables",
+    "custom_container_config",
+  ]) {
+    if (new RegExp(`\\b${forbiddenControl}\\b`).test(parserFunction)) {
+      errors.push(
+        `session-isolated parser function must not configure ${forbiddenControl}`,
+      );
+    }
+  }
+  if (
+    /resource\s+"alicloud_instance"\s+"parser|resource\s+"alicloud_ram_role"\s+"parser|parser_supervisor|parser-cloud-init|parser\.tar/.test(
+      `${runtimeMain}\n${runtimeVariables}`,
+    )
+  ) {
+    errors.push(
+      "bounded dev must not retain a parser ECS host, role, attachment, archive, or cloud-init path",
+    );
+  }
+  if (
+    /\bparser\b|parser_supervisor/i.test(networkSource) ||
+    devVariables.includes("parser_image_id")
+  ) {
+    errors.push(
+      "bounded dev network and ECS inputs must not retain a parser VSwitch or security group",
+    );
+  }
+  if (
+    /resource\s+"alicloud_fcv3_trigger"|resource\s+"alicloud_fcv3_provision_config"/.test(
+      runtimeMain,
+    )
+  ) {
+    errors.push(
+      "session-isolated parser must have no trigger or provisioned/minimum instance resource",
+    );
+  }
+  for (const requiredArtifact of [
+    'resource "alicloud_oss_bucket_object" "parser_code"',
+    'resource "alicloud_oss_bucket_object" "parser_runtime_layer"',
+    'resource "alicloud_oss_bucket_object" "parser_tools_layer"',
+    'resource "alicloud_oss_bucket_object" "parser_snapshot_layer"',
+    'resource "alicloud_fcv3_layer_version" "parser_runtime"',
+    'resource "alicloud_fcv3_layer_version" "parser_tools"',
+    'resource "alicloud_fcv3_layer_version" "parser_snapshot"',
+    "alicloud_oss_bucket_object.parser_code.key",
+    "alicloud_fcv3_layer_version.parser_runtime.layer_version_arn",
+    "alicloud_fcv3_layer_version.parser_tools.layer_version_arn",
+    "alicloud_fcv3_layer_version.parser_snapshot.layer_version_arn",
+  ]) {
+    if (!runtimeMain.includes(requiredArtifact)) {
+      errors.push(
+        `session-isolated parser is missing immutable code/layer wiring: ${requiredArtifact}`,
+      );
+    }
+  }
+  for (const immutablePattern of [
+    "parser-code\\\\.zip",
+    "parser-java-worker-layer\\\\.zip",
+    "parser-native-layer\\\\.zip",
+    "parser-clamav-snapshot-layer\\\\.zip",
+  ]) {
+    if (!runtimeVariables.includes(immutablePattern)) {
+      errors.push(
+        `session-isolated parser artifact identity is missing content-address validation: ${immutablePattern}`,
+      );
+    }
+  }
+  const parserFcActions = [...parserSessionPolicy.matchAll(/"fc:([A-Za-z]+)"/g)]
+    .map((match) => `fc:${match[1]}`)
+    .sort();
+  const expectedParserFcActions = [
+    "fc:CreateSession",
+    "fc:DeleteSession",
+    "fc:GetSession",
+    "fc:InvokeFunction",
+  ].sort();
+  if (
+    JSON.stringify(parserFcActions) !==
+      JSON.stringify(expectedParserFcActions) ||
+    !normalizeWhitespace(parserSessionPolicy).includes('Resource = "*"') ||
+    !normalizeWhitespace(parserSessionAttachment).includes(
+      "policy_name = alicloud_ram_policy.api_parser_sessions.policy_name",
+    ) ||
+    !normalizeWhitespace(parserSessionAttachment).includes(
+      "role_name = alicloud_ram_role.api.role_name",
+    )
+  ) {
+    errors.push(
+      "trusted API role must receive only the exact FC create/get/invoke/delete session action set",
+    );
+  }
+  for (const requiredApiParserEnvironment of [
+    'REFLO_DEMO_UPLOAD_PROCESSOR_MODE = "serverless-isolated-ingestion-v1"',
+    "REFLO_ALIBABA_FC_ACCOUNT_ID = var.fc_account_id",
+    "REFLO_ALIBABA_FC_API_ROLE_NAME = alicloud_ram_role.api.role_name",
+    'REFLO_ALIBABA_FC_PARSER_AFFINITY_HEADER = "reflo-session-id"',
+    "REFLO_ALIBABA_FC_PARSER_ARTIFACT_DIGEST = local.parser_artifact_digest",
+    "REFLO_ALIBABA_FC_PARSER_FUNCTION_NAME = local.parser_function_name",
+    'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER = "LATEST"',
+    'REFLO_ALIBABA_FC_PARSER_SESSION_IDLE_SECONDS = "300"',
+    'REFLO_ALIBABA_FC_PARSER_SESSION_TTL_SECONDS = "2400"',
+  ]) {
+    if (!normalizedRuntime.includes(requiredApiParserEnvironment)) {
+      errors.push(
+        `trusted API environment is missing parser client control: ${requiredApiParserEnvironment}`,
+      );
+    }
+  }
+  for (const parserArtifactDigestInput of [
+    '"serverless-isolated-ingestion-package-v1"',
+    "var.artifact_identity.parser_code_sha256",
+    "var.artifact_identity.parser_java_worker_layer_sha256",
+    "var.artifact_identity.parser_native_layer_sha256",
+    "var.artifact_identity.parser_clamav_snapshot_sha256",
+  ]) {
+    if (
+      !normalizeWhitespace(extractNamedBlock(runtimeMain, "locals")).includes(
+        parserArtifactDigestInput,
+      ) &&
+      !normalizedRuntime.includes(parserArtifactDigestInput)
+    ) {
+      errors.push(
+        `parser aggregate artifact digest is missing identity input: ${parserArtifactDigestInput}`,
+      );
+    }
+  }
+  if (
+    !normalizedRuntime.includes(
+      'parser_artifact_digest = sha256(join(":", [',
+    ) ||
+    !runtimeVariables.includes('variable "fc_account_id"') ||
+    !devVariables.includes('variable "fc_account_id"') ||
+    !normalizeWhitespace(devMain).includes("fc_account_id = var.fc_account_id")
+  ) {
+    errors.push(
+      "trusted API parser client must receive the validated FC account ID and one deterministic aggregate artifact digest",
+    );
+  }
+
   const deployWorkflow = readIfPresent(
     root,
     ".github/workflows/deploy-dev.yml",
@@ -225,6 +427,7 @@ export function checkInfraPolicy(rootDirectory) {
     "workflow_dispatch:",
     "id-token: write",
     "environment: dev",
+    "TF_VAR_fc_account_id: ${{ vars.REFLO_ALIBABA_ACCOUNT_ID }}",
     "github.ref == 'refs/heads/main'",
     "reflo-protected-dev-apply",
     "tofu -chdir=infra/environments/dev plan",
@@ -271,9 +474,14 @@ export function checkInfraPolicy(rootDirectory) {
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     if (
-      [".git", ".next", ".turbo", ".terraform", "node_modules"].includes(
-        entry.name,
-      )
+      [
+        ".artifacts",
+        ".git",
+        ".next",
+        ".turbo",
+        ".terraform",
+        "node_modules",
+      ].includes(entry.name)
     ) {
       return [];
     }
@@ -281,6 +489,44 @@ function walk(directory) {
     const target = path.join(directory, entry.name);
     return entry.isDirectory() ? walk(target) : [target];
   });
+}
+
+function extractNamedBlock(source, declaration) {
+  const start = source.indexOf(declaration);
+  if (start === -1) {
+    return "";
+  }
+  const opening = source.indexOf("{", start + declaration.length);
+  if (opening === -1) {
+    return "";
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = opening; index < source.length; index += 1) {
+    const character = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  return "";
 }
 
 function readIfPresent(root, relative) {

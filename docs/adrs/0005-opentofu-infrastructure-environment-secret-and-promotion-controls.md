@@ -1,7 +1,7 @@
 ---
 id: "0005"
 title: "OpenTofu infrastructure, environment, secret, and promotion controls"
-status: Accepted
+status: Superseded
 date: "2026-07-18"
 aliases: [D-GH-5]
 prd_references: "`prds/reflo-prd.md` §9, §11, and §13"
@@ -18,7 +18,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/5#issuecomment-5013676908
   record_pr: https://github.com/deepessh/reflo-learning/pull/66
 supersedes: []
-superseded_by: null
+superseded_by: "0043"
 deprecation: null
 maintenance: []
 ---

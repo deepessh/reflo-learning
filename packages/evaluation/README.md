@@ -1,11 +1,11 @@
 # Reflo release-gate evaluation
 
 `@reflo/evaluation` implements the repository-owned `evaluation-contract-v2`
-defined by ADR 0041 / D-GH-196. It validates immutable dataset manifests,
-enforces the retained qualification profiles, deterministically scores
-performance, dual-TTS, upload-security, and adversarial runs, emits
-content-addressed evidence bundles, and publishes fail-closed
-environment-scoped attestations through an authorized index port.
+originally adopted by ADR 0041 and retained under ADR 0042 / D-GH-202. It
+validates immutable dataset manifests, enforces the retained qualification
+profiles, deterministically scores performance, dual-TTS, upload-security, and
+adversarial runs, emits content-addressed evidence bundles, and publishes
+fail-closed environment-scoped attestations through an authorized index port.
 
 PRD v2.7 defers formal target-environment execution until after Demo Day. The
 v2 contracts, schemas, fixtures, scorers, historical evidence, and attestation

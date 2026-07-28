@@ -1,7 +1,7 @@
 ---
 id: "0041"
 title: "PDF-only Demo release-gate contract v2"
-status: Accepted
+status: Superseded
 date: "2026-07-27"
 aliases: [D-GH-196]
 prd_references: "`prds/reflo-prd.md` v2.6 §3 G1, §5, §6 F1, §7, §8 Flow A, §11, §12, and §13; ADR 0003; ADR 0008; ADR 0015; ADR 0028"
@@ -27,7 +27,7 @@ provenance:
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/196#issuecomment-5096658975
   record_pr: https://github.com/deepessh/reflo-learning/pull/197
 supersedes: ["0015"]
-superseded_by: null
+superseded_by: "0042"
 deprecation: null
 maintenance: []
 ---

@@ -1,22 +1,26 @@
 # Reflo release-gate evaluation
 
 `@reflo/evaluation` implements the repository-owned `evaluation-contract-v2`
-defined by D-GH-15. It validates immutable dataset manifests, enforces the exact
-Week 1 execution profiles, deterministically scores performance, dual-TTS,
-upload-security, and adversarial runs, emits content-addressed evidence bundles,
-and publishes fail-closed environment-scoped attestations through an authorized
-index port.
+originally adopted by ADR 0041 and retained under ADR 0042 / D-GH-202. It
+validates immutable dataset manifests, enforces the retained qualification
+profiles, deterministically scores performance, dual-TTS, upload-security, and
+adversarial runs, emits content-addressed evidence bundles, and publishes
+fail-closed environment-scoped attestations through an authorized index port.
 
-The Demo Day performance contract is PDF-only: every standard-profile
-performance item is a 5–200 page PDF between 0.5 and 20 MiB. Passing this gate
-does not provide EPUB or DOCX support, performance, or SLO evidence. Upload
-security still requires explicit fail-closed rejection coverage for EPUB and
-DOCX at the PDF-only Demo Day boundary.
+PRD v2.7 defers formal target-environment execution until after Demo Day. The
+v2 contracts, schemas, fixtures, scorers, historical evidence, and attestation
+index remain inactive future verification capability; they are not deleted,
+weakened, or represented as passed. The retained performance contract is
+PDF-only: every standard-profile item is a 5–200 page PDF between 0.5 and
+20 MiB. Passing it does not provide EPUB or DOCX support, performance, or SLO
+evidence. Upload security still requires explicit fail-closed rejection
+coverage for EPUB and DOCX at the PDF-only product boundary.
 
 CI may validate schemas, fixtures, determinism, and fail-closed behavior. It
-cannot pass the performance or audio gates. Those require target-production
-execution and current rights, capacity, quota, legal, human-listening, and other
-operational evidence required by the PRD.
+cannot pass the performance, audio, upload-security, adversarial-document, or
+secure-ingestion environment gates. Those require the deferred target
+execution and current rights, capacity, quota, legal, human-listening, and
+other operational evidence required by the PRD.
 
 After building the package, evaluate an immutable input without overwriting an
 existing bundle:

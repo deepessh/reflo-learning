@@ -179,6 +179,57 @@ resource "alicloud_ecs_ram_role_attachment" "api" {
   instance_id   = alicloud_instance.api.id
 }
 
+resource "alicloud_ecs_command" "migrate" {
+  name        = "${var.name_prefix}-migrate-${substr(var.artifact_identity.api_archive_sha256, 0, 12)}"
+  description = "Serialized Reflo dev schema and reduced runtime-role preparation"
+  type        = "RunShellScript"
+  timeout     = 900
+  working_dir = "/opt/reflo/current"
+  command_content = base64encode(<<-SCRIPT
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cloud-init status --wait
+    set -a
+    source /etc/reflo/migration.env
+    set +a
+    node /opt/reflo/current/node_modules/@reflo/db/scripts/prepare-local-app-profile.mjs
+    rm -f /etc/reflo/migration.env
+  SCRIPT
+  )
+}
+
+resource "alicloud_ecs_invocation" "migrate" {
+  command_id  = alicloud_ecs_command.migrate.id
+  instance_id = [alicloud_instance.api.id]
+  repeat_mode = "Once"
+
+  timeouts {
+    create = "20m"
+  }
+}
+
+resource "alicloud_ecs_command" "start_api" {
+  name        = "${var.name_prefix}-start-api-${substr(var.artifact_identity.api_archive_sha256, 0, 12)}"
+  description = "Start Reflo only after the serialized migration succeeds"
+  type        = "RunShellScript"
+  timeout     = 120
+  working_dir = "/opt/reflo/current"
+  command_content = base64encode(<<-SCRIPT
+    #!/usr/bin/env bash
+    set -euo pipefail
+    systemctl enable --now reflo-api.service
+  SCRIPT
+  )
+}
+
+resource "alicloud_ecs_invocation" "start_api" {
+  command_id  = alicloud_ecs_command.start_api.id
+  instance_id = [alicloud_instance.api.id]
+  repeat_mode = "Once"
+
+  depends_on = [alicloud_ecs_invocation.migrate]
+}
+
 resource "alicloud_instance" "parser_supervisor" {
   image_id                   = var.ecs.parser_image_id
   instance_type              = var.ecs.parser_instance_type

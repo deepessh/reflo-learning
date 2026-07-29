@@ -19,9 +19,12 @@ Confirm issue #199 contains owner-authored approval for:
 The current conservative proposal is USD 40/month for the session-isolated
 parser, USD 160/month for Model Studio, and USD 4.75/month for an EventBridge
 stream only if pay-by-event metering is confirmed. These are planning
-allowances, not authorization. They leave USD 95.25 under the existing USD 300
-ceiling for every other paid service. Do not silently reallocate or exceed the
-ceiling if the remaining approved BOM no longer fits.
+allowances, not authorization. Retaining the other previously approved BOM
+lines at USD 196.39/month produces a revised total of USD 401.14/month, which
+exceeds the existing USD 300 ceiling by USD 101.14. Do not silently reduce the
+model usage bound, reallocate approved allowances, or exceed the ceiling. A new
+owner verdict must approve a lower exact service/usage BOM or a higher ceiling
+before any dev plan.
 
 Singapore `ap-southeast-1` and dev are already the only region/environment
 accepted by this root. Staging, public access, external learners, external

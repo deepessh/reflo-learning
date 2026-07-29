@@ -27,10 +27,9 @@ The managed RocketMQ trigger introduces a separately billed EventBridge event
 stream. It must use the owner-approved metering mode and allowance, and its
 service-linked roles must be activated before the protected plan. The dev apply
 also remains blocked until issue #199 records an authorized transactional
-outbox publisher and dead-letter destination, bounded long-narration
-segmentation, and the activation-gated Piper fallback. The revised conservative
-BOM is USD 401.14/month, so it also requires an owner-approved cost reduction
-or a new ceiling before planning.
+outbox publisher and dead-letter destination, plus the activation-gated Piper
+fallback. The revised conservative BOM is USD 401.14/month, so it also requires
+an owner-approved cost reduction or a new ceiling before planning.
 
 The partial OSS backend receives `bucket`, `region`,
 `tablestore_endpoint`, and `tablestore_table` only from the protected workflow.

@@ -38,11 +38,8 @@ issue #199:
    bounded audio messages to the private RocketMQ topic; and
 2. the current trigger blocks after bounded retries instead of discarding a
    failed message, but a separately approved dead-letter destination is still
-   required for the accepted end-state;
-3. the provider accepts at most 600 characters per Qwen3 TTS Flash request, so
-   the 4,000-character planning bound requires deterministic segmentation and
-   WAV composition; and
-4. the activation-gated Piper fallback must be composed and packaged before
+   required for the accepted end-state; and
+3. the activation-gated Piper fallback must be composed and packaged before
    claiming the dual-route audio release gate.
 
 Do not plan or apply the dev root while either item remains unresolved.

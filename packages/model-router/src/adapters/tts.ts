@@ -72,6 +72,11 @@ const DASHSCOPE_TTS_ENDPOINT =
   "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
 const MAX_DASHSCOPE_RESPONSE_BYTES = 64 * 1024;
 const MAX_TTS_AUDIO_BYTES = 32 * 1024 * 1024;
+const QWEN_TTS_MAX_SEGMENT_CHARACTERS = 600;
+const MAX_QWEN_TTS_NARRATION_CHARACTERS = 4_000;
+const PREFERRED_SEGMENT_BOUNDARY_FLOOR = Math.floor(
+  QWEN_TTS_MAX_SEGMENT_CHARACTERS / 2,
+);
 
 export class DashScopeModelStudioTtsClient implements ModelStudioTtsClient {
   readonly #apiKey: string;
@@ -96,13 +101,80 @@ export class DashScopeModelStudioTtsClient implements ModelStudioTtsClient {
     request: Parameters<ModelStudioTtsClient["synthesize"]>[0],
     signal: AbortSignal,
   ): Promise<TtsSynthesisResponse> {
+    const narrationCharacters = countCharacters(request.narration);
     if (
       request.model !== QWEN_3_TTS_FLASH_MODEL ||
       request.voiceProfileId !== REFLO_NARRATOR_VOICE_PROFILE ||
       request.speakingRate !== 1 ||
-      request.narration.length < 1 ||
-      request.narration.length > 600 ||
+      narrationCharacters < 1 ||
+      narrationCharacters > MAX_QWEN_TTS_NARRATION_CHARACTERS ||
       !/^[a-zA-Z0-9_-]{8,128}$/.test(request.idempotencyKey)
+    ) {
+      throw new ModelStudioTtsClientError(
+        "invalid_request",
+        "not_accepted",
+        false,
+      );
+    }
+    const segments = segmentQwenTtsNarration(request.narration);
+    const segmentWavs: Uint8Array[] = [];
+    let acceptedSegment = false;
+    let pcmByteLength = 0;
+    for (const narration of segments) {
+      try {
+        const segment = await this.#synthesizeSegment(
+          { ...request, narration },
+          signal,
+          MAX_TTS_AUDIO_BYTES - pcmByteLength,
+        );
+        acceptedSegment = true;
+        const segmentDataLength = pcmWavDataLength(
+          segment.audioBytes,
+          segment.sampleRateHz,
+        );
+        if (segmentDataLength === undefined) {
+          throw invalidAudio();
+        }
+        pcmByteLength += segmentDataLength;
+        if (44 + pcmByteLength > MAX_TTS_AUDIO_BYTES) {
+          throw new ModelStudioTtsClientError(
+            "provider_error",
+            "accepted",
+            false,
+          );
+        }
+        segmentWavs.push(segment.audioBytes);
+      } catch (error) {
+        if (
+          acceptedSegment &&
+          error instanceof ModelStudioTtsClientError &&
+          error.submissionState !== "accepted"
+        ) {
+          throw new ModelStudioTtsClientError(error.code, "accepted", false, {
+            cause: error,
+          });
+        }
+        throw error;
+      }
+    }
+    return {
+      audioBytes: composePcmWavSegments(segmentWavs, 24_000, pcmByteLength),
+      engineVersion: QWEN_3_TTS_FLASH_MODEL_VERSION,
+      sampleRateHz: 24_000,
+      voiceArtifactVersion: "qwen-cherry-2025-11-27",
+      voiceId: "Cherry",
+    };
+  }
+
+  async #synthesizeSegment(
+    request: Parameters<ModelStudioTtsClient["synthesize"]>[0],
+    signal: AbortSignal,
+    maximumAudioBytes: number,
+  ): Promise<TtsSynthesisResponse> {
+    if (
+      countCharacters(request.narration) < 1 ||
+      countCharacters(request.narration) > QWEN_TTS_MAX_SEGMENT_CHARACTERS ||
+      maximumAudioBytes < 44
     ) {
       throw new ModelStudioTtsClientError(
         "invalid_request",
@@ -152,7 +224,7 @@ export class DashScopeModelStudioTtsClient implements ModelStudioTtsClient {
     }
     const audioBytes = await readBoundedBytes(
       audioResponse,
-      MAX_TTS_AUDIO_BYTES,
+      maximumAudioBytes,
       signal,
       "accepted",
     );
@@ -164,6 +236,68 @@ export class DashScopeModelStudioTtsClient implements ModelStudioTtsClient {
       voiceId: "Cherry",
     };
   }
+}
+
+function segmentQwenTtsNarration(narration: string): readonly string[] {
+  const characters = Array.from(narration);
+  if (characters.length === 0) {
+    return [];
+  }
+  const segments: string[] = [];
+  for (let start = 0; start < characters.length;) {
+    const maximumEnd = Math.min(
+      start + QWEN_TTS_MAX_SEGMENT_CHARACTERS,
+      characters.length,
+    );
+    const end =
+      maximumEnd === characters.length
+        ? maximumEnd
+        : preferredSegmentEnd(characters, start, maximumEnd);
+    segments.push(characters.slice(start, end).join(""));
+    start = end;
+  }
+  return Object.freeze(segments);
+}
+
+function preferredSegmentEnd(
+  characters: readonly string[],
+  start: number,
+  maximumEnd: number,
+): number {
+  const preferredFloor = Math.min(
+    start + PREFERRED_SEGMENT_BOUNDARY_FLOOR,
+    maximumEnd,
+  );
+  for (let index = maximumEnd - 1; index >= preferredFloor; index -= 1) {
+    if (
+      isSentenceTerminator(characters[index] ?? "") &&
+      isWhitespace(characters[index + 1] ?? "")
+    ) {
+      let end = index + 1;
+      while (end < maximumEnd && isWhitespace(characters[end] ?? "")) {
+        end += 1;
+      }
+      return end;
+    }
+  }
+  for (let index = maximumEnd - 1; index >= preferredFloor; index -= 1) {
+    if (isWhitespace(characters[index] ?? "")) {
+      return index + 1;
+    }
+  }
+  return maximumEnd;
+}
+
+function isSentenceTerminator(character: string): boolean {
+  return character === "." || character === "!" || character === "?";
+}
+
+function isWhitespace(character: string): boolean {
+  return /^\s$/u.test(character);
+}
+
+function countCharacters(value: string): number {
+  return Array.from(value).length;
 }
 
 export interface PiperSynthesisProcess {
@@ -397,11 +531,22 @@ function ttsInput(invocation: AdapterInvocation): TextToSpeechInput {
 }
 
 function validatePcmWav(bytes: Uint8Array, sampleRateHz: number): number {
+  const dataLength = pcmWavDataLength(bytes, sampleRateHz);
+  if (dataLength === undefined) {
+    throw invalidAudio();
+  }
+  return dataLength / (sampleRateHz * 2);
+}
+
+function pcmWavDataLength(
+  bytes: Uint8Array,
+  sampleRateHz: number,
+): number | undefined {
   if (
     !(TTS_ALLOWED_SAMPLE_RATES as readonly number[]).includes(sampleRateHz) ||
     bytes.byteLength < 44
   ) {
-    throw invalidAudio();
+    return undefined;
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const ascii = (offset: number, length: number) =>
@@ -424,9 +569,58 @@ function validatePcmWav(bytes: Uint8Array, sampleRateHz: number): number {
     dataLength === 0 ||
     dataLength % 2 !== 0
   ) {
-    throw invalidAudio();
+    return undefined;
   }
-  return dataLength / (sampleRateHz * 2);
+  return dataLength;
+}
+
+function composePcmWavSegments(
+  segmentWavs: readonly Uint8Array[],
+  sampleRateHz: 22_050 | 24_000,
+  expectedDataLength: number,
+): Uint8Array {
+  if (
+    segmentWavs.length === 0 ||
+    expectedDataLength < 2 ||
+    expectedDataLength % 2 !== 0 ||
+    44 + expectedDataLength > MAX_TTS_AUDIO_BYTES
+  ) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  const composed = new Uint8Array(44 + expectedDataLength);
+  const view = new DataView(composed.buffer);
+  writeAscii(composed, 0, "RIFF");
+  view.setUint32(4, composed.byteLength - 8, true);
+  writeAscii(composed, 8, "WAVE");
+  writeAscii(composed, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRateHz, true);
+  view.setUint32(28, sampleRateHz * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(composed, 36, "data");
+  view.setUint32(40, expectedDataLength, true);
+  let offset = 44;
+  for (const segment of segmentWavs) {
+    const dataLength = pcmWavDataLength(segment, sampleRateHz);
+    if (dataLength === undefined) {
+      throw invalidAudio();
+    }
+    composed.set(segment.subarray(44), offset);
+    offset += dataLength;
+  }
+  if (offset !== composed.byteLength) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  return composed;
+}
+
+function writeAscii(bytes: Uint8Array, offset: number, value: string): void {
+  for (const [index, character] of Array.from(value).entries()) {
+    bytes[offset + index] = character.charCodeAt(0);
+  }
 }
 
 function invalidAudio(): ModelAdapterError {

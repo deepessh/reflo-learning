@@ -1,10 +1,10 @@
 output "runtime" {
   value = {
-    api_instance_id        = alicloud_instance.api.id
-    api_private_ip         = alicloud_instance.api.private_ip
-    api_public_ip          = alicloud_instance.api.public_ip
-    api_role_name          = alicloud_ram_role.api.role_name
-    parser_function_name   = alicloud_fcv3_function.parser.function_name
+    api_instance_id      = alicloud_instance.api.id
+    api_private_ip       = alicloud_instance.api.private_ip
+    api_public_ip        = alicloud_instance.api.public_ip
+    api_role_name        = alicloud_ram_role.api.role_name
+    parser_function_name = alicloud_fcv3_function.parser.function_name
     parser_layer_arns = [
       alicloud_fcv3_layer_version.parser_runtime.layer_version_arn,
       alicloud_fcv3_layer_version.parser_tools.layer_version_arn,

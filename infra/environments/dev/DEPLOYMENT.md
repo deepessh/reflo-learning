@@ -9,15 +9,35 @@ the staff-controlled Demo Day boundary.
 Confirm issue #199 contains owner-authored approval for:
 
 1. the designated Alibaba Cloud International account;
-2. the exact paid classes and quantities plus a monthly ceiling;
+2. the exact paid classes and quantities plus a monthly ceiling, including the
+   Function Compute parser allowance, the Model Studio allowance and usage
+   caps, and the EventBridge event-stream metering mode and allowance;
 3. the one-time bootstrap identity and GitHub OIDC provisioning;
 4. the dedicated staff hostname boundary, if CDN domains will be enabled; and
 5. exactly one dedicated Telegram or email destination.
+
+The current conservative proposal is USD 40/month for the session-isolated
+parser, USD 160/month for Model Studio, and USD 4.75/month for an EventBridge
+stream only if pay-by-event metering is confirmed. These are planning
+allowances, not authorization. They leave USD 95.25 under the existing USD 300
+ceiling for every other paid service. Do not silently reallocate or exceed the
+ceiling if the remaining approved BOM no longer fits.
 
 Singapore `ap-southeast-1` and dev are already the only region/environment
 accepted by this root. Staging, public access, external learners, external
 uploads, external recipients, KMS Secrets Manager, SLS, and Alibaba Container
 Registry remain excluded.
+
+Before requesting a dev plan, resolve the two incomplete queue guarantees on
+issue #199:
+
+1. the transactional outbox still needs an authorized publisher that sends its
+   bounded audio messages to the private RocketMQ topic; and
+2. the current trigger blocks after bounded retries instead of discarding a
+   failed message, but a separately approved dead-letter destination is still
+   required for the accepted end-state.
+
+Do not plan or apply the dev root while either item remains unresolved.
 
 ## 2. Prepare the GitHub `dev` environment
 
@@ -53,6 +73,12 @@ Environment secret:
 
 - `REFLO_DEV_RUNTIME_SECRETS`: JSON matching `runtime_secrets`
 
+The protected runtime secrets must include `REFLO_QWEN_TTS_API_KEY` and
+`REFLO_QWEN_TTS_DRIFT_CANARY_PASSED=true` for the jobs function, in addition to
+the already approved database, messaging, delivery, and tracing values.
+Configure only secret values in this object; the root derives its non-secret
+bucket, region, topic, timeout, and database connection values.
+
 Do not configure an Alibaba AccessKey. Do not put account IDs, role/provider
 ARNs, bucket names, hostnames, messaging identifiers, or secret JSON in issues
 or workflow inputs.
@@ -82,7 +108,27 @@ lock values and use `tofu init -migrate-state`. Verify:
 
 The bootstrap state is a recovery boundary and is never uploaded to GitHub.
 
-## 4. Package immutable artifacts
+## 4. Activate the managed RocketMQ trigger prerequisites
+
+The jobs function consumes exactly one private RocketMQ message per synchronous
+managed EventBridge delivery. EventBridge is a separately billed service even
+though Function Compute creates the trigger resource. Confirm in the console
+that the stream uses the owner-approved pay-by-event mode; do not accept
+capacity-unit metering implicitly.
+
+Using an owner-approved administrative identity, activate EventBridge and
+pre-create or verify these exact service-linked roles:
+
+- `AliyunServiceRoleForEventBridgeSourceRocketMQ`
+- `AliyunServiceRoleForEventBridgeSendToFC`
+- `AliyunServiceRoleForEventBridgeConnectVPC`
+- `AliyunServiceRoleForFC`
+
+Record only a sanitized success statement on issue #199. Do not grant the
+deployment role broad `ram:CreateServiceLinkedRole`; the committed bootstrap
+policy intentionally permits only the exact application jobs role to be passed.
+
+## 5. Package immutable artifacts
 
 The protected workflow runs `pnpm package:dev-deployment`. It produces, under
 `.artifacts/deployment/`, an API tarball, jobs ZIP, parser custom-runtime code
@@ -100,7 +146,7 @@ registry access. The API ECS image approved in the BOM must already contain
 `ossutil`. Do not substitute mutable artifact keys, layers, or image tags for
 the recorded identities.
 
-## 5. Protected plan and apply
+## 6. Protected plan and apply
 
 From Actions, run **Deploy protected dev** on `main` with:
 
@@ -119,7 +165,7 @@ reference requires a new workflow dispatch and environment review.
 Do not copy the console plan, raw state, runner files, hostnames, destination
 identifiers, or secrets into GitHub.
 
-## 6. Smoke and rollback
+## 7. Smoke and rollback
 
 Use only seeded, synthetic, rights-cleared, and staff-controlled identities.
 Record exact observed results for health, staff authentication, seeded online
@@ -132,7 +178,7 @@ Application rollback selects an earlier immutable API/jobs/parser manifest and
 runs a newly reviewed deployment. Infrastructure recovery is a reviewed
 roll-forward or new rollback plan; never edit state manually.
 
-## 7. Recovery and teardown
+## 8. Recovery and teardown
 
 For lock recovery, first prove no apply is running, identify the exact stale
 `LockID`, obtain named break-glass approval, and use `tofu force-unlock` only

@@ -192,7 +192,7 @@ export function checkInfraPolicy(rootDirectory) {
       "bounded Demo Day dev must not provision Alibaba Container Registry",
     );
   }
-  if (/alicloud_event_bridge|eventbridge/i.test(devSource)) {
+  if (/resource\s+"alicloud_event_bridge[^"]*"\s+"parser/i.test(devSource)) {
     errors.push(
       "bounded Demo Day parser must not provision or depend on EventBridge",
     );
@@ -239,6 +239,14 @@ export function checkInfraPolicy(rootDirectory) {
   const parserFunction = extractNamedBlock(
     runtimeMain,
     'resource "alicloud_fcv3_function" "parser"',
+  );
+  const jobsFunction = extractNamedBlock(
+    runtimeMain,
+    'resource "alicloud_fcv3_function" "jobs"',
+  );
+  const jobsTrigger = extractNamedBlock(
+    runtimeMain,
+    'resource "alicloud_fcv3_trigger" "jobs"',
   );
   const parserSessionPolicy = extractNamedBlock(
     runtimeMain,
@@ -308,13 +316,40 @@ export function checkInfraPolicy(rootDirectory) {
     );
   }
   if (
-    /resource\s+"alicloud_fcv3_trigger"|resource\s+"alicloud_fcv3_provision_config"/.test(
+    /resource\s+"alicloud_fcv3_trigger"\s+"parser|resource\s+"alicloud_fcv3_provision_config"\s+"parser/.test(
       runtimeMain,
     )
   ) {
     errors.push(
       "session-isolated parser must have no trigger or provisioned/minimum instance resource",
     );
+  }
+  const normalizedJobs = normalizeWhitespace(`${jobsFunction} ${jobsTrigger}`);
+  for (const requiredControl of [
+    'handler = "dist/index.handler"',
+    "instance_concurrency = 1",
+    "vpc_config",
+    "vpc_id = var.vpc_id",
+    "vswitch_ids = [var.vswitch_ids.application]",
+    "security_group_id = var.security_group_ids.application",
+    'trigger_type = "eventbridge"',
+    "triggerEnable = true",
+    "asyncInvocationType = true",
+    'eventSourceType = "RocketMQ"',
+    'InstanceType = "Cloud_5"',
+    'InstanceNetwork = "PrivateNetwork"',
+    'Offset = "CONSUME_FROM_LAST_OFFSET"',
+    'mode = "event-streaming"',
+    'errorsTolerance = "NONE"',
+    'PushRetryStrategy = "BACKOFF_RETRY"',
+    "CountBasedWindow = 1",
+    "TimeBasedWindow = 0",
+  ]) {
+    if (!normalizedJobs.includes(requiredControl)) {
+      errors.push(
+        `jobs Function Compute RocketMQ composition is missing required control: ${requiredControl}`,
+      );
+    }
   }
   for (const requiredArtifact of [
     'resource "alicloud_oss_bucket_object" "parser_code"',

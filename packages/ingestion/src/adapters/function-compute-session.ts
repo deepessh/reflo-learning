@@ -34,6 +34,16 @@ import type {
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$/;
 
+export function aliFunctionComputeInternalEndpoint(input: {
+  readonly accountId: string;
+  readonly region: "ap-southeast-1";
+}): string {
+  if (!/^[0-9]{6,32}$/.test(input.accountId)) {
+    throw unavailable();
+  }
+  return `${input.accountId}.${input.region}-internal.fc.aliyuncs.com`;
+}
+
 export interface FunctionComputeSessionWorkerConfiguration {
   readonly workerArtifactDigest: string;
 }
@@ -336,7 +346,7 @@ export class AliFunctionComputeSessionClient implements FunctionComputeSessionCl
       new $OpenApiUtil.Config({
         connectTimeout: 5_000,
         credential: new Credentials.default.default(undefined, provider),
-        endpoint: `${configuration.accountId}.fcv3.${configuration.region}.aliyuncs.com`,
+        endpoint: aliFunctionComputeInternalEndpoint(configuration),
         protocol: "HTTPS",
         readTimeout: 1_795_000,
         regionId: configuration.region,

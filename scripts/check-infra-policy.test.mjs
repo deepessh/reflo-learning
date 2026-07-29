@@ -152,17 +152,14 @@ test("infrastructure policy rejects parser identity, egress, isolation, and perm
       "infra/modules/demo-runtime/main.tf",
     );
     const altered = readFileSync(runtimePath, "utf8")
-      .replace(
-        "internet_access        = false",
-        "internet_access        = true",
-      )
+      .replace("internet_access         = false", "internet_access = true")
       .replace(
         'instance_isolation_mode = "SESSION_EXCLUSIVE"',
         'instance_isolation_mode = "NONE"',
       )
       .replace(
-        'description            = "Credential-free session-isolated Reflo document parser"',
-        'description            = "Credential-free session-isolated Reflo document parser"\n  role                   = alicloud_ram_role.jobs.arn\n  vpc_config {}',
+        'description             = "Credential-free session-isolated Reflo document parser"',
+        'description             = "Credential-free session-isolated Reflo document parser"\n  role                   = alicloud_ram_role.jobs.arn\n  vpc_config {}',
       )
       .replace(
         '"fc:InvokeFunction",',
@@ -187,12 +184,12 @@ test("infrastructure policy rejects incomplete or mutable API parser client wiri
     );
     const altered = readFileSync(runtimePath, "utf8")
       .replace(
-        'REFLO_DEMO_UPLOAD_PROCESSOR_MODE              = "serverless-isolated-ingestion-v1"',
-        'REFLO_DEMO_UPLOAD_PROCESSOR_MODE              = "disabled"',
+        'REFLO_DEMO_UPLOAD_PROCESSOR_MODE             = "serverless-isolated-ingestion-v1"',
+        'REFLO_DEMO_UPLOAD_PROCESSOR_MODE             = "disabled"',
       )
       .replace(
-        'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER    = "LATEST"',
-        'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER    = "mutable"',
+        'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER   = "LATEST"',
+        'REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER   = "mutable"',
       )
       .replace("var.artifact_identity.parser_clamav_snapshot_sha256,", "");
     writeFileSync(runtimePath, altered);

@@ -210,6 +210,11 @@ resource "alicloud_ram_policy" "dev_infrastructure" {
           "fc:GetFunction",
           "fc:ListFunctions",
           "fc:UpdateFunction",
+          "fc:CreateTrigger",
+          "fc:DeleteTrigger",
+          "fc:GetTrigger",
+          "fc:ListTriggers",
+          "fc:UpdateTrigger",
           "cdn:AddCdnDomain",
           "cdn:BatchSetCdnDomainConfig",
           "cdn:DeleteCdnDomain",
@@ -243,6 +248,11 @@ resource "alicloud_ram_policy" "dev_infrastructure" {
           "oss:DeleteBucket",
         ]
         Resource = ["*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ram:PassRole"]
+        Resource = ["acs:ram::*:role/reflo-dev-jobs"]
       },
     ]
   })

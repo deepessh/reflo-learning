@@ -9,7 +9,8 @@ This issue #199 root declares the minimum bounded Alibaba Cloud dev topology:
   parser with no runtime role, VPC attachment, mount, trigger, or Internet
   access;
 - RDS PostgreSQL, AnalyticDB for PostgreSQL, and private RocketMQ;
-- Function Compute jobs with zero provisioned concurrency;
+- private-VPC Function Compute jobs with zero provisioned concurrency and an
+  EventBridge-managed, synchronous, one-message RocketMQ trigger;
 - optional overseas web and private-delivery CDN domains, enabled only after
   the owner supplies the approved hostname boundary; and
 - action-scoped ECS, Function Compute, and deployment identities.
@@ -21,6 +22,12 @@ only authorized dev region. The protected deployment supplies the non-secret
 Alibaba account ID used by the API to address the parser function. This
 configuration does not authorize an account, resource class, spend, bootstrap
 identity, hostname, messaging destination, plan, or apply.
+
+The managed RocketMQ trigger introduces a separately billed EventBridge event
+stream. It must use the owner-approved metering mode and allowance, and its
+service-linked roles must be activated before the protected plan. The dev apply
+also remains blocked until issue #199 records an authorized transactional
+outbox publisher and dead-letter destination.
 
 The partial OSS backend receives `bucket`, `region`,
 `tablestore_endpoint`, and `tablestore_table` only from the protected workflow.

@@ -87,6 +87,9 @@ importers:
 
   apps/jobs:
     dependencies:
+      "@reflo/asset-delivery":
+        specifier: workspace:*
+        version: link:../../packages/asset-delivery
       "@reflo/audio":
         specifier: workspace:*
         version: link:../../packages/audio
@@ -96,6 +99,15 @@ importers:
       "@reflo/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
+      "@reflo/db":
+        specifier: workspace:*
+        version: link:../../packages/db
+      "@reflo/model-router":
+        specifier: workspace:*
+        version: link:../../packages/model-router
+      "@reflo/observability":
+        specifier: workspace:*
+        version: link:../../packages/observability
       "@reflo/retrieval":
         specifier: workspace:*
         version: link:../../packages/retrieval

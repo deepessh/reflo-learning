@@ -23,6 +23,18 @@ locals {
       Principal = { Service = ["fc.aliyuncs.com"] }
     }]
   })
+  jobs_environment = merge(var.function_environment, {
+    DATABASE_URL                  = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_ALIBABA_REGION          = data.alicloud_regions.current.regions[0].id
+    REFLO_JOBS_HANDLER_TIMEOUT_MS = tostring((var.function_compute.timeout_seconds * 1000) - 5000)
+    REFLO_OSS_DELIVERY_BUCKET     = var.bucket_names.delivery
+    REFLO_ROCKETMQ_JOBS_TOPIC     = alicloud_rocketmq_topic.jobs.topic_name
+  })
+  rocketmq_vpc_endpoint = one([
+    for endpoint in alicloud_rocketmq_instance.events.network_info[0].endpoints :
+    endpoint.endpoint_url
+    if endpoint.endpoint_type == "TCP_VPC"
+  ])
 }
 
 resource "alicloud_ram_role" "api" {
@@ -104,22 +116,22 @@ resource "alicloud_ram_role_policy_attachment" "api_parser_sessions" {
 
 locals {
   api_environment = merge(var.api_environment, {
-    DATABASE_URL                                  = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
-    REFLO_ALIBABA_FC_ACCOUNT_ID                   = var.fc_account_id
-    REFLO_ALIBABA_FC_API_ROLE_NAME                = alicloud_ram_role.api.role_name
-    REFLO_ALIBABA_FC_PARSER_AFFINITY_HEADER       = "reflo-session-id"
-    REFLO_ALIBABA_FC_PARSER_ARTIFACT_DIGEST       = local.parser_artifact_digest
-    REFLO_ALIBABA_FC_PARSER_FUNCTION_NAME         = local.parser_function_name
-    REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER    = "LATEST"
-    REFLO_ALIBABA_FC_PARSER_SESSION_IDLE_SECONDS  = "300"
-    REFLO_ALIBABA_FC_PARSER_SESSION_TTL_SECONDS   = "2400"
-    REFLO_ALIBABA_REGION                          = data.alicloud_regions.current.regions[0].id
-    REFLO_DEMO_UPLOAD_PROCESSOR_MODE              = "serverless-isolated-ingestion-v1"
-    REFLO_OSS_ARTIFACT_BUCKET                     = var.bucket_names.artifacts
-    REFLO_OSS_DELIVERY_BUCKET                     = var.bucket_names.delivery
-    REFLO_OSS_QUARANTINE_BUCKET                   = var.bucket_names.quarantine
-    REFLO_OSS_RUNTIME_ROLE_NAME                   = alicloud_ram_role.api.role_name
-    REFLO_VECTOR_DATABASE_URL                     = "postgresql://reflo_vector_api:${urlencode(var.analyticdb_runtime_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
+    DATABASE_URL                                 = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_ALIBABA_FC_ACCOUNT_ID                  = var.fc_account_id
+    REFLO_ALIBABA_FC_API_ROLE_NAME               = alicloud_ram_role.api.role_name
+    REFLO_ALIBABA_FC_PARSER_AFFINITY_HEADER      = "reflo-session-id"
+    REFLO_ALIBABA_FC_PARSER_ARTIFACT_DIGEST      = local.parser_artifact_digest
+    REFLO_ALIBABA_FC_PARSER_FUNCTION_NAME        = local.parser_function_name
+    REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER   = "LATEST"
+    REFLO_ALIBABA_FC_PARSER_SESSION_IDLE_SECONDS = "300"
+    REFLO_ALIBABA_FC_PARSER_SESSION_TTL_SECONDS  = "2400"
+    REFLO_ALIBABA_REGION                         = data.alicloud_regions.current.regions[0].id
+    REFLO_DEMO_UPLOAD_PROCESSOR_MODE             = "serverless-isolated-ingestion-v1"
+    REFLO_OSS_ARTIFACT_BUCKET                    = var.bucket_names.artifacts
+    REFLO_OSS_DELIVERY_BUCKET                    = var.bucket_names.delivery
+    REFLO_OSS_QUARANTINE_BUCKET                  = var.bucket_names.quarantine
+    REFLO_OSS_RUNTIME_ROLE_NAME                  = alicloud_ram_role.api.role_name
+    REFLO_VECTOR_DATABASE_URL                    = "postgresql://reflo_vector_api:${urlencode(var.analyticdb_runtime_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
   })
   migration_environment = {
     DATABASE_URL                    = "postgresql://reflo_admin:${urlencode(var.rds_admin_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
@@ -355,6 +367,32 @@ resource "alicloud_ram_role" "jobs" {
   tags                        = var.tags
 }
 
+resource "alicloud_ram_policy" "jobs" {
+  policy_name     = "${var.name_prefix}-jobs-oss"
+  description     = "Function Compute jobs write only immutable private delivery assets"
+  rotate_strategy = "DeleteOldestNonDefaultVersionWhenLimitExceeded"
+  tags            = var.tags
+  policy_document = jsonencode({
+    Version = "1"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "oss:GetObject",
+        "oss:PutObject",
+      ]
+      Resource = [
+        "acs:oss:*:*:${var.bucket_names.delivery}/owners/*",
+      ]
+    }]
+  })
+}
+
+resource "alicloud_ram_role_policy_attachment" "jobs" {
+  policy_name = alicloud_ram_policy.jobs.policy_name
+  policy_type = alicloud_ram_policy.jobs.type
+  role_name   = alicloud_ram_role.jobs.role_name
+}
+
 resource "alicloud_oss_bucket_object" "api_artifact" {
   bucket                 = var.bucket_names.artifacts
   key                    = var.artifact_identity.api_archive_key
@@ -433,12 +471,63 @@ resource "alicloud_fcv3_function" "jobs" {
   role                  = alicloud_ram_role.jobs.arn
   runtime               = "nodejs20"
   timeout               = var.function_compute.timeout_seconds
-  environment_variables = var.function_environment
+  environment_variables = local.jobs_environment
   code {
     oss_bucket_name = var.bucket_names.artifacts
     oss_object_name = alicloud_oss_bucket_object.jobs_artifact.key
   }
+  vpc_config {
+    vpc_id            = var.vpc_id
+    vswitch_ids       = [var.vswitch_ids.application]
+    security_group_id = var.security_group_ids.application
+  }
   tags = merge(var.tags, { Component = "jobs" })
+}
+
+resource "alicloud_fcv3_trigger" "jobs" {
+  function_name = alicloud_fcv3_function.jobs.function_name
+  qualifier     = "LATEST"
+  trigger_name  = "${var.name_prefix}-jobs-rocketmq"
+  trigger_type  = "eventbridge"
+  trigger_config = jsonencode({
+    triggerEnable          = true
+    asyncInvocationType    = true
+    eventRuleFilterPattern = jsonencode({})
+    eventSinkConfig = {
+      deliveryOption = {
+        eventSchema = "CloudEvents"
+      }
+    }
+    eventSourceConfig = {
+      eventSourceType = "RocketMQ"
+      eventSourceParameters = {
+        sourceRocketMQParameters = {
+          RegionId                = data.alicloud_regions.current.regions[0].id
+          InstanceId              = alicloud_rocketmq_instance.events.id
+          InstanceType            = "Cloud_5"
+          InstanceEndpoint        = local.rocketmq_vpc_endpoint
+          InstanceNetwork         = "PrivateNetwork"
+          InstanceVpcId           = var.vpc_id
+          InstanceVSwitchIds      = var.vswitch_ids.application
+          InstanceSecurityGroupId = var.security_group_ids.application
+          Topic                   = alicloud_rocketmq_topic.jobs.topic_name
+          GroupID                 = alicloud_rocketmq_consumer_group.jobs.consumer_group_id
+          Offset                  = "CONSUME_FROM_LAST_OFFSET"
+        }
+      }
+    }
+    runOptions = {
+      mode            = "event-streaming"
+      errorsTolerance = "NONE"
+      retryStrategy = {
+        PushRetryStrategy = "BACKOFF_RETRY"
+      }
+      batchWindow = {
+        CountBasedWindow = 1
+        TimeBasedWindow  = 0
+      }
+    }
+  })
 }
 
 resource "alicloud_fcv3_layer_version" "parser_runtime" {
@@ -475,24 +564,24 @@ resource "alicloud_fcv3_layer_version" "parser_snapshot" {
 }
 
 resource "alicloud_fcv3_function" "parser" {
-  function_name          = local.parser_function_name
-  description            = "Credential-free session-isolated Reflo document parser"
-  cpu                    = 2
-  disk_size              = 10240
-  handler                = "bootstrap"
-  instance_concurrency   = 1
+  function_name           = local.parser_function_name
+  description             = "Credential-free session-isolated Reflo document parser"
+  cpu                     = 2
+  disk_size               = 10240
+  handler                 = "bootstrap"
+  instance_concurrency    = 1
   instance_isolation_mode = "SESSION_EXCLUSIVE"
-  internet_access        = false
-  memory_size            = 4096
-  resource_group_id      = var.resource_group_id
-  runtime                = "custom.debian11"
-  session_affinity       = "HEADER_FIELD"
+  internet_access         = false
+  memory_size             = 4096
+  resource_group_id       = var.resource_group_id
+  runtime                 = "custom.debian11"
+  session_affinity        = "HEADER_FIELD"
   session_affinity_config = jsonencode({
-    affinityHeaderFieldName        = "reflo-session-id"
-    disableSessionIdReuse          = true
-    sessionConcurrencyPerInstance  = 1
-    sessionIdleTimeoutInSeconds    = 300
-    sessionTTLInSeconds            = 2400
+    affinityHeaderFieldName       = "reflo-session-id"
+    disableSessionIdReuse         = true
+    sessionConcurrencyPerInstance = 1
+    sessionIdleTimeoutInSeconds   = 300
+    sessionTTLInSeconds           = 2400
   })
   timeout = 1800
   code {

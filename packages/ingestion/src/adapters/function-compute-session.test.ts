@@ -16,7 +16,10 @@ import {
   functionSessionSha256,
 } from "../function-session-protocol.js";
 import type { FunctionComputeSessionClientPort } from "../ports.js";
-import { FunctionComputeSessionDocumentWorker } from "./function-compute-session.js";
+import {
+  aliFunctionComputeInternalEndpoint,
+  FunctionComputeSessionDocumentWorker,
+} from "./function-compute-session.js";
 
 const created: string[] = [];
 
@@ -26,6 +29,26 @@ afterEach(async () => {
       .splice(0)
       .map((directory) => rm(directory, { force: true, recursive: true })),
   );
+});
+
+describe("Ali Function Compute session endpoint", () => {
+  it("uses the documented same-region Singapore internal endpoint", () => {
+    expect(
+      aliFunctionComputeInternalEndpoint({
+        accountId: "1234567890123456",
+        region: "ap-southeast-1",
+      }),
+    ).toBe("1234567890123456.ap-southeast-1-internal.fc.aliyuncs.com");
+  });
+
+  it("rejects an invalid account identifier", () => {
+    expect(() =>
+      aliFunctionComputeInternalEndpoint({
+        accountId: "not-an-account",
+        region: "ap-southeast-1",
+      }),
+    ).toThrow(IngestionError);
+  });
 });
 
 describe("FunctionComputeSessionDocumentWorker", () => {

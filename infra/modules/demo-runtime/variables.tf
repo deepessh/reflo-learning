@@ -51,12 +51,12 @@ variable "bucket_names" {
 variable "ecs" {
   description = "Owner-approved ECS image and paid instance classes. No default is intentional."
   type = object({
-    api_image_id                = string
-    api_ingress_cidrs           = list(string)
-    api_instance_type           = string
-    api_system_disk_category    = string
-    api_system_disk_size_gib    = number
-    api_public_bandwidth_mbps   = number
+    api_image_id              = string
+    api_ingress_cidrs         = list(string)
+    api_instance_type         = string
+    api_system_disk_category  = string
+    api_system_disk_size_gib  = number
+    api_public_bandwidth_mbps = number
   })
 
   validation {
@@ -74,14 +74,14 @@ variable "ecs" {
 variable "artifact_identity" {
   description = "Immutable content-addressed artifact identities published outside a registry."
   type = object({
-    api_archive_key                 = string
-    api_archive_sha256              = string
-    parser_code_key                 = string
-    parser_code_sha256              = string
-    parser_java_worker_layer_key    = string
-    parser_java_worker_layer_sha256 = string
-    parser_native_layer_key         = string
-    parser_native_layer_sha256      = string
+    api_archive_key                  = string
+    api_archive_sha256               = string
+    parser_code_key                  = string
+    parser_code_sha256               = string
+    parser_java_worker_layer_key     = string
+    parser_java_worker_layer_sha256  = string
+    parser_native_layer_key          = string
+    parser_native_layer_sha256       = string
     parser_clamav_snapshot_layer_key = string
     parser_clamav_snapshot_sha256    = string
   })
@@ -222,8 +222,24 @@ variable "function_compute" {
 }
 
 variable "function_environment" {
-  type      = map(string)
-  sensitive = true
+  description = "Protected jobs-only secrets and explicitly enabled tracing values."
+  type        = map(string)
+  sensitive   = true
+
+  validation {
+    condition = (
+      can(regex(
+        "^sk-[A-Za-z0-9_-]{16,256}$",
+        lookup(var.function_environment, "REFLO_QWEN_TTS_API_KEY", ""),
+      )) &&
+      lookup(
+        var.function_environment,
+        "REFLO_QWEN_TTS_DRIFT_CANARY_PASSED",
+        "",
+      ) == "true"
+    )
+    error_message = "Function Compute jobs require the protected Qwen TTS key and an explicitly passed drift canary."
+  }
 }
 
 variable "cdn" {

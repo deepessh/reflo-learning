@@ -68,6 +68,104 @@ export class ModelStudioTtsClientError extends Error {
   }
 }
 
+const DASHSCOPE_TTS_ENDPOINT =
+  "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const MAX_DASHSCOPE_RESPONSE_BYTES = 64 * 1024;
+const MAX_TTS_AUDIO_BYTES = 32 * 1024 * 1024;
+
+export class DashScopeModelStudioTtsClient implements ModelStudioTtsClient {
+  readonly #apiKey: string;
+  readonly #fetch: typeof fetch;
+
+  constructor(options: {
+    readonly apiKey: string;
+    readonly fetchImplementation?: typeof fetch;
+  }) {
+    if (!/^sk-[a-zA-Z0-9_-]{16,256}$/.test(options.apiKey)) {
+      throw new ModelStudioTtsClientError(
+        "authentication_failed",
+        "not_accepted",
+        false,
+      );
+    }
+    this.#apiKey = options.apiKey;
+    this.#fetch = options.fetchImplementation ?? fetch;
+  }
+
+  async synthesize(
+    request: Parameters<ModelStudioTtsClient["synthesize"]>[0],
+    signal: AbortSignal,
+  ): Promise<TtsSynthesisResponse> {
+    if (
+      request.model !== QWEN_3_TTS_FLASH_MODEL ||
+      request.voiceProfileId !== REFLO_NARRATOR_VOICE_PROFILE ||
+      request.speakingRate !== 1 ||
+      request.narration.length < 1 ||
+      request.narration.length > 600 ||
+      !/^[a-zA-Z0-9_-]{8,128}$/.test(request.idempotencyKey)
+    ) {
+      throw new ModelStudioTtsClientError(
+        "invalid_request",
+        "not_accepted",
+        false,
+      );
+    }
+    let response: Response;
+    try {
+      response = await this.#fetch(DASHSCOPE_TTS_ENDPOINT, {
+        body: JSON.stringify({
+          input: {
+            language_type: "English",
+            text: request.narration,
+            voice: "Cherry",
+          },
+          model: request.model,
+        }),
+        headers: {
+          authorization: `Bearer ${this.#apiKey}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+        redirect: "error",
+        signal,
+      });
+    } catch (error) {
+      throw transportFailure(error, signal, "unknown");
+    }
+    if (!response.ok) {
+      throw responseFailure(response.status);
+    }
+    const payload = await readJsonResponse(response, signal);
+    const audioUrl = modelStudioAudioUrl(payload);
+    let audioResponse: Response;
+    try {
+      audioResponse = await this.#fetch(audioUrl, {
+        method: "GET",
+        redirect: "error",
+        signal,
+      });
+    } catch (error) {
+      throw transportFailure(error, signal, "accepted");
+    }
+    if (!audioResponse.ok) {
+      throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+    }
+    const audioBytes = await readBoundedBytes(
+      audioResponse,
+      MAX_TTS_AUDIO_BYTES,
+      signal,
+      "accepted",
+    );
+    return {
+      audioBytes,
+      engineVersion: QWEN_3_TTS_FLASH_MODEL_VERSION,
+      sampleRateHz: 24_000,
+      voiceArtifactVersion: "qwen-cherry-2025-11-27",
+      voiceId: "Cherry",
+    };
+  }
+}
+
 export interface PiperSynthesisProcess {
   synthesize(
     request: {
@@ -383,6 +481,153 @@ function assertSafeVersion(value: string): void {
       transient: false,
     });
   }
+}
+
+async function readJsonResponse(
+  response: Response,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const bytes = await readBoundedBytes(
+    response,
+    MAX_DASHSCOPE_RESPONSE_BYTES,
+    signal,
+    "accepted",
+  );
+  try {
+    return JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
+  } catch (error) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false, {
+      cause: error,
+    });
+  }
+}
+
+async function readBoundedBytes(
+  response: Response,
+  maximumBytes: number,
+  signal: AbortSignal,
+  submissionState: "accepted" | "unknown",
+): Promise<Uint8Array> {
+  const declaredHeader = response.headers.get("content-length");
+  const declaredLength =
+    declaredHeader === null ? undefined : Number(declaredHeader);
+  if (
+    (declaredLength !== undefined &&
+      Number.isFinite(declaredLength) &&
+      (declaredLength < 1 || declaredLength > maximumBytes)) ||
+    response.body === null
+  ) {
+    throw new ModelStudioTtsClientError(
+      "provider_error",
+      submissionState,
+      false,
+    );
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    for (;;) {
+      if (signal.aborted) {
+        throw new ModelStudioTtsClientError("timeout", submissionState, false);
+      }
+      const chunk = await reader.read();
+      if (chunk.done) {
+        break;
+      }
+      byteLength += chunk.value.byteLength;
+      if (byteLength > maximumBytes) {
+        throw new ModelStudioTtsClientError(
+          "provider_error",
+          submissionState,
+          false,
+        );
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (byteLength < 1) {
+    throw new ModelStudioTtsClientError(
+      "provider_error",
+      submissionState,
+      false,
+    );
+  }
+  return new Uint8Array(Buffer.concat(chunks, byteLength));
+}
+
+function modelStudioAudioUrl(value: unknown): URL {
+  const root = record(value);
+  const output = record(root?.output);
+  const audio = record(output?.audio);
+  if (
+    root?.status_code !== 200 ||
+    output?.finish_reason !== "stop" ||
+    typeof audio?.url !== "string"
+  ) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  let url: URL;
+  try {
+    url = new URL(audio.url);
+  } catch (error) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false, {
+      cause: error,
+    });
+  }
+  if (
+    !url.hostname.startsWith("dashscope-result-") ||
+    !url.hostname.endsWith(".aliyuncs.com") ||
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  url.protocol = "https:";
+  return url;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
+}
+
+function responseFailure(status: number): ModelStudioTtsClientError {
+  if (status === 401 || status === 403) {
+    return new ModelStudioTtsClientError(
+      "authentication_failed",
+      "not_accepted",
+      false,
+    );
+  }
+  if (status === 429) {
+    return new ModelStudioTtsClientError("rate_limited", "not_accepted", true);
+  }
+  if (status >= 400 && status < 500) {
+    return new ModelStudioTtsClientError(
+      "invalid_request",
+      "not_accepted",
+      false,
+    );
+  }
+  return new ModelStudioTtsClientError("unavailable", "unknown", true);
+}
+
+function transportFailure(
+  error: unknown,
+  signal: AbortSignal,
+  submissionState: "accepted" | "unknown",
+): ModelStudioTtsClientError {
+  return new ModelStudioTtsClientError(
+    signal.aborted ? "timeout" : "unavailable",
+    submissionState,
+    submissionState !== "accepted",
+    { cause: error },
+  );
 }
 
 function pathIsAbsolute(value: string): boolean {

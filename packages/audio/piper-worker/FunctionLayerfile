@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.13.12-slim-bookworm@sha256:a58daefb915e1e03ad48f3ca4df8832065412c5c35cacb9d39f4229184de12b6
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONNOUSERSITE=1
+
+WORKDIR /build
+
+COPY function-requirements.txt manifest.json worker.py ./
+
+RUN python -m pip download \
+      --dest /wheels \
+      --only-binary=:all: \
+      --requirement function-requirements.txt \
+    && echo "b17184a664bd9431ce95c138f4bfb3025e1280cf26075a703dbfdcab989b8ee3  /wheels/piper_tts-1.4.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl" \
+      | sha256sum --check --strict \
+    && echo "6872443f236a554921cda6f318c900e2d0c226792cf3534d00e5057c6926e5d2  /wheels/onnxruntime-1.27.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" \
+      | sha256sum --check --strict \
+    && python -m pip install \
+      --no-index \
+      --no-deps \
+      --find-links=/wheels \
+      --requirement function-requirements.txt \
+    && python -m pip check \
+    && python - <<'PY'
+import importlib.metadata
+from pathlib import Path
+
+expected = {}
+for line in Path("function-requirements.txt").read_text().splitlines():
+    name, version = line.split("==", 1)
+    expected[name] = version
+actual = {
+    name: importlib.metadata.version(name)
+    for name in expected
+}
+if actual != expected:
+    raise SystemExit(f"unexpected Piper dependency set: {actual!r}")
+PY
+
+RUN mkdir -p /layer/reflo/piper/bin /layer/reflo/piper/voice \
+    && cp -a /usr/local /layer/reflo/piper/python \
+    && install -m 0444 manifest.json /layer/reflo/piper/manifest.json \
+    && install -m 0444 worker.py /layer/reflo/piper/worker.py
+
+COPY function-python /layer/reflo/piper/bin/python
+
+ADD --checksum=sha256:5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a \
+  https://huggingface.co/rhasspy/piper-voices/resolve/5b44ec7bab7c5822cfec48fbd5aa99db71a823d6/en/en_US/ljspeech/high/en_US-ljspeech-high.onnx \
+  /layer/reflo/piper/voice/en_US-ljspeech-high.onnx
+ADD --checksum=sha256:7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14 \
+  https://huggingface.co/rhasspy/piper-voices/resolve/5b44ec7bab7c5822cfec48fbd5aa99db71a823d6/en/en_US/ljspeech/high/en_US-ljspeech-high.onnx.json \
+  /layer/reflo/piper/voice/en_US-ljspeech-high.onnx.json
+
+RUN chmod 0555 /layer/reflo/piper/bin/python \
+    && find /layer -type d -exec chmod 0555 {} + \
+    && find /layer -type f -perm /111 -exec chmod 0555 {} + \
+    && find /layer -type f ! -perm /111 -exec chmod 0444 {} + \
+    && mkdir -p /opt/reflo \
+    && ln -s /layer/reflo/piper /opt/reflo/piper \
+    && /layer/reflo/piper/bin/python -c \
+      "import importlib.metadata; assert importlib.metadata.version('piper-tts') == '1.4.2'; assert importlib.metadata.version('onnxruntime') == '1.27.0'" \
+    && rm /opt/reflo/piper

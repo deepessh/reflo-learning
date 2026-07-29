@@ -24,11 +24,21 @@ locals {
     }]
   })
   jobs_environment = merge(var.function_environment, {
-    DATABASE_URL                  = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
-    REFLO_ALIBABA_REGION          = data.alicloud_regions.current.regions[0].id
-    REFLO_JOBS_HANDLER_TIMEOUT_MS = tostring((var.function_compute.timeout_seconds * 1000) - 5000)
-    REFLO_OSS_DELIVERY_BUCKET     = var.bucket_names.delivery
-    REFLO_ROCKETMQ_JOBS_TOPIC     = alicloud_rocketmq_topic.jobs.topic_name
+    DATABASE_URL                       = "postgresql://reflo_api:${urlencode(var.rds_runtime_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_ALIBABA_REGION               = data.alicloud_regions.current.regions[0].id
+    REFLO_JOBS_HANDLER_TIMEOUT_MS      = tostring((var.function_compute.timeout_seconds * 1000) - 5000)
+    REFLO_OSS_DELIVERY_BUCKET          = var.bucket_names.delivery
+    REFLO_ROCKETMQ_JOBS_TOPIC          = alicloud_rocketmq_topic.jobs.topic_name
+    REFLO_PIPER_ACTIVATION_STATUS      = "blocked"
+    REFLO_PIPER_ARTIFACT_REVISION      = "5b44ec7bab7c5822cfec48fbd5aa99db71a823d6"
+    REFLO_PIPER_CONFIG_PATH            = "/opt/reflo/piper/voice/en_US-ljspeech-high.onnx.json"
+    REFLO_PIPER_CONFIG_SHA256          = "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14"
+    REFLO_PIPER_MODEL_PATH             = "/opt/reflo/piper/voice/en_US-ljspeech-high.onnx"
+    REFLO_PIPER_MODEL_SHA256           = "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a"
+    REFLO_PIPER_PYTHON_EXECUTABLE      = "/opt/reflo/piper/bin/python"
+    REFLO_PIPER_SCRATCH_ROOT           = "/tmp/reflo-piper-work"
+    REFLO_PIPER_VOICE_ARTIFACT_VERSION = "piper-voice-en-us-ljspeech-high-v1"
+    REFLO_PIPER_WORKER_PATH            = "/opt/reflo/piper/worker.py"
   })
   rocketmq_vpc_endpoint = one([
     for endpoint in alicloud_rocketmq_instance.events.network_info[0].endpoints :
@@ -447,6 +457,26 @@ resource "alicloud_oss_bucket_object" "jobs_artifact" {
   server_side_encryption = "AES256"
 }
 
+resource "alicloud_oss_bucket_object" "jobs_piper_layer" {
+  bucket                 = var.bucket_names.artifacts
+  key                    = var.artifact_identity.jobs_piper_layer_key
+  source                 = "${path.root}/../../../.artifacts/deployment/jobs-piper-layer.zip"
+  acl                    = "private"
+  content_type           = "application/zip"
+  server_side_encryption = "AES256"
+}
+
+resource "alicloud_fcv3_layer_version" "jobs_piper" {
+  layer_name         = "${var.name_prefix}-jobs-piper"
+  description        = "Content-addressed activation-gated Piper CPU fallback"
+  acl                = "0"
+  compatible_runtime = ["nodejs20"]
+  code {
+    oss_bucket_name = var.bucket_names.artifacts
+    oss_object_name = alicloud_oss_bucket_object.jobs_piper_layer.key
+  }
+}
+
 resource "alicloud_oss_bucket_object" "web_artifact" {
   for_each = fileset("${path.root}/../../../.artifacts/web", "**")
 
@@ -472,6 +502,7 @@ resource "alicloud_fcv3_function" "jobs" {
   runtime               = "nodejs20"
   timeout               = var.function_compute.timeout_seconds
   environment_variables = local.jobs_environment
+  layers                = [alicloud_fcv3_layer_version.jobs_piper.layer_version_arn]
   code {
     oss_bucket_name = var.bucket_names.artifacts
     oss_object_name = alicloud_oss_bucket_object.jobs_artifact.key

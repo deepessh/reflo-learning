@@ -7,6 +7,8 @@ import { after, describe, it } from "node:test";
 import {
   buildDeploymentManifest,
   DEPLOYMENT_ARTIFACT_CONTRACT,
+  JOBS_LAYER_LIMIT_BYTES,
+  JOBS_RUNTIME,
   PARSER_ARCHIVE_LIMIT_BYTES,
   PARSER_LAYER_COUNT_LIMIT,
   PARSER_LAYER_TOTAL_LIMIT_BYTES,
@@ -17,6 +19,7 @@ const directories = [];
 const filenames = [
   "api.tar.gz",
   "jobs.zip",
+  "jobs-piper-layer.zip",
   "parser-code.zip",
   "parser-java-worker-layer.zip",
   "parser-native-layer.zip",
@@ -38,6 +41,16 @@ describe("deployment artifact manifest", () => {
 
     assert.equal(manifest.contractVersion, DEPLOYMENT_ARTIFACT_CONTRACT);
     assert.equal(manifest.commit, commit);
+    assert.equal(manifest.artifacts.jobs.runtime, JOBS_RUNTIME);
+    assert.equal(
+      manifest.artifacts.jobs.layers.piper.compressedBytes <=
+        JOBS_LAYER_LIMIT_BYTES,
+      true,
+    );
+    assert.equal(
+      manifest.artifacts.jobs.layers.piper.key,
+      `deployments/${manifest.artifacts.jobs.layers.piper.sha256}/jobs-piper-layer.zip`,
+    );
     assert.equal(manifest.artifacts.parser.runtime, PARSER_RUNTIME);
     assert.deepEqual(Object.keys(manifest.artifacts.parser.layers), [
       "clamavSnapshot",

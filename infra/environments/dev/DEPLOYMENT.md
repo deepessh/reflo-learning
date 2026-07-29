@@ -39,10 +39,13 @@ issue #199:
 2. the current trigger blocks after bounded retries instead of discarding a
    failed message, but a separately approved dead-letter destination is still
    required for the accepted end-state; and
-3. the activation-gated Piper fallback must be composed and packaged before
-   claiming the dual-route audio release gate.
+3. the content-addressed Piper layer remains forced to `blocked`. Do not
+   activate or claim the dual-route audio release gate without ADR 0011's
+   legal, security, target-capacity, and listening evidence.
 
-Do not plan or apply the dev root while either item remains unresolved.
+Do not plan or apply the dev root while either of the first two items remains
+unresolved. The third item is an activation and claim prohibition, not a
+Demo Day deployment prerequisite under ADR 0042.
 
 ## 2. Prepare the GitHub `dev` environment
 
@@ -136,13 +139,14 @@ policy intentionally permits only the exact application jobs role to be passed.
 ## 5. Package immutable artifacts
 
 The protected workflow runs `pnpm package:dev-deployment`. It produces, under
-`.artifacts/deployment/`, an API tarball, jobs ZIP, parser custom-runtime code
-ZIP, Java-worker layer, native-tools layer, independently admitted ClamAV
-snapshot layer, and `manifest.json`. A generated `deployment.tfvars.json`
-passes the same non-secret manifest to OpenTofu. The v2 manifest records the
-exact Git commit, `custom.debian11` runtime, compressed sizes, SHA-256 digests,
-and content-addressed OSS keys. The directory is ignored and must never contain
-runtime configuration or secrets.
+`.artifacts/deployment/`, an API tarball, jobs ZIP, activation-blocked Piper
+layer, parser custom-runtime code ZIP, Java-worker layer, native-tools layer,
+independently admitted ClamAV snapshot layer, and `manifest.json`. A generated
+`deployment.tfvars.json` passes the same non-secret manifest to OpenTofu. The
+v3 manifest records the exact Git commit, `nodejs20` and `custom.debian11`
+runtimes, compressed sizes, SHA-256 digests, and content-addressed OSS keys.
+The directory is ignored and must never contain runtime configuration or
+secrets.
 
 The parser archives are exported from the exact-pinned build without publishing
 the build image. Function Compute loads the private code and layer objects

@@ -6,12 +6,14 @@ commit="$(git -C "$root" rev-parse HEAD)"
 target="$root/.artifacts/deployment"
 parser_image="reflo-parser:$commit"
 native_image="reflo-parser-fc-native:$commit"
+piper_image="reflo-jobs-piper-layer:$commit"
 bootstrap="$root/packages/ingestion/worker/function/bootstrap"
 snapshot="${REFLO_CLAMAV_ADMISSION_DATABASE_DIR:-}"
 clamav_updater="docker.io/clamav/clamav@sha256:48eaad9644475c2d466ce6d4ba2da892dbd4dcd47713201d31b665364655cc3c"
 scratch="$(mktemp -d)"
 container_id=""
 native_container_id=""
+piper_container_id=""
 
 cleanup() {
   if [[ -n "$container_id" ]]; then
@@ -19,6 +21,9 @@ cleanup() {
   fi
   if [[ -n "$native_container_id" ]]; then
     docker rm --force "$native_container_id" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$piper_container_id" ]]; then
+    docker rm --force "$piper_container_id" >/dev/null 2>&1 || true
   fi
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf "$scratch"
@@ -67,6 +72,7 @@ mkdir -p "$target"
 rm -f \
   "$target/api.tar.gz" \
   "$target/jobs.zip" \
+  "$target/jobs-piper-layer.zip" \
   "$target/parser.tar" \
   "$target/parser-code.zip" \
   "$target/parser-java-worker-layer.zip" \
@@ -96,6 +102,19 @@ docker run \
   .
 
 reproducible_zip "$root/.artifacts/jobs" "$target/jobs.zip"
+
+docker build \
+  --platform linux/amd64 \
+  --file "$root/packages/audio/piper-worker/FunctionLayerfile" \
+  --tag "$piper_image" \
+  "$root/packages/audio/piper-worker"
+piper_container_id="$(docker create "$piper_image")"
+piper_stage="$scratch/jobs-piper"
+mkdir -p "$piper_stage"
+docker cp "$piper_container_id:/layer/." "$piper_stage"
+docker rm "$piper_container_id" >/dev/null
+piper_container_id=""
+reproducible_zip "$piper_stage" "$target/jobs-piper-layer.zip"
 
 # Keep the exact-pinned OCI build as the common local/cloud compiler, but
 # export immutable Function Compute archives instead of publishing the image.

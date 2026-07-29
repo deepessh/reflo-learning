@@ -3,7 +3,9 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEPLOYMENT_ARTIFACT_CONTRACT = "reflo-dev-deployment-artifacts-v2";
+export const DEPLOYMENT_ARTIFACT_CONTRACT = "reflo-dev-deployment-artifacts-v3";
+export const JOBS_RUNTIME = "nodejs20";
+export const JOBS_LAYER_LIMIT_BYTES = 500 * 1024 * 1024;
 export const PARSER_RUNTIME = "custom.debian11";
 export const PARSER_ARCHIVE_LIMIT_BYTES = 500 * 1024 * 1024;
 export const PARSER_LAYER_COUNT_LIMIT = 4;
@@ -12,6 +14,7 @@ export const PARSER_LAYER_TOTAL_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const artifactFiles = Object.freeze({
   api: "api.tar.gz",
   jobs: "jobs.zip",
+  jobsPiperLayer: "jobs-piper-layer.zip",
   parserCode: "parser-code.zip",
   parserJavaWorker: "parser-java-worker-layer.zip",
   parserNative: "parser-native-layer.zip",
@@ -35,6 +38,11 @@ export async function buildDeploymentManifest(directory, commit) {
     artifacts.parserNative,
     artifacts.parserClamavSnapshot,
   ];
+  if (artifacts.jobsPiperLayer.compressedBytes > JOBS_LAYER_LIMIT_BYTES) {
+    throw new Error(
+      "jobs-piper-layer.zip exceeds the 500 MiB Function Compute layer limit",
+    );
+  }
   for (const archive of [artifacts.parserCode, ...parserLayers]) {
     if (archive.compressedBytes > PARSER_ARCHIVE_LIMIT_BYTES) {
       throw new Error(
@@ -57,7 +65,11 @@ export async function buildDeploymentManifest(directory, commit) {
   return {
     artifacts: {
       api: artifacts.api,
-      jobs: artifacts.jobs,
+      jobs: {
+        code: artifacts.jobs,
+        layers: { piper: artifacts.jobsPiperLayer },
+        runtime: JOBS_RUNTIME,
+      },
       parser: {
         code: artifacts.parserCode,
         layers: {

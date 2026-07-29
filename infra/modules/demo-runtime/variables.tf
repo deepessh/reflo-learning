@@ -76,6 +76,8 @@ variable "artifact_identity" {
   type = object({
     api_archive_key                  = string
     api_archive_sha256               = string
+    jobs_piper_layer_key             = string
+    jobs_piper_layer_sha256          = string
     parser_code_key                  = string
     parser_code_sha256               = string
     parser_java_worker_layer_key     = string
@@ -90,6 +92,8 @@ variable "artifact_identity" {
     condition = (
       can(regex("^deployments/[a-f0-9]{64}/api\\.tar\\.gz$", var.artifact_identity.api_archive_key)) &&
       can(regex("^[a-f0-9]{64}$", var.artifact_identity.api_archive_sha256)) &&
+      can(regex("^deployments/[a-f0-9]{64}/jobs-piper-layer\\.zip$", var.artifact_identity.jobs_piper_layer_key)) &&
+      can(regex("^[a-f0-9]{64}$", var.artifact_identity.jobs_piper_layer_sha256)) &&
       can(regex("^deployments/[a-f0-9]{64}/parser-code\\.zip$", var.artifact_identity.parser_code_key)) &&
       can(regex("^[a-f0-9]{64}$", var.artifact_identity.parser_code_sha256)) &&
       can(regex("^deployments/[a-f0-9]{64}/parser-java-worker-layer\\.zip$", var.artifact_identity.parser_java_worker_layer_key)) &&

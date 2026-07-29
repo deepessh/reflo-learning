@@ -10,6 +10,8 @@ import {
 } from "@reflo/model-router";
 import {
   DashScopeModelStudioTtsClient,
+  NodePiperSynthesisProcess,
+  createPiperTtsAdapter,
   QWEN_3_TTS_FLASH_MODEL,
   QWEN_3_TTS_FLASH_MODEL_VERSION,
   createQwenTtsAdapter,
@@ -74,7 +76,7 @@ export async function createProductionAudioHandler(
     model: QWEN_3_TTS_FLASH_MODEL,
   });
   const models = createModelRouter({
-    adapters: adapterRegistry(speech),
+    adapters: speechAdapterRegistry(environment, speech),
     deployment: "dev",
     traceSink: traces.modelTraces,
   });
@@ -98,15 +100,55 @@ export async function createProductionAudioHandler(
   };
 }
 
-function adapterRegistry(
-  speech: ModelAdapterRegistry["speech"][string],
+export function speechAdapterRegistry(
+  environment: NodeJS.ProcessEnv,
+  primary: ModelAdapterRegistry["speech"][string],
 ): ModelAdapterRegistry {
+  const activation = required(environment, "REFLO_PIPER_ACTIVATION_STATUS");
+  if (activation !== "active" && activation !== "blocked") {
+    throw new Error("Piper activation status is invalid");
+  }
+  const fallback =
+    activation === "active"
+      ? createPiperTtsAdapter({
+          process: new NodePiperSynthesisProcess({
+            configPath: required(environment, "REFLO_PIPER_CONFIG_PATH"),
+            configSha256: required(environment, "REFLO_PIPER_CONFIG_SHA256"),
+            modelPath: required(environment, "REFLO_PIPER_MODEL_PATH"),
+            modelSha256: required(environment, "REFLO_PIPER_MODEL_SHA256"),
+            pythonExecutable: required(
+              environment,
+              "REFLO_PIPER_PYTHON_EXECUTABLE",
+            ),
+            scratchRoot: required(environment, "REFLO_PIPER_SCRATCH_ROOT"),
+            workerPath: required(environment, "REFLO_PIPER_WORKER_PATH"),
+          }),
+          profile: {
+            artifactRevision: required(
+              environment,
+              "REFLO_PIPER_ARTIFACT_REVISION",
+            ),
+            configPath: required(environment, "REFLO_PIPER_CONFIG_PATH"),
+            configSha256: required(environment, "REFLO_PIPER_CONFIG_SHA256"),
+            modelPath: required(environment, "REFLO_PIPER_MODEL_PATH"),
+            modelSha256: required(environment, "REFLO_PIPER_MODEL_SHA256"),
+            runtimeDownloadsAllowed: false,
+            voiceArtifactVersion: required(
+              environment,
+              "REFLO_PIPER_VOICE_ARTIFACT_VERSION",
+            ),
+          },
+        })
+      : undefined;
   return {
     dialogue: {},
     embedding: {},
     grading: {},
     groundedGeneration: {},
-    speech: { "qwen-tts.primary": speech },
+    speech: {
+      "qwen-tts.primary": primary,
+      ...(fallback === undefined ? {} : { "piper-tts.cpu": fallback }),
+    },
     structured: {},
     video: {},
   };

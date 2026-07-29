@@ -12,6 +12,8 @@ locals {
   artifact_identity = {
     api_archive_key                  = var.deployment_manifest.artifacts.api.key
     api_archive_sha256               = var.deployment_manifest.artifacts.api.sha256
+    jobs_piper_layer_key             = var.deployment_manifest.artifacts.jobs.layers.piper.key
+    jobs_piper_layer_sha256          = var.deployment_manifest.artifacts.jobs.layers.piper.sha256
     parser_code_key                  = var.deployment_manifest.artifacts.parser.code.key
     parser_code_sha256               = var.deployment_manifest.artifacts.parser.code.sha256
     parser_java_worker_layer_key     = var.deployment_manifest.artifacts.parser.layers.javaWorker.key
@@ -22,7 +24,7 @@ locals {
     parser_native_layer_sha256       = var.deployment_manifest.artifacts.parser.layers.nativeTools.sha256
   }
   function_compute = merge(var.approved_runtime_configuration.function_compute, {
-    code_object_key = var.deployment_manifest.artifacts.jobs.key
+    code_object_key = var.deployment_manifest.artifacts.jobs.code.key
   })
 }
 

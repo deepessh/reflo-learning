@@ -107,7 +107,67 @@ describe("registry-free parser Function Compute packaging policy", () => {
     assert.match(workflow, /parser-code\.zip/);
     assert.match(workflow, /parser-clamav-snapshot-layer\.zip/);
     assert.match(workflow, /test ! -e .*parser\.tar/);
-    assert.match(workflow, /reflo-dev-deployment-artifacts-v2/);
+    assert.match(workflow, /reflo-dev-deployment-artifacts-v3/);
     assert.match(workflow, /custom\.debian11/);
+  });
+
+  it("packages the disabled Piper fallback as one exact jobs layer", async () => {
+    const [packaging, workflow, layerfile, requirements, runtime] =
+      await Promise.all([
+        readFile(
+          new URL("./prepare-dev-deployment-artifacts.sh", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../.github/workflows/deploy-dev.yml", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../packages/audio/piper-worker/FunctionLayerfile",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../packages/audio/piper-worker/function-requirements.txt",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL("../infra/modules/demo-runtime/main.tf", import.meta.url),
+          "utf8",
+        ),
+      ]);
+
+    assert.match(packaging, /jobs-piper-layer\.zip/);
+    assert.match(workflow, /jobs-piper-layer\.zip/);
+    assert.match(
+      layerfile,
+      /python:3\.13\.12-slim-bookworm@sha256:a58daefb915e1e03ad48f3ca4df8832065412c5c35cacb9d39f4229184de12b6/,
+    );
+    for (const digest of [
+      "b17184a664bd9431ce95c138f4bfb3025e1280cf26075a703dbfdcab989b8ee3",
+      "6872443f236a554921cda6f318c900e2d0c226792cf3534d00e5057c6926e5d2",
+      "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a",
+      "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14",
+    ]) {
+      assert.match(layerfile, new RegExp(digest));
+    }
+    for (const dependency of [
+      "onnxruntime==1.27.0",
+      "piper-tts==1.4.2",
+      "pip==25.3",
+    ]) {
+      assert.match(requirements, new RegExp(dependency.replace(".", "\\.")));
+    }
+    assert.match(runtime, /compatible_runtime = \["nodejs20"\]/);
+    assert.match(runtime, /REFLO_PIPER_ACTIVATION_STATUS\s*=\s*"blocked"/);
+    assert.doesNotMatch(
+      runtime,
+      /REFLO_PIPER_ACTIVATION_STATUS\s*=\s*"active"/,
+    );
   });
 });

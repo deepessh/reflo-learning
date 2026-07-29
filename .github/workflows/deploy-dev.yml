@@ -89,12 +89,15 @@ jobs:
           test -s "$artifact_root/parser-java-worker-layer.zip"
           test -s "$artifact_root/parser-native-layer.zip"
           test -s "$artifact_root/parser-clamav-snapshot-layer.zip"
+          test -s "$artifact_root/jobs-piper-layer.zip"
           test ! -e "$artifact_root/parser.tar"
           node --input-type=module - "$artifact_root/manifest.json" <<'NODE'
           import { readFile } from "node:fs/promises";
           const manifest = JSON.parse(await readFile(process.argv[2], "utf8"));
           if (
-            manifest.contractVersion !== "reflo-dev-deployment-artifacts-v2" ||
+            manifest.contractVersion !== "reflo-dev-deployment-artifacts-v3" ||
+            manifest.artifacts?.jobs?.runtime !== "nodejs20" ||
+            Object.keys(manifest.artifacts?.jobs?.layers ?? {}).join(",") !== "piper" ||
             manifest.artifacts?.parser?.runtime !== "custom.debian11" ||
             Object.keys(manifest.artifacts?.parser?.layers ?? {}).length !== 3
           ) {

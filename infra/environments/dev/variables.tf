@@ -147,8 +147,17 @@ variable "deployment_manifest" {
         sha256 = string
       })
       jobs = object({
-        key    = string
-        sha256 = string
+        code = object({
+          key    = string
+          sha256 = string
+        })
+        layers = object({
+          piper = object({
+            key    = string
+            sha256 = string
+          })
+        })
+        runtime = string
       })
       parser = object({
         code = object({
@@ -178,14 +187,16 @@ variable "deployment_manifest" {
 
   validation {
     condition = (
-      var.deployment_manifest.contractVersion == "reflo-dev-deployment-artifacts-v2" &&
+      var.deployment_manifest.contractVersion == "reflo-dev-deployment-artifacts-v3" &&
+      var.deployment_manifest.artifacts.jobs.runtime == "nodejs20" &&
       var.deployment_manifest.artifacts.parser.runtime == "custom.debian11" &&
       can(regex("^[a-f0-9]{40}$", var.deployment_manifest.commit)) &&
       alltrue([
         for artifact in concat(
           [
             var.deployment_manifest.artifacts.api,
-            var.deployment_manifest.artifacts.jobs,
+            var.deployment_manifest.artifacts.jobs.code,
+            var.deployment_manifest.artifacts.jobs.layers.piper,
             var.deployment_manifest.artifacts.parser.code,
           ],
           values(var.deployment_manifest.artifacts.parser.layers),
@@ -193,7 +204,7 @@ variable "deployment_manifest" {
         can(regex("^[a-f0-9]{64}$", artifact.sha256))
       ])
     )
-    error_message = "deployment_manifest must be the exact v2 custom.debian11 manifest generated for one immutable commit."
+    error_message = "deployment_manifest must be the exact v3 jobs-plus-parser manifest generated for one immutable commit."
   }
 }
 

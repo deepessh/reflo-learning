@@ -27,9 +27,11 @@ The managed RocketMQ trigger introduces a separately billed EventBridge event
 stream. It must use the owner-approved metering mode and allowance, and its
 service-linked roles must be activated before the protected plan. The dev apply
 also remains blocked until issue #199 records an authorized transactional
-outbox publisher and dead-letter destination, plus the activation-gated Piper
-fallback. The revised conservative BOM is USD 401.14/month, so it also requires
-an owner-approved cost reduction or a new ceiling before planning.
+outbox publisher and dead-letter destination. The immutable Piper layer is
+packaged with the jobs function but forced to `blocked`; a later activation
+still requires ADR 0011's legal, security, capacity, and listening evidence.
+The revised conservative BOM is USD 401.14/month, so it also requires an
+owner-approved cost reduction or a new ceiling before planning.
 
 The partial OSS backend receives `bucket`, `region`,
 `tablestore_endpoint`, and `tablestore_table` only from the protected workflow.
@@ -41,9 +43,9 @@ uploaded as a GitHub artifact.
 The bounded dev root contains no Alibaba KMS Secrets Manager, SLS, or Alibaba
 Container Registry. Deployment artifacts use SHA-256-addressed private OSS
 keys. ECS consumes the API archive by exact digest; Function Compute consumes
-the content-addressed jobs ZIP plus the parser code and three immutable parser
-layers. Operational traces use the repository's closed structured-log contract
-rather than SLS.
+the content-addressed jobs ZIP, its activation-blocked Piper layer, plus the
+parser code and three immutable parser layers. Operational traces use the
+repository's closed structured-log contract rather than SLS.
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for bootstrap, protected deployment,
 recovery, rollback, and teardown procedures.

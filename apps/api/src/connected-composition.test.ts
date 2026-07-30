@@ -39,7 +39,7 @@ describe("connected demo composition", () => {
         }),
       ),
     );
-    const runtime = createConnectedDemoRuntime(
+    const runtime = await createConnectedDemoRuntime(
       developmentEnvironment(artifactRoot),
       "dev",
     );
@@ -69,9 +69,9 @@ describe("connected demo composition", () => {
     runtimes.pop();
   });
 
-  it("rejects development model descriptors in staging and pilot", () => {
+  it("rejects development model descriptors in staging and pilot", async () => {
     for (const deployment of ["pilot", "staging"] as const) {
-      expect(() =>
+      await expect(
         createConnectedDemoRuntime(
           {
             REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE:
@@ -82,7 +82,7 @@ describe("connected demo composition", () => {
           },
           deployment,
         ),
-      ).toThrow("development-only");
+      ).rejects.toThrow("development-only");
     }
   });
 
@@ -94,7 +94,9 @@ describe("connected demo composition", () => {
     const environment = developmentEnvironment(artifactRoot);
     delete environment.REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE;
 
-    expect(() => createConnectedDemoRuntime(environment, "dev")).toThrow(
+    await expect(
+      createConnectedDemoRuntime(environment, "dev"),
+    ).rejects.toThrow(
       "must attest the staff-controlled rights-cleared demo boundary",
     );
   });
@@ -106,6 +108,7 @@ function developmentEnvironment(artifactRoot: string): NodeJS.ProcessEnv {
     REFLO_CONNECTED_DEMO_ARTIFACT_ROOT: artifactRoot,
     REFLO_CONNECTED_DEMO_BOUNDARY_PROFILE: "staff-controlled-rights-cleared-v1",
     REFLO_CONNECTED_DEMO_MODE: "staff-only-demo-v1",
+    REFLO_CONNECTED_DEMO_OBJECT_STORE: "local-filesystem-v1",
     REFLO_DEMO_GRADING_CALIBRATION_EVIDENCE_ID:
       "synthetic-demo-calibration-fixture-v1",
     REFLO_DEMO_GRADING_CONFIDENCE_THRESHOLD: "0.95000",

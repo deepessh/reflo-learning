@@ -266,19 +266,15 @@ describe("configuration and dashboard contract", () => {
     });
   });
 
-  it("fans model traces to Langfuse and SLS and sends operations only to SLS", async () => {
+  it("sends model traces to Langfuse and closed operations to structured logs", async () => {
     const fetchImplementation = vi.fn(async () => new Response(null));
-    const runtime = createDemoTraceRuntime(
-      environment({
-        REFLO_SLS_OTEL_ENDPOINT:
-          "https://reflo-demo.cn-hangzhou.log.aliyuncs.com/opentelemetry/v1/traces",
-      }),
-      {
-        component: "api",
-        deployment: "staging",
-        fetchImplementation,
-      },
-    );
+    const operationalWrite = vi.fn();
+    const runtime = createDemoTraceRuntime(environment(), {
+      component: "api",
+      deployment: "staging",
+      fetchImplementation,
+      operationalWrite,
+    });
     await runtime.modelTraces.record(
       logicalTrace,
       new AbortController().signal,
@@ -293,30 +289,25 @@ describe("configuration and dashboard contract", () => {
     });
 
     expect(runtime.enabled).toBe(true);
-    expect(
-      fetchImplementation.mock.calls.map(([url]) => String(url)).sort(),
-    ).toEqual([
+    expect(fetchImplementation.mock.calls.map(([url]) => String(url))).toEqual([
       "https://langfuse.example.invalid/api/public/otel/v1/traces",
-      "https://reflo-demo.cn-hangzhou.log.aliyuncs.com/opentelemetry/v1/traces",
-      "https://reflo-demo.cn-hangzhou.log.aliyuncs.com/opentelemetry/v1/traces",
     ]);
+    expect(operationalWrite).toHaveBeenCalledOnce();
+    expect(operationalWrite.mock.calls[0]?.[0]).toContain(
+      "reflo.demo-operational-trace",
+    );
+    expect(operationalWrite.mock.calls[0]?.[0]).not.toContain("learner");
   });
 
-  it("rejects non-TLS and non-SLS production endpoints", () => {
+  it("rejects non-TLS production model-trace endpoints", () => {
     expect(() =>
       createDemoTraceRuntime(
         environment({
-          REFLO_SLS_OTEL_ENDPOINT: "http://sls.example.invalid",
+          REFLO_LANGFUSE_BASE_URL: "http://langfuse.example.invalid",
         }),
         { component: "api", deployment: "staging" },
       ),
     ).toThrow("telemetry endpoint is not allowlisted");
-    expect(() =>
-      createDemoTraceRuntime(environment(), {
-        component: "api",
-        deployment: "staging",
-      }),
-    ).toThrow("must use Alibaba Cloud SLS");
   });
 
   it("defines one honestly labeled health panel for every required stage", () => {
@@ -343,12 +334,6 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     REFLO_LANGFUSE_BASE_URL: "https://langfuse.example.invalid",
     REFLO_LANGFUSE_PUBLIC_KEY: "pk",
     REFLO_LANGFUSE_SECRET_KEY: "sk",
-    REFLO_SLS_ACCESS_KEY_ID: "ak",
-    REFLO_SLS_ACCESS_KEY_SECRET: "secret",
-    REFLO_SLS_OTEL_ENDPOINT:
-      "https://sls.example.invalid/opentelemetry/v1/traces",
-    REFLO_SLS_PROJECT: "reflo-demo",
-    REFLO_SLS_TRACE_INSTANCE_ID: "reflo-demo-traces",
     ...overrides,
   };
 }

@@ -29,7 +29,8 @@ const SCAN_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 
 export interface IngestionSupervisorDependencies {
   readonly clock: IngestionClock;
-  readonly malwareScanner: MalwareScannerPort;
+  readonly malwareScanner?: MalwareScannerPort;
+  readonly malwareScanPlacement?: "isolated-worker" | "trusted-supervisor";
   readonly operations: IngestionOperationStore;
   readonly publisher: NormalizedDocumentPublisherPort;
   readonly quarantine: QuarantineObjectPort;
@@ -71,7 +72,17 @@ export class IngestionSupervisor {
         throw new IngestionError("hash_mismatch");
       }
       const validated = validateUpload(source, staged);
-      await this.scanForMalware(staged);
+      if (
+        (this.dependencies.malwareScanPlacement ?? "trusted-supervisor") ===
+        "trusted-supervisor"
+      ) {
+        await this.scanForMalware(staged);
+      } else if (this.dependencies.malwareScanner !== undefined) {
+        throw new IngestionError(
+          "infrastructure_unavailable",
+          "ambiguous_malware_scan_placement",
+        );
+      }
       const rawOutput = await this.dependencies.worker.execute({
         documentKind: validated.documentKind,
         inputPath: staged.inputPath,
@@ -132,12 +143,16 @@ export class IngestionSupervisor {
   }
 
   async scanForMalware(staged: StagedUpload): Promise<void> {
-    const snapshot = await this.dependencies.malwareScanner.currentSnapshot();
+    const scanner = this.dependencies.malwareScanner;
+    if (scanner === undefined) {
+      throw new IngestionError(
+        "infrastructure_unavailable",
+        "malware_scanner_missing",
+      );
+    }
+    const snapshot = await scanner.currentSnapshot();
     validateSnapshot(snapshot, this.dependencies.clock.now());
-    const result = await this.dependencies.malwareScanner.scan(
-      staged,
-      snapshot,
-    );
+    const result = await scanner.scan(staged, snapshot);
     if (!result.clean) {
       throw new IngestionError("malware_detected");
     }

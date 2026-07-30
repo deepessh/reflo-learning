@@ -11,13 +11,17 @@ import {
 import { LocalSmokeObjectStore, artifactObjectKey } from "@reflo/dev-smoke";
 import {
   CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
+  AliFunctionComputeSessionClient,
   ClamAvScannerAdapter,
+  FunctionComputeSessionDocumentWorker,
   IngestionSupervisor,
   NodeEphemeralWorkspace,
   NodeProcessRunner,
   NormalizedOutputFileReader,
   ObjectArtifactPublisher,
   PodmanDocumentWorker,
+  type IsolatedDocumentWorkerPort,
+  type MalwareScannerPort,
   type ProcessRunnerPort,
   QuarantineStagingAdapter,
   validateNormalizedDocument,
@@ -33,10 +37,15 @@ import {
   type DemoUploadProcessingWork,
 } from "./demo-upload.js";
 import { DemoUploadProcessingService } from "./demo-upload-processing.js";
+import {
+  createAliOssConnectedObjectStore,
+  type ConnectedObjectStore,
+} from "./ali-oss-object-store.js";
 
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
 const LOCAL_PROCESSOR_MODE = "local-isolated-v1";
+const SERVERLESS_PROCESSOR_MODE = "serverless-isolated-ingestion-v1";
 const CLAMAV_SCANNER_MEMORY_BYTES = 1_024 * 1_024 * 1_024;
 
 export interface DemoUploadRuntime {
@@ -66,7 +75,10 @@ export async function createDemoUploadRuntime(
   if (processorMode === "disabled") {
     return { close: async () => undefined };
   }
-  if (processorMode !== LOCAL_PROCESSOR_MODE) {
+  if (
+    processorMode !== LOCAL_PROCESSOR_MODE &&
+    processorMode !== SERVERLESS_PROCESSOR_MODE
+  ) {
     throw new Error("demo upload processor mode is not allowlisted");
   }
   const databaseUrl = required(input, "DATABASE_URL");
@@ -80,47 +92,107 @@ export async function createDemoUploadRuntime(
     input,
     "REFLO_DEMO_OPERATOR_OWNER_SCOPE_ID",
   );
-  if (
-    required(input, "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE") !==
-    CLAMAV_UPSTREAM_SNAPSHOT_PROFILE
-  ) {
-    throw new Error("demo upload requires a verified malware scanner");
-  }
-  const clamDatabaseDirectory = requiredAbsolute(
-    input,
-    "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
-  );
-  const admissionDatabaseDirectory = requiredAbsolute(
-    input,
-    "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
-  );
-  const scannerImage = requiredMatching(
-    input,
-    "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
-    /^.+@sha256:[a-f0-9]{64}$/,
-  );
-  const scannerRunner = new PodmanClamAvProcessRunner(
-    {
-      databaseDirectory: admissionDatabaseDirectory,
-      imageReference: scannerImage,
-    },
-    new NodeProcessRunner(),
-  );
-  const malwareScanner = new ClamAvScannerAdapter({
-    databaseDirectory: admissionDatabaseDirectory,
-    executable: "clamscan",
-    expectedFreshClamImageDigest: scannerImage.slice(
-      scannerImage.lastIndexOf("@") + 1,
-    ),
-    expectedProfile: CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
-    expectedSnapshotId: requiredMatching(
+  let malwareScanner: MalwareScannerPort | undefined;
+  let worker: IsolatedDocumentWorkerPort;
+  if (processorMode === LOCAL_PROCESSOR_MODE) {
+    if (
+      required(input, "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE") !==
+      CLAMAV_UPSTREAM_SNAPSHOT_PROFILE
+    ) {
+      throw new Error("demo upload requires a verified malware scanner");
+    }
+    const clamDatabaseDirectory = requiredAbsolute(
       input,
-      "REFLO_LOCAL_CLAMAV_SNAPSHOT_ID",
-      /^cvd-[a-f0-9]{32}$/,
-    ),
-    manifestPath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_MANIFEST_PATH"),
-    runner: scannerRunner,
-  });
+      "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
+    );
+    const admissionDatabaseDirectory = requiredAbsolute(
+      input,
+      "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
+    );
+    const scannerImage = requiredMatching(
+      input,
+      "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
+      /^.+@sha256:[a-f0-9]{64}$/,
+    );
+    const scannerRunner = new PodmanClamAvProcessRunner(
+      {
+        databaseDirectory: admissionDatabaseDirectory,
+        imageReference: scannerImage,
+      },
+      new NodeProcessRunner(),
+    );
+    malwareScanner = new ClamAvScannerAdapter({
+      databaseDirectory: admissionDatabaseDirectory,
+      executable: "clamscan",
+      expectedFreshClamImageDigest: scannerImage.slice(
+        scannerImage.lastIndexOf("@") + 1,
+      ),
+      expectedProfile: CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
+      expectedSnapshotId: requiredMatching(
+        input,
+        "REFLO_LOCAL_CLAMAV_SNAPSHOT_ID",
+        /^cvd-[a-f0-9]{32}$/,
+      ),
+      manifestPath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_MANIFEST_PATH"),
+      runner: scannerRunner,
+    });
+    worker = new PodmanDocumentWorker(
+      {
+        clamDatabaseDirectory,
+        environment: deployment,
+        executable: "podman",
+        imageReference: required(input, "REFLO_LOCAL_INGESTION_IMAGE"),
+        resolvedImageDigest: requiredMatching(
+          input,
+          "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
+          /^sha256:[a-f0-9]{64}$/,
+        ),
+        tessdataDirectory: requiredAbsolute(input, "REFLO_LOCAL_TESSDATA_DIR"),
+      },
+      new NodeProcessRunner(),
+      new NormalizedOutputFileReader(),
+    );
+  } else {
+    const region = required(input, "REFLO_ALIBABA_REGION");
+    if (region !== "ap-southeast-1") {
+      throw new Error("serverless parser is approved only in Singapore");
+    }
+    worker = new FunctionComputeSessionDocumentWorker(
+      {
+        workerArtifactDigest: requiredMatching(
+          input,
+          "REFLO_ALIBABA_FC_PARSER_ARTIFACT_DIGEST",
+          /^sha256:[a-f0-9]{64}$/,
+        ),
+      },
+      new AliFunctionComputeSessionClient({
+        accountId: requiredMatching(
+          input,
+          "REFLO_ALIBABA_FC_ACCOUNT_ID",
+          /^[0-9]{6,32}$/,
+        ),
+        affinityHeaderName: required(
+          input,
+          "REFLO_ALIBABA_FC_PARSER_AFFINITY_HEADER",
+        ),
+        functionName: required(input, "REFLO_ALIBABA_FC_PARSER_FUNCTION_NAME"),
+        qualifier: required(
+          input,
+          "REFLO_ALIBABA_FC_PARSER_FUNCTION_QUALIFIER",
+        ),
+        region,
+        roleName: required(input, "REFLO_ALIBABA_FC_API_ROLE_NAME"),
+        sessionIdleTimeoutSeconds: requiredInteger(
+          input,
+          "REFLO_ALIBABA_FC_PARSER_SESSION_IDLE_SECONDS",
+        ),
+        sessionTtlSeconds: requiredInteger(
+          input,
+          "REFLO_ALIBABA_FC_PARSER_SESSION_TTL_SECONDS",
+        ),
+      }),
+    );
+  }
   const scratchRoot = path.join(artifactRoot, ".ingestion-work");
   mkdirSync(scratchRoot, { mode: 0o700, recursive: true });
   const scratchStat = lstatSync(scratchRoot);
@@ -140,7 +212,20 @@ export async function createDemoUploadRuntime(
     environment: deployment,
   });
   const vectorPool = new PostgresAnalyticDbPool(vectorDatabaseUrl);
-  const objects = new LocalSmokeObjectStore(artifactRoot);
+  const storageMode =
+    input.REFLO_CONNECTED_DEMO_OBJECT_STORE?.trim() ?? "local-filesystem-v1";
+  const objects: ConnectedObjectStore =
+    storageMode === "local-filesystem-v1"
+      ? new LocalSmokeObjectStore(artifactRoot)
+      : storageMode === "alibaba-private-oss-v1"
+        ? await createAliOssConnectedObjectStore({
+            artifactBucket: required(input, "REFLO_OSS_ARTIFACT_BUCKET"),
+            deliveryBucket: required(input, "REFLO_OSS_DELIVERY_BUCKET"),
+            quarantineBucket: required(input, "REFLO_OSS_QUARANTINE_BUCKET"),
+            region: required(input, "REFLO_ALIBABA_REGION"),
+            roleName: required(input, "REFLO_OSS_RUNTIME_ROLE_NAME"),
+          })
+        : failObjectStoreMode();
   const liteLlm = createLiteLlmDevAdapters(input);
   const tracing = createDemoTraceRuntime(input, {
     component: "api-demo-upload",
@@ -192,22 +277,6 @@ export async function createDemoUploadRuntime(
   });
   const publisher = new ObjectArtifactPublisher(objects);
   const workspaces = new NodeEphemeralWorkspace(scratchRoot);
-  const worker = new PodmanDocumentWorker(
-    {
-      clamDatabaseDirectory,
-      environment: deployment,
-      executable: "podman",
-      imageReference: required(input, "REFLO_LOCAL_INGESTION_IMAGE"),
-      resolvedImageDigest: requiredMatching(
-        input,
-        "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
-        /^sha256:[a-f0-9]{64}$/,
-      ),
-      tessdataDirectory: requiredAbsolute(input, "REFLO_LOCAL_TESSDATA_DIR"),
-    },
-    new NodeProcessRunner(),
-    new NormalizedOutputFileReader(),
-  );
   const processing = new DemoUploadProcessingService({
     artifacts: {
       async readNormalizedDocument(artifact) {
@@ -229,6 +298,10 @@ export async function createDemoUploadRuntime(
         return new IngestionSupervisor({
           clock: { now: () => new Date() },
           malwareScanner,
+          malwareScanPlacement:
+            processorMode === SERVERLESS_PROCESSOR_MODE
+              ? "isolated-worker"
+              : "trusted-supervisor",
           operations,
           publisher,
           quarantine: new QuarantineStagingAdapter(objects),
@@ -279,6 +352,10 @@ export async function createDemoUploadRuntime(
     await runtime.close().catch(() => undefined);
     throw error;
   }
+}
+
+function failObjectStoreMode(): never {
+  throw new Error("REFLO_CONNECTED_DEMO_OBJECT_STORE is not allowlisted");
 }
 
 function distribution(values: readonly number[]): {
@@ -336,6 +413,18 @@ function requiredMatching(
     throw new Error(`${name} is invalid`);
   }
   return value;
+}
+
+function requiredInteger(input: NodeJS.ProcessEnv, name: string): number {
+  const value = required(input, name);
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new Error(`${name} is invalid`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} is invalid`);
+  }
+  return parsed;
 }
 
 export class PodmanClamAvProcessRunner implements ProcessRunnerPort {

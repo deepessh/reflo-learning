@@ -68,6 +68,238 @@ export class ModelStudioTtsClientError extends Error {
   }
 }
 
+const DASHSCOPE_TTS_ENDPOINT =
+  "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const MAX_DASHSCOPE_RESPONSE_BYTES = 64 * 1024;
+const MAX_TTS_AUDIO_BYTES = 32 * 1024 * 1024;
+const QWEN_TTS_MAX_SEGMENT_CHARACTERS = 600;
+const MAX_QWEN_TTS_NARRATION_CHARACTERS = 4_000;
+const PREFERRED_SEGMENT_BOUNDARY_FLOOR = Math.floor(
+  QWEN_TTS_MAX_SEGMENT_CHARACTERS / 2,
+);
+
+export class DashScopeModelStudioTtsClient implements ModelStudioTtsClient {
+  readonly #apiKey: string;
+  readonly #fetch: typeof fetch;
+
+  constructor(options: {
+    readonly apiKey: string;
+    readonly fetchImplementation?: typeof fetch;
+  }) {
+    if (!/^sk-[a-zA-Z0-9_-]{16,256}$/.test(options.apiKey)) {
+      throw new ModelStudioTtsClientError(
+        "authentication_failed",
+        "not_accepted",
+        false,
+      );
+    }
+    this.#apiKey = options.apiKey;
+    this.#fetch = options.fetchImplementation ?? fetch;
+  }
+
+  async synthesize(
+    request: Parameters<ModelStudioTtsClient["synthesize"]>[0],
+    signal: AbortSignal,
+  ): Promise<TtsSynthesisResponse> {
+    const narrationCharacters = countCharacters(request.narration);
+    if (
+      request.model !== QWEN_3_TTS_FLASH_MODEL ||
+      request.voiceProfileId !== REFLO_NARRATOR_VOICE_PROFILE ||
+      request.speakingRate !== 1 ||
+      narrationCharacters < 1 ||
+      narrationCharacters > MAX_QWEN_TTS_NARRATION_CHARACTERS ||
+      !/^[a-zA-Z0-9_-]{8,128}$/.test(request.idempotencyKey)
+    ) {
+      throw new ModelStudioTtsClientError(
+        "invalid_request",
+        "not_accepted",
+        false,
+      );
+    }
+    const segments = segmentQwenTtsNarration(request.narration);
+    const segmentWavs: Uint8Array[] = [];
+    let acceptedSegment = false;
+    let pcmByteLength = 0;
+    for (const narration of segments) {
+      try {
+        const segment = await this.#synthesizeSegment(
+          { ...request, narration },
+          signal,
+          MAX_TTS_AUDIO_BYTES - pcmByteLength,
+        );
+        acceptedSegment = true;
+        const segmentDataLength = pcmWavDataLength(
+          segment.audioBytes,
+          segment.sampleRateHz,
+        );
+        if (segmentDataLength === undefined) {
+          throw invalidAudio();
+        }
+        pcmByteLength += segmentDataLength;
+        if (44 + pcmByteLength > MAX_TTS_AUDIO_BYTES) {
+          throw new ModelStudioTtsClientError(
+            "provider_error",
+            "accepted",
+            false,
+          );
+        }
+        segmentWavs.push(segment.audioBytes);
+      } catch (error) {
+        if (
+          acceptedSegment &&
+          error instanceof ModelStudioTtsClientError &&
+          error.submissionState !== "accepted"
+        ) {
+          throw new ModelStudioTtsClientError(error.code, "accepted", false, {
+            cause: error,
+          });
+        }
+        throw error;
+      }
+    }
+    return {
+      audioBytes: composePcmWavSegments(segmentWavs, 24_000, pcmByteLength),
+      engineVersion: QWEN_3_TTS_FLASH_MODEL_VERSION,
+      sampleRateHz: 24_000,
+      voiceArtifactVersion: "qwen-cherry-2025-11-27",
+      voiceId: "Cherry",
+    };
+  }
+
+  async #synthesizeSegment(
+    request: Parameters<ModelStudioTtsClient["synthesize"]>[0],
+    signal: AbortSignal,
+    maximumAudioBytes: number,
+  ): Promise<TtsSynthesisResponse> {
+    if (
+      countCharacters(request.narration) < 1 ||
+      countCharacters(request.narration) > QWEN_TTS_MAX_SEGMENT_CHARACTERS ||
+      maximumAudioBytes < 44
+    ) {
+      throw new ModelStudioTtsClientError(
+        "invalid_request",
+        "not_accepted",
+        false,
+      );
+    }
+    let response: Response;
+    try {
+      response = await this.#fetch(DASHSCOPE_TTS_ENDPOINT, {
+        body: JSON.stringify({
+          input: {
+            language_type: "English",
+            text: request.narration,
+            voice: "Cherry",
+          },
+          model: request.model,
+        }),
+        headers: {
+          authorization: `Bearer ${this.#apiKey}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+        redirect: "error",
+        signal,
+      });
+    } catch (error) {
+      throw transportFailure(error, signal, "unknown");
+    }
+    if (!response.ok) {
+      throw responseFailure(response.status);
+    }
+    const payload = await readJsonResponse(response, signal);
+    const audioUrl = modelStudioAudioUrl(payload);
+    let audioResponse: Response;
+    try {
+      audioResponse = await this.#fetch(audioUrl, {
+        method: "GET",
+        redirect: "error",
+        signal,
+      });
+    } catch (error) {
+      throw transportFailure(error, signal, "accepted");
+    }
+    if (!audioResponse.ok) {
+      throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+    }
+    const audioBytes = await readBoundedBytes(
+      audioResponse,
+      maximumAudioBytes,
+      signal,
+      "accepted",
+    );
+    return {
+      audioBytes,
+      engineVersion: QWEN_3_TTS_FLASH_MODEL_VERSION,
+      sampleRateHz: 24_000,
+      voiceArtifactVersion: "qwen-cherry-2025-11-27",
+      voiceId: "Cherry",
+    };
+  }
+}
+
+function segmentQwenTtsNarration(narration: string): readonly string[] {
+  const characters = Array.from(narration);
+  if (characters.length === 0) {
+    return [];
+  }
+  const segments: string[] = [];
+  for (let start = 0; start < characters.length;) {
+    const maximumEnd = Math.min(
+      start + QWEN_TTS_MAX_SEGMENT_CHARACTERS,
+      characters.length,
+    );
+    const end =
+      maximumEnd === characters.length
+        ? maximumEnd
+        : preferredSegmentEnd(characters, start, maximumEnd);
+    segments.push(characters.slice(start, end).join(""));
+    start = end;
+  }
+  return Object.freeze(segments);
+}
+
+function preferredSegmentEnd(
+  characters: readonly string[],
+  start: number,
+  maximumEnd: number,
+): number {
+  const preferredFloor = Math.min(
+    start + PREFERRED_SEGMENT_BOUNDARY_FLOOR,
+    maximumEnd,
+  );
+  for (let index = maximumEnd - 1; index >= preferredFloor; index -= 1) {
+    if (
+      isSentenceTerminator(characters[index] ?? "") &&
+      isWhitespace(characters[index + 1] ?? "")
+    ) {
+      let end = index + 1;
+      while (end < maximumEnd && isWhitespace(characters[end] ?? "")) {
+        end += 1;
+      }
+      return end;
+    }
+  }
+  for (let index = maximumEnd - 1; index >= preferredFloor; index -= 1) {
+    if (isWhitespace(characters[index] ?? "")) {
+      return index + 1;
+    }
+  }
+  return maximumEnd;
+}
+
+function isSentenceTerminator(character: string): boolean {
+  return character === "." || character === "!" || character === "?";
+}
+
+function isWhitespace(character: string): boolean {
+  return /^\s$/u.test(character);
+}
+
+function countCharacters(value: string): number {
+  return Array.from(value).length;
+}
+
 export interface PiperSynthesisProcess {
   synthesize(
     request: {
@@ -299,11 +531,22 @@ function ttsInput(invocation: AdapterInvocation): TextToSpeechInput {
 }
 
 function validatePcmWav(bytes: Uint8Array, sampleRateHz: number): number {
+  const dataLength = pcmWavDataLength(bytes, sampleRateHz);
+  if (dataLength === undefined) {
+    throw invalidAudio();
+  }
+  return dataLength / (sampleRateHz * 2);
+}
+
+function pcmWavDataLength(
+  bytes: Uint8Array,
+  sampleRateHz: number,
+): number | undefined {
   if (
     !(TTS_ALLOWED_SAMPLE_RATES as readonly number[]).includes(sampleRateHz) ||
     bytes.byteLength < 44
   ) {
-    throw invalidAudio();
+    return undefined;
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const ascii = (offset: number, length: number) =>
@@ -326,9 +569,58 @@ function validatePcmWav(bytes: Uint8Array, sampleRateHz: number): number {
     dataLength === 0 ||
     dataLength % 2 !== 0
   ) {
-    throw invalidAudio();
+    return undefined;
   }
-  return dataLength / (sampleRateHz * 2);
+  return dataLength;
+}
+
+function composePcmWavSegments(
+  segmentWavs: readonly Uint8Array[],
+  sampleRateHz: 22_050 | 24_000,
+  expectedDataLength: number,
+): Uint8Array {
+  if (
+    segmentWavs.length === 0 ||
+    expectedDataLength < 2 ||
+    expectedDataLength % 2 !== 0 ||
+    44 + expectedDataLength > MAX_TTS_AUDIO_BYTES
+  ) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  const composed = new Uint8Array(44 + expectedDataLength);
+  const view = new DataView(composed.buffer);
+  writeAscii(composed, 0, "RIFF");
+  view.setUint32(4, composed.byteLength - 8, true);
+  writeAscii(composed, 8, "WAVE");
+  writeAscii(composed, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRateHz, true);
+  view.setUint32(28, sampleRateHz * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(composed, 36, "data");
+  view.setUint32(40, expectedDataLength, true);
+  let offset = 44;
+  for (const segment of segmentWavs) {
+    const dataLength = pcmWavDataLength(segment, sampleRateHz);
+    if (dataLength === undefined) {
+      throw invalidAudio();
+    }
+    composed.set(segment.subarray(44), offset);
+    offset += dataLength;
+  }
+  if (offset !== composed.byteLength) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  return composed;
+}
+
+function writeAscii(bytes: Uint8Array, offset: number, value: string): void {
+  for (const [index, character] of Array.from(value).entries()) {
+    bytes[offset + index] = character.charCodeAt(0);
+  }
 }
 
 function invalidAudio(): ModelAdapterError {
@@ -383,6 +675,153 @@ function assertSafeVersion(value: string): void {
       transient: false,
     });
   }
+}
+
+async function readJsonResponse(
+  response: Response,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const bytes = await readBoundedBytes(
+    response,
+    MAX_DASHSCOPE_RESPONSE_BYTES,
+    signal,
+    "accepted",
+  );
+  try {
+    return JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
+  } catch (error) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false, {
+      cause: error,
+    });
+  }
+}
+
+async function readBoundedBytes(
+  response: Response,
+  maximumBytes: number,
+  signal: AbortSignal,
+  submissionState: "accepted" | "unknown",
+): Promise<Uint8Array> {
+  const declaredHeader = response.headers.get("content-length");
+  const declaredLength =
+    declaredHeader === null ? undefined : Number(declaredHeader);
+  if (
+    (declaredLength !== undefined &&
+      Number.isFinite(declaredLength) &&
+      (declaredLength < 1 || declaredLength > maximumBytes)) ||
+    response.body === null
+  ) {
+    throw new ModelStudioTtsClientError(
+      "provider_error",
+      submissionState,
+      false,
+    );
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    for (;;) {
+      if (signal.aborted) {
+        throw new ModelStudioTtsClientError("timeout", submissionState, false);
+      }
+      const chunk = await reader.read();
+      if (chunk.done) {
+        break;
+      }
+      byteLength += chunk.value.byteLength;
+      if (byteLength > maximumBytes) {
+        throw new ModelStudioTtsClientError(
+          "provider_error",
+          submissionState,
+          false,
+        );
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (byteLength < 1) {
+    throw new ModelStudioTtsClientError(
+      "provider_error",
+      submissionState,
+      false,
+    );
+  }
+  return new Uint8Array(Buffer.concat(chunks, byteLength));
+}
+
+function modelStudioAudioUrl(value: unknown): URL {
+  const root = record(value);
+  const output = record(root?.output);
+  const audio = record(output?.audio);
+  if (
+    root?.status_code !== 200 ||
+    output?.finish_reason !== "stop" ||
+    typeof audio?.url !== "string"
+  ) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  let url: URL;
+  try {
+    url = new URL(audio.url);
+  } catch (error) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false, {
+      cause: error,
+    });
+  }
+  if (
+    !url.hostname.startsWith("dashscope-result-") ||
+    !url.hostname.endsWith(".aliyuncs.com") ||
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    throw new ModelStudioTtsClientError("provider_error", "accepted", false);
+  }
+  url.protocol = "https:";
+  return url;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
+}
+
+function responseFailure(status: number): ModelStudioTtsClientError {
+  if (status === 401 || status === 403) {
+    return new ModelStudioTtsClientError(
+      "authentication_failed",
+      "not_accepted",
+      false,
+    );
+  }
+  if (status === 429) {
+    return new ModelStudioTtsClientError("rate_limited", "not_accepted", true);
+  }
+  if (status >= 400 && status < 500) {
+    return new ModelStudioTtsClientError(
+      "invalid_request",
+      "not_accepted",
+      false,
+    );
+  }
+  return new ModelStudioTtsClientError("unavailable", "unknown", true);
+}
+
+function transportFailure(
+  error: unknown,
+  signal: AbortSignal,
+  submissionState: "accepted" | "unknown",
+): ModelStudioTtsClientError {
+  return new ModelStudioTtsClientError(
+    signal.aborted ? "timeout" : "unavailable",
+    submissionState,
+    submissionState !== "accepted",
+    { cause: error },
+  );
 }
 
 function pathIsAbsolute(value: string): boolean {

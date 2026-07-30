@@ -16,6 +16,16 @@ export type {
 export { PostgresActivationRepository } from "./activation-repository.js";
 export { PostgresAudioGenerationRepository } from "./audio-generation-repository.js";
 export type { PostgresAudioGenerationRepositoryOptions } from "./audio-generation-repository.js";
+export { PostgresAudioAuthorizationResolver } from "./audio-authorization-resolver.js";
+export { PostgresRocketMqRepository } from "./rocketmq-repository.js";
+export type {
+  PostgresRocketMqRepositoryOptions,
+  RedriveClaimResult,
+  RefloEventEnvelope,
+  RocketMqFailureClass,
+  RocketMqRedriveReasonCode,
+  RocketMqRedriveRejectionClass,
+} from "./rocketmq-repository.js";
 export { PostgresAssessmentRepository } from "./assessment-repository.js";
 export { PostgresDemoDeliveryRepository } from "./delivery-repository.js";
 export { PostgresTutorAgentRepository } from "./tutor-agent-repository.js";

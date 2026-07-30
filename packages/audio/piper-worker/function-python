@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+runtime=/opt/reflo/piper/python
+export LD_LIBRARY_PATH="$runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PYTHONHOME="$runtime"
+export PYTHONNOUSERSITE=1
+export PYTHONDONTWRITEBYTECODE=1
+
+exec "$runtime/bin/python3.13" "$@"

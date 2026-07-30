@@ -25,6 +25,7 @@ import {
 } from "@reflo/observability";
 
 const DELIVERY_MODE = "staff-only-demo-v1";
+const DELIVERY_PROVIDERS = new Set(["email", "telegram"]);
 const DIRECTMAIL_ELIGIBILITY = "approved-free-quota-v1";
 const FREE_DAILY_LIMIT = 200;
 const FREE_TOTAL_LIMIT = 2_000;
@@ -60,43 +61,22 @@ export function createDeliveryRuntime(
     throw new Error("REFLO_DEMO_DELIVERY_MODE is not allowlisted");
   }
   const databaseUrl = required(input, "DATABASE_URL");
-  const emailLinkSigningKey = readKey(
-    input,
-    "REFLO_DEMO_EMAIL_LINK_SIGNING_KEY",
-  );
   const destinationLookupKey = readKey(
     input,
     "REFLO_DEMO_DESTINATION_LOOKUP_KEY",
   );
-  if (
-    Buffer.from(emailLinkSigningKey).equals(Buffer.from(destinationLookupKey))
-  ) {
-    throw new Error("Demo delivery keys must be independent");
+  const selectedProvider = required(input, "REFLO_DEMO_DELIVERY_PROVIDER");
+  if (!DELIVERY_PROVIDERS.has(selectedProvider)) {
+    throw new Error("REFLO_DEMO_DELIVERY_PROVIDER is not allowlisted");
   }
-  const telegram = destination(
+  const provider = selectedProvider as "email" | "telegram";
+  const prefix = provider === "email" ? "EMAIL" : "TELEGRAM";
+  const selectedDestination = destination(
     input,
-    "TELEGRAM",
-    "telegram",
+    prefix,
+    provider,
     destinationLookupKey,
   );
-  const email = destination(input, "EMAIL", "email", destinationLookupKey);
-
-  if (input.REFLO_DIRECTMAIL_ELIGIBILITY !== DIRECTMAIL_ELIGIBILITY) {
-    throw new Error("DirectMail production eligibility is not approved");
-  }
-  const dailyLimit = readLimit(input, "REFLO_DIRECTMAIL_DAILY_LIMIT");
-  const totalLimit = readLimit(input, "REFLO_DIRECTMAIL_TOTAL_LIMIT");
-  if (
-    dailyLimit > FREE_DAILY_LIMIT ||
-    totalLimit > FREE_TOTAL_LIMIT ||
-    dailyLimit > totalLimit
-  ) {
-    throw new Error("DirectMail delivery limits exceed approved free capacity");
-  }
-  const region = required(input, "REFLO_DIRECTMAIL_REGION");
-  if (!DIRECTMAIL_REGIONS.has(region as DemoDirectMailRegion)) {
-    throw new Error("REFLO_DIRECTMAIL_REGION is not allowlisted");
-  }
   const messageAdapter = input.REFLO_DEMO_MESSAGE_ADAPTER ?? "provider";
   if (messageAdapter !== "provider" && messageAdapter !== "local-fixture") {
     throw new Error("REFLO_DEMO_MESSAGE_ADAPTER is not allowlisted");
@@ -117,32 +97,33 @@ export function createDeliveryRuntime(
       );
     },
   };
-  const emailPort =
+  const messagePort =
     messageAdapter === "local-fixture"
-      ? new LocalFixtureMessagePort("email")
-      : new CapacityGuardedEmailPort(
-          createDirectMailDemoMessageAdapter({
-            fromAlias: required(input, "REFLO_DIRECTMAIL_FROM_ALIAS"),
-            ramRoleName: required(input, "REFLO_DIRECTMAIL_RAM_ROLE_NAME"),
-            region: region as DemoDirectMailRegion,
-            senderAddress: required(input, "REFLO_DIRECTMAIL_SENDER_ADDRESS"),
-          }),
-          capacityRepository,
-          dailyLimit,
-          totalLimit,
-        );
-  const telegramPort =
-    messageAdapter === "local-fixture"
-      ? new LocalFixtureMessagePort("telegram")
-      : createTelegramDemoMessageAdapter({
-          botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
-        });
+      ? new LocalFixtureMessagePort(provider)
+      : provider === "telegram"
+        ? createTelegramDemoMessageAdapter({
+            botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
+          })
+        : createEmailPort(input, capacityRepository);
+  const emailLinkSigningKey =
+    provider === "email"
+      ? readKey(input, "REFLO_DEMO_EMAIL_LINK_SIGNING_KEY")
+      : undefined;
+  if (
+    emailLinkSigningKey !== undefined &&
+    Buffer.from(emailLinkSigningKey).equals(Buffer.from(destinationLookupKey))
+  ) {
+    throw new Error("Demo delivery keys must be independent");
+  }
   const delivery = new DemoDeliveryService({
-    destinations: [telegram, email],
-    emailLinkOrigin: required(input, "REFLO_DEMO_EMAIL_LINK_ORIGIN"),
+    destinations: [selectedDestination],
+    emailLinkOrigin:
+      provider === "email"
+        ? required(input, "REFLO_DEMO_EMAIL_LINK_ORIGIN")
+        : undefined,
     emailLinkSigningKey,
     knowledge,
-    messagePorts: [telegramPort, emailPort],
+    messagePorts: [messagePort],
     repository,
   });
   const tracing = createDemoTraceRuntime(input, {
@@ -250,9 +231,42 @@ async function recordOperationalBestEffort(
   try {
     await tracing.recordOperational(trace);
   } catch {
-    // The bounded event was validated before transport. SLS availability does
+    // The bounded event was validated before transport. Trace availability does
     // not reinterpret an already committed delivery outcome.
   }
+}
+
+function createEmailPort(
+  input: NodeJS.ProcessEnv,
+  capacityRepository: PostgresAccountRepository,
+): DemoMessagePort {
+  if (input.REFLO_DIRECTMAIL_ELIGIBILITY !== DIRECTMAIL_ELIGIBILITY) {
+    throw new Error("DirectMail production eligibility is not approved");
+  }
+  const dailyLimit = readLimit(input, "REFLO_DIRECTMAIL_DAILY_LIMIT");
+  const totalLimit = readLimit(input, "REFLO_DIRECTMAIL_TOTAL_LIMIT");
+  if (
+    dailyLimit > FREE_DAILY_LIMIT ||
+    totalLimit > FREE_TOTAL_LIMIT ||
+    dailyLimit > totalLimit
+  ) {
+    throw new Error("DirectMail delivery limits exceed approved free capacity");
+  }
+  const region = required(input, "REFLO_DIRECTMAIL_REGION");
+  if (!DIRECTMAIL_REGIONS.has(region as DemoDirectMailRegion)) {
+    throw new Error("REFLO_DIRECTMAIL_REGION is not allowlisted");
+  }
+  return new CapacityGuardedEmailPort(
+    createDirectMailDemoMessageAdapter({
+      fromAlias: required(input, "REFLO_DIRECTMAIL_FROM_ALIAS"),
+      ramRoleName: required(input, "REFLO_DIRECTMAIL_RAM_ROLE_NAME"),
+      region: region as DemoDirectMailRegion,
+      senderAddress: required(input, "REFLO_DIRECTMAIL_SENDER_ADDRESS"),
+    }),
+    capacityRepository,
+    dailyLimit,
+    totalLimit,
+  );
 }
 
 function replayOutcome(

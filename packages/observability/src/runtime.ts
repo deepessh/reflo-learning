@@ -3,17 +3,14 @@ import { randomUUID } from "node:crypto";
 import type { ModelTraceSink } from "@reflo/model-router";
 
 import { createLangfuseModelTraceSink } from "./adapters/langfuse.js";
-import { createSlsDemoOperationalTraceSink } from "./adapters/sls.js";
+import { createStructuredLogOperationalTraceSink } from "./adapters/structured-log.js";
 import {
   DEMO_TELEMETRY_SCHEMA_VERSION,
   assertSafeDemoOperationalTrace,
   type DemoOperationalTraceInput,
   type DemoOperationalTraceSink,
 } from "./contracts.js";
-import {
-  createCompositeModelTraceSink,
-  createSlsModelHealthTraceSink,
-} from "./projection.js";
+import { createCompositeModelTraceSink } from "./projection.js";
 import { validateTelemetryEndpoint } from "./otlp.js";
 
 const ENABLED_MODE = "staff-only-demo-v1";
@@ -30,6 +27,7 @@ export function createDemoTraceRuntime(
     readonly component: string;
     readonly deployment: "dev" | "pilot" | "staging";
     readonly fetchImplementation?: typeof fetch;
+    readonly operationalWrite?: (line: string) => void;
   },
 ): DemoTraceRuntime {
   const mode = input.REFLO_DEMO_TRACING_MODE?.trim();
@@ -53,31 +51,9 @@ export function createDemoTraceRuntime(
     required(input, "REFLO_LANGFUSE_BASE_URL"),
     options.deployment,
   );
-  const slsEndpoint = validateTelemetryEndpoint(
-    required(input, "REFLO_SLS_OTEL_ENDPOINT"),
-    options.deployment,
-    "/opentelemetry/v1/traces",
-  );
-  if (
-    options.deployment !== "dev" &&
-    !slsEndpoint.hostname.endsWith(".log.aliyuncs.com")
-  ) {
-    throw new Error("REFLO_SLS_OTEL_ENDPOINT must use Alibaba Cloud SLS");
-  }
-
   const fetchImplementation = options.fetchImplementation ?? fetch;
-  const sls: DemoOperationalTraceSink = createSlsDemoOperationalTraceSink(
-    {
-      accessKeyId: required(input, "REFLO_SLS_ACCESS_KEY_ID"),
-      accessKeySecret: required(input, "REFLO_SLS_ACCESS_KEY_SECRET"),
-      deployment: options.deployment,
-      endpoint: slsEndpoint,
-      instanceId: bounded(input, "REFLO_SLS_TRACE_INSTANCE_ID"),
-      project: bounded(input, "REFLO_SLS_PROJECT"),
-      serviceName: options.component,
-    },
-    fetchImplementation,
-  );
+  const operational: DemoOperationalTraceSink =
+    createStructuredLogOperationalTraceSink(options.operationalWrite);
   const langfuse = createLangfuseModelTraceSink(
     {
       baseUrl: langfuseEndpoint,
@@ -91,15 +67,7 @@ export function createDemoTraceRuntime(
 
   return Object.freeze({
     enabled: true,
-    modelTraces: createCompositeModelTraceSink([
-      langfuse,
-      createSlsModelHealthTraceSink({
-        component: options.component,
-        demoRunId,
-        environment: options.deployment,
-        sink: sls,
-      }),
-    ]),
+    modelTraces: createCompositeModelTraceSink([langfuse]),
     async recordOperational(trace: DemoOperationalTraceInput): Promise<void> {
       const event = assertSafeDemoOperationalTrace({
         attemptCount: trace.attemptCount ?? 1,
@@ -130,7 +98,7 @@ export function createDemoTraceRuntime(
         stage: trace.stage,
         startedAt: trace.startedAt,
       });
-      await sls.record(event, new AbortController().signal);
+      await operational.record(event, new AbortController().signal);
     },
   });
 }
@@ -143,14 +111,6 @@ function disabledRuntime(): DemoTraceRuntime {
     },
     recordOperational: async () => undefined,
   });
-}
-
-function bounded(input: NodeJS.ProcessEnv, name: string): string {
-  const value = required(input, name);
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(value)) {
-    throw new Error(`${name} is not a bounded provider identifier`);
-  }
-  return value;
 }
 
 function required(input: NodeJS.ProcessEnv, name: string): string {

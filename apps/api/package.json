@@ -18,17 +18,20 @@
   "dependencies": {
     "@reflo/accounts": "workspace:*",
     "@reflo/assessment": "workspace:*",
+    "@reflo/asset-delivery": "workspace:*",
+    "@reflo/audio": "workspace:*",
     "@reflo/config": "workspace:*",
     "@reflo/contracts": "workspace:*",
     "@reflo/db": "workspace:*",
-    "@reflo/dev-smoke": "workspace:*",
     "@reflo/delivery": "workspace:*",
+    "@reflo/dev-smoke": "workspace:*",
     "@reflo/ingestion": "workspace:*",
     "@reflo/knowledge-model": "workspace:*",
     "@reflo/model-router": "workspace:*",
     "@reflo/observability": "workspace:*",
     "@reflo/retrieval": "workspace:*",
-    "@reflo/tutor-agent": "workspace:*"
+    "@reflo/tutor-agent": "workspace:*",
+    "rocketmq-client-nodejs": "1.0.5"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

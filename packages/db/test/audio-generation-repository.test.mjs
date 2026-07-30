@@ -10,7 +10,10 @@ import pg from "pg";
 
 import { buildAudioPlan } from "@reflo/audio";
 
-import { PostgresAudioGenerationRepository } from "../dist/index.js";
+import {
+  PostgresAudioAuthorizationResolver,
+  PostgresAudioGenerationRepository,
+} from "../dist/index.js";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(
@@ -46,6 +49,7 @@ test(
     const admin = new pg.Client({ connectionString: baseDatabaseUrl });
     let repository;
     let competing;
+    let resolver;
     let client;
     await admin.connect();
     try {
@@ -70,6 +74,7 @@ test(
         leaseDurationMs: 60_000,
         leaseOwner: "audio-worker-test-0002",
       });
+      resolver = new PostgresAudioAuthorizationResolver(databaseUrl.toString());
 
       const course = await repository.loadCourse(authorization, ids.course);
       assert.ok(course);
@@ -148,7 +153,51 @@ test(
         outbox.rows.some(({ payload }) => payload.includes("Narration")),
         false,
       );
+      assert.deepEqual(
+        await resolver.resolve({
+          courseId: ids.course,
+          operationId: failed.id,
+        }),
+        {
+          actorId: ids.user,
+          authorizationId: ids.membership,
+          ownerScopeId: ids.scope,
+        },
+      );
+      await client.query(
+        `UPDATE source_document
+         SET retention_status = 'tombstoned'
+         WHERE id = $1`,
+        [ids.document],
+      );
+      assert.equal(
+        await resolver.resolve({
+          courseId: ids.course,
+          operationId: failed.id,
+        }),
+        null,
+      );
+      await client.query(
+        `UPDATE source_document
+         SET retention_status = 'active'
+         WHERE id = $1`,
+        [ids.document],
+      );
+      await client.query(
+        `UPDATE app_user
+         SET status = 'disabled'
+         WHERE id = $1`,
+        [ids.user],
+      );
+      assert.equal(
+        await resolver.resolve({
+          courseId: ids.course,
+          operationId: failed.id,
+        }),
+        null,
+      );
     } finally {
+      await resolver?.close();
       await competing?.close();
       await repository?.close();
       await client?.end();

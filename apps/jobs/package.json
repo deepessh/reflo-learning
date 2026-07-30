@@ -22,9 +22,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@reflo/asset-delivery": "workspace:*",
     "@reflo/audio": "workspace:*",
     "@reflo/config": "workspace:*",
     "@reflo/contracts": "workspace:*",
+    "@reflo/db": "workspace:*",
+    "@reflo/model-router": "workspace:*",
+    "@reflo/observability": "workspace:*",
     "@reflo/retrieval": "workspace:*"
   },
   "devDependencies": {

@@ -2,6 +2,9 @@ export const INGESTION_PROFILE_VERSION = "isolated-ingestion-v1" as const;
 export const INGESTION_LIMITS_VERSION = "isolated-ingestion-limits-v1" as const;
 export const NORMALIZED_DOCUMENT_VERSION = "normalized-document-v1" as const;
 export const SCAN_CLASSIFIER_VERSION = "scan-detect-v1" as const;
+export const FC_SESSION_PROTOCOL_VERSION =
+  "serverless-isolated-ingestion-session-v1" as const;
+export const FC_SESSION_MAX_CHUNK_BYTES = 8 * 1_024 * 1_024;
 
 export const INGESTION_COMPONENTS = Object.freeze({
   clamAv: "1.4.5",

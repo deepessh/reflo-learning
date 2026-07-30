@@ -72,6 +72,12 @@ export interface IsolatedDocumentWorkerPort {
   execute(request: WorkerExecutionRequest): Promise<unknown>;
 }
 
+export interface FunctionComputeSessionClientPort {
+  createSession(sessionId: string): Promise<{ readonly sessionId: string }>;
+  deleteSession(sessionId: string): Promise<void>;
+  invoke(sessionId: string, request: Uint8Array): Promise<Uint8Array>;
+}
+
 export interface NormalizedDocumentPublisherPort {
   /**
    * Idempotently publishes the validated internal artifact by operation and

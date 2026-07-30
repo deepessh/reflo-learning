@@ -23,6 +23,7 @@ describe("demo delivery composition", () => {
       createDeliveryRuntime(
         {
           ...environment(),
+          REFLO_DEMO_DELIVERY_PROVIDER: "email",
           REFLO_DEMO_DESTINATION_LOOKUP_KEY: key(1),
         },
         "staging",
@@ -42,7 +43,11 @@ describe("demo delivery composition", () => {
   it("composes only explicit staff destinations and approved free capacity", async () => {
     expect(() =>
       createDeliveryRuntime(
-        { ...environment(), REFLO_DIRECTMAIL_DAILY_LIMIT: "201" },
+        {
+          ...environment(),
+          REFLO_DEMO_DELIVERY_PROVIDER: "email",
+          REFLO_DIRECTMAIL_DAILY_LIMIT: "201",
+        },
         "staging",
       ),
     ).toThrow(/exceed approved free capacity/);
@@ -58,6 +63,31 @@ describe("demo delivery composition", () => {
     );
     expect(local.delivery).toBeDefined();
     await local.close();
+  });
+
+  it("composes Telegram without DirectMail or email configuration", async () => {
+    const telegram = environment();
+    for (const name of Object.keys(telegram)) {
+      if (name.includes("EMAIL") || name.includes("DIRECTMAIL")) {
+        delete telegram[name];
+      }
+    }
+    const runtime = createDeliveryRuntime(telegram, "staging");
+    expect(runtime.delivery).toBeDefined();
+    await runtime.close();
+  });
+
+  it("composes email without Telegram configuration", async () => {
+    const email = {
+      ...environment(),
+      REFLO_DEMO_DELIVERY_PROVIDER: "email",
+    };
+    for (const name of Object.keys(email)) {
+      if (name.includes("TELEGRAM")) delete email[name];
+    }
+    const runtime = createDeliveryRuntime(email, "staging");
+    expect(runtime.delivery).toBeDefined();
+    await runtime.close();
   });
 
   it("records bounded delivery health without changing delivery outcomes", async () => {
@@ -108,6 +138,7 @@ function environment(): NodeJS.ProcessEnv {
   return {
     DATABASE_URL: "postgresql://runtime@db.invalid/reflo",
     REFLO_DEMO_DELIVERY_MODE: "staff-only-demo-v1",
+    REFLO_DEMO_DELIVERY_PROVIDER: "telegram",
     REFLO_DEMO_DESTINATION_LOOKUP_KEY: key(2),
     REFLO_DEMO_EMAIL_CHANNEL_ID: "10000000-0000-4000-8000-000000000001",
     REFLO_DEMO_EMAIL_DESTINATION: "staff-email@example.test",

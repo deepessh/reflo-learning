@@ -1,3 +1,16 @@
 # Bootstrap root
 
-Reserved for the one-time remote-state, TableStore locking, staging/pilot KMS metadata, and GitHub OIDC control-plane bootstrap authorized by ADR 0043. The bounded Demo Day `dev` secret path does not require KMS Secrets Manager. Resource implementation requires a separately triaged issue.
+This one-time root declares the ADR 0043 control plane for issue #199:
+
+- private, versioned, AES-256-encrypted OSS state;
+- TableStore locking with the exact `LockID` string key required by the OpenTofu OSS backend;
+- GitHub OIDC trust restricted to the repository's immutable numeric identity and the protected `dev` environment; and
+- least-privilege state and lock-table access for the deployment role.
+
+Before bootstrap, query GitHub's repository OIDC customization endpoint and
+copy its exact `sub_claim_prefix` into the protected bootstrap input
+`github_oidc_subject_prefix`. It has the form
+`repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`; never reconstruct the value
+from the mutable repository name. The role appends `:environment:dev`.
+
+The committed partial OSS backend is disabled only for the first reviewed bootstrap apply. Immediately afterward, migrate that local bootstrap state into the created bucket and lock table using the non-secret backend metadata output, verify the remote version, and remove the local copy through the documented recovery procedure. It must not be applied until issue #199 records the required account, region, bootstrap-identity, and spending approvals. Inputs are supplied through the protected execution boundary; never commit tfvars, state, plans, account identifiers, or fingerprints copied from an unverified source.

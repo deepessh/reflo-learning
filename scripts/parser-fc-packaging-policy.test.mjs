@@ -43,6 +43,19 @@ describe("registry-free parser Function Compute packaging policy", () => {
     assert.match(packaging, /\$native_stage\/reflo\/native\/bin/);
     assert.match(packaging, /\$native_stage\/reflo\/native\/lib/);
     assert.match(packaging, /\$snapshot_stage\/reflo\/clamav/);
+    assert.match(packaging, /copy_tree_from_container/);
+    assert.match(
+      packaging,
+      /docker cp "\$source_container:\$source\/\." - \|\s+tar --extract --file=- --directory="\$destination"/,
+    );
+    assert.doesNotMatch(
+      packaging,
+      /docker cp "\$piper_container_id:\/layer\/\." "\$piper_stage"/,
+    );
+    assert.doesNotMatch(
+      packaging,
+      /docker cp\s+"?\$native_container_id:\/opt\/reflo\/native\/\."?/,
+    );
     assert.doesNotMatch(packaging, /\$(?:java|native|snapshot)_stage\/opt\//);
     assert.match(
       packaging,

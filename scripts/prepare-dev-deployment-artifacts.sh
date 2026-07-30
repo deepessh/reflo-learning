@@ -59,11 +59,19 @@ reproducible_zip() {
   test -s "$destination"
 }
 
+copy_tree_from_container() {
+  local source_container="$1"
+  local source="$2"
+  local destination="$3"
+  mkdir -p "$destination"
+  docker cp "$source_container:$source/." - |
+    tar --extract --file=- --directory="$destination"
+}
+
 copy_from_parser_image() {
   local source="$1"
   local destination="$2"
-  mkdir -p "$destination"
-  docker cp "$container_id:$source/." "$destination"
+  copy_tree_from_container "$container_id" "$source" "$destination"
 }
 
 cd "$root"
@@ -111,7 +119,7 @@ docker build \
 piper_container_id="$(docker create "$piper_image")"
 piper_stage="$scratch/jobs-piper"
 mkdir -p "$piper_stage"
-docker cp "$piper_container_id:/layer/." "$piper_stage"
+copy_tree_from_container "$piper_container_id" "/layer" "$piper_stage"
 docker rm "$piper_container_id" >/dev/null
 piper_container_id=""
 reproducible_zip "$piper_stage" "$target/jobs-piper-layer.zip"
@@ -184,8 +192,9 @@ if ! grep -qx \
 fi
 
 native_container_id="$(docker create "$native_image")"
-docker cp \
-  "$native_container_id:/opt/reflo/native/." \
+copy_tree_from_container \
+  "$native_container_id" \
+  "/opt/reflo/native" \
   "$native_stage/reflo/native"
 docker rm "$native_container_id" >/dev/null
 native_container_id=""

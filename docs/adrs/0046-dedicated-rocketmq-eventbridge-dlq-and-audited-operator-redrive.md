@@ -12,7 +12,7 @@ ownership:
 authorization:
   decider: "@deepessh, repository owner and named architecture decider for issue #209"
   approval_basis: >-
-    owner review of the proposal and the evidence/constraints recorded in
+    owner review of the proposal and the evidence and constraints recorded in
     https://github.com/deepessh/reflo-learning/issues/209#issuecomment-5134712497,
     followed by the explicit instruction: “Proceed.”
 provenance:

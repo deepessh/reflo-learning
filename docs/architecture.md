@@ -50,6 +50,8 @@ Detailed rules live in the linked records.
 | [ADR 0042](adrs/0042-deferred-release-qualification-activation-and-retained-v2-evidence.md) | Deferred release qualification activation and retained v2 evidence | `D-GH-202` | ADR |
 | [ADR 0043](adrs/0043-protected-github-dev-secrets-and-private-delivery-custody.md) | Protected GitHub dev secrets and private-delivery custody | `D-GH-203` | ADR |
 | [ADR 0044](adrs/0044-serverless-isolated-ingestion-task-for-demo-day-dev.md) | Serverless isolated-ingestion task for Demo Day dev | `D-GH-206` | ADR |
+| [ADR 0045](adrs/0045-supervised-rocketmq-transactional-outbox-relay-on-api-ecs.md) | Supervised RocketMQ transactional-outbox relay on API ECS | `D-GH-208` | ADR |
+| [ADR 0046](adrs/0046-dedicated-rocketmq-eventbridge-dlq-and-audited-operator-redrive.md) | Dedicated RocketMQ EventBridge DLQ and audited operator redrive | `D-GH-209` | ADR |
 <!-- END GENERATED ACTIVE ADRS -->
 <!-- prettier-ignore-end -->
 

@@ -121,6 +121,359 @@ $$;
 
 
 --
+-- Name: reflo_claim_audio_redrive(uuid, uuid, text, text, timestamp with time zone, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_claim_audio_redrive(candidate_message_id uuid, candidate_request_key uuid, candidate_reason_code text, candidate_lease_owner text, candidate_lease_expires_at timestamp with time zone, candidate_now timestamp with time zone) RETURNS TABLE(claim_outcome text, message_id uuid, message_kind text, message_name text, message_version integer, producer text, environment text, correlation_id uuid, causation_id uuid, idempotency_key text, payload jsonb, occurred_at timestamp with time zone, deadline_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $_$
+DECLARE
+  existing rocketmq_redrive_request%ROWTYPE;
+  safe_message record;
+BEGIN
+  IF candidate_reason_code NOT IN (
+       'configuration_repaired',
+       'provider_recovered',
+       'transient_dependency_recovered'
+     )
+     OR candidate_lease_owner !~ '^[a-zA-Z0-9_-]{8,128}$'
+     OR candidate_lease_expires_at <= candidate_now
+     OR candidate_lease_expires_at > candidate_now + interval '5 minutes' THEN
+    RAISE EXCEPTION 'invalid audio redrive claim'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT
+    queued.*,
+    operation.state AS operation_state
+  INTO safe_message
+  FROM public.outbox_message AS queued
+  JOIN public.async_operation AS operation
+    ON operation.owner_scope_id = queued.owner_scope_id
+   AND operation.id = queued.operation_id
+  JOIN public.audio_generation_operation AS audio
+    ON audio.owner_scope_id = queued.owner_scope_id
+   AND audio.id = queued.operation_id
+  JOIN public.course
+    ON course.owner_scope_id = audio.owner_scope_id
+   AND course.id = audio.course_id
+  JOIN public.source_document AS source
+    ON source.owner_scope_id = course.owner_scope_id
+   AND source.id = course.source_document_id
+  JOIN public.owner_scope AS scope
+    ON scope.id = queued.owner_scope_id
+  JOIN public.scope_membership AS membership
+    ON membership.owner_scope_id = queued.owner_scope_id
+   AND membership.role = 'owner'
+   AND membership.revoked_at IS NULL
+  JOIN public.app_user AS actor
+    ON actor.id = membership.user_id
+  WHERE queued.message_id = candidate_message_id
+    AND queued.message_kind = 'command'
+    AND queued.message_name = 'media.audio.generate'
+    AND queued.message_version = 1
+    AND queued.producer = 'audio-generation'
+    AND queued.environment = 'dev'
+    AND queued.published_at IS NOT NULL
+    AND queued.payload = jsonb_build_object(
+      'courseId', audio.course_id::text,
+      'operationId', audio.id::text,
+      'ownerScopeId', audio.owner_scope_id::text
+    )
+    AND operation.operation_name = 'media.audio.generate'
+    AND operation.operation_version = 1
+    AND operation.attempt_count < 5
+    AND (
+      (
+        operation.state = 'queued'
+        AND operation.attempt_count = 0
+        AND operation.sanitized_failure IS NULL
+        AND candidate_reason_code IN (
+          'configuration_repaired', 'provider_recovered'
+        )
+      )
+      OR (
+        operation.state = 'retry_scheduled'
+        AND operation.sanitized_failure->>'policyVersion' = 'audio-retry-v1'
+        AND (
+          (
+            candidate_reason_code = 'configuration_repaired'
+            AND operation.sanitized_failure->>'failureClass' =
+              'infrastructure_unavailable'
+          )
+          OR (
+            candidate_reason_code = 'provider_recovered'
+            AND operation.sanitized_failure->>'failureClass' IN (
+              'provider_throttled', 'provider_unavailable'
+            )
+          )
+          OR (
+            candidate_reason_code = 'transient_dependency_recovered'
+            AND operation.sanitized_failure->>'failureClass' =
+              'dependency_timeout'
+          )
+        )
+      )
+    )
+    AND operation.deadline_at > candidate_now
+    AND course.status = 'ready'
+    AND source.parse_status = 'parsed'
+    AND source.retention_status = 'active'
+    AND scope.status = 'active'
+    AND actor.status = 'active'
+  FOR UPDATE OF operation;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT
+      'ineligible'::text,
+      NULL::uuid,
+      NULL::text,
+      NULL::text,
+      NULL::integer,
+      NULL::text,
+      NULL::text,
+      NULL::uuid,
+      NULL::uuid,
+      NULL::text,
+      NULL::jsonb,
+      NULL::timestamptz,
+      NULL::timestamptz;
+    RETURN;
+  END IF;
+
+  SELECT *
+  INTO existing
+  FROM public.rocketmq_redrive_request
+  WHERE rocketmq_redrive_request.message_id = candidate_message_id
+  FOR UPDATE;
+
+  IF FOUND THEN
+    IF existing.request_key <> candidate_request_key
+       OR existing.reason_code <> candidate_reason_code THEN
+      RETURN QUERY SELECT
+        'conflict'::text,
+        NULL::uuid,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::uuid,
+        NULL::uuid,
+        NULL::text,
+        NULL::jsonb,
+        NULL::timestamptz,
+        NULL::timestamptz;
+      RETURN;
+    END IF;
+    IF existing.state = 'published' THEN
+      RETURN QUERY SELECT
+        'published'::text,
+        NULL::uuid,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::uuid,
+        NULL::uuid,
+        NULL::text,
+        NULL::jsonb,
+        NULL::timestamptz,
+        NULL::timestamptz;
+      RETURN;
+    END IF;
+    IF existing.state = 'rejected' THEN
+      RETURN QUERY SELECT
+        'rejected'::text,
+        NULL::uuid,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::uuid,
+        NULL::uuid,
+        NULL::text,
+        NULL::jsonb,
+        NULL::timestamptz,
+        NULL::timestamptz;
+      RETURN;
+    END IF;
+    IF existing.lease_expires_at IS NOT NULL
+       AND existing.lease_expires_at > candidate_now THEN
+      RETURN QUERY SELECT
+        'active'::text,
+        NULL::uuid,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::uuid,
+        NULL::uuid,
+        NULL::text,
+        NULL::jsonb,
+        NULL::timestamptz,
+        NULL::timestamptz;
+      RETURN;
+    END IF;
+
+    UPDATE public.rocketmq_redrive_request
+    SET lease_owner = candidate_lease_owner,
+        lease_expires_at = candidate_lease_expires_at,
+        updated_at = candidate_now
+    WHERE rocketmq_redrive_request.message_id = candidate_message_id;
+  ELSE
+    INSERT INTO public.rocketmq_redrive_request (
+      message_id,
+      request_key,
+      reason_code,
+      state,
+      lease_owner,
+      lease_expires_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      candidate_message_id,
+      candidate_request_key,
+      candidate_reason_code,
+      'authorized',
+      candidate_lease_owner,
+      candidate_lease_expires_at,
+      candidate_now,
+      candidate_now
+    );
+
+    INSERT INTO public.rocketmq_redrive_audit (
+      message_id,
+      request_key,
+      event_kind,
+      reason_code,
+      attempt_number,
+      occurred_at
+    )
+    VALUES (
+      candidate_message_id,
+      candidate_request_key,
+      'authorized',
+      candidate_reason_code,
+      0,
+      candidate_now
+    );
+  END IF;
+
+  UPDATE public.rocketmq_redrive_request
+  SET publication_attempt_count = publication_attempt_count + 1,
+      normalized_failure_class = NULL,
+      updated_at = candidate_now
+  WHERE rocketmq_redrive_request.message_id = candidate_message_id
+  RETURNING * INTO existing;
+
+  INSERT INTO public.rocketmq_redrive_audit (
+    message_id,
+    request_key,
+    event_kind,
+    reason_code,
+    attempt_number,
+    occurred_at
+  )
+  VALUES (
+    candidate_message_id,
+    candidate_request_key,
+    'publication_attempted',
+    candidate_reason_code,
+    existing.publication_attempt_count,
+    candidate_now
+  );
+
+  RETURN QUERY SELECT
+    'claimed'::text,
+    safe_message.message_id,
+    safe_message.message_kind,
+    safe_message.message_name,
+    safe_message.message_version,
+    safe_message.producer,
+    safe_message.environment,
+    safe_message.correlation_id,
+    safe_message.causation_id,
+    safe_message.idempotency_key,
+    safe_message.payload,
+    safe_message.occurred_at,
+    safe_message.deadline_at;
+END
+$_$;
+
+
+--
+-- Name: reflo_claim_outbox_messages(text, timestamp with time zone, integer, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_claim_outbox_messages(candidate_lease_owner text, candidate_lease_expires_at timestamp with time zone, candidate_batch_size integer, candidate_now timestamp with time zone) RETURNS TABLE(message_id uuid, message_kind text, message_name text, message_version integer, producer text, environment text, correlation_id uuid, causation_id uuid, idempotency_key text, payload jsonb, occurred_at timestamp with time zone, deadline_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $_$
+BEGIN
+  IF candidate_lease_owner !~ '^[a-zA-Z0-9_-]{8,128}$'
+     OR candidate_batch_size < 1
+     OR candidate_batch_size > 25
+     OR candidate_lease_expires_at <= candidate_now
+     OR candidate_lease_expires_at > candidate_now + interval '5 minutes' THEN
+    RAISE EXCEPTION 'invalid outbox relay claim'
+      USING ERRCODE = '22023';
+  END IF;
+
+  RETURN QUERY
+  WITH candidates AS (
+    SELECT queued.message_id
+    FROM public.outbox_message AS queued
+    WHERE queued.published_at IS NULL
+      AND queued.message_kind = 'command'
+      AND queued.message_name = 'media.audio.generate'
+      AND queued.message_version = 1
+      AND queued.producer = 'audio-generation'
+      AND queued.environment = 'dev'
+      AND (queued.deadline_at IS NULL OR queued.deadline_at > candidate_now)
+      AND (
+        queued.relay_lease_owner IS NULL
+        OR queued.relay_lease_expires_at <= candidate_now
+      )
+    ORDER BY queued.priority, queued.created_at, queued.message_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT candidate_batch_size
+  ),
+  claimed AS (
+    UPDATE public.outbox_message AS queued
+    SET relay_lease_owner = candidate_lease_owner,
+        relay_lease_expires_at = candidate_lease_expires_at,
+        publish_attempt_count = queued.publish_attempt_count + 1,
+        last_publish_failure_class = NULL
+    FROM candidates
+    WHERE queued.message_id = candidates.message_id
+    RETURNING queued.*
+  )
+  SELECT
+    claimed.message_id,
+    claimed.message_kind,
+    claimed.message_name,
+    claimed.message_version,
+    claimed.producer,
+    claimed.environment,
+    claimed.correlation_id,
+    claimed.causation_id,
+    claimed.idempotency_key,
+    claimed.payload,
+    claimed.occurred_at,
+    claimed.deadline_at
+  FROM claimed
+  ORDER BY claimed.priority, claimed.created_at, claimed.message_id;
+END
+$_$;
+
+
+--
 -- Name: reflo_context_actor_id(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -186,6 +539,105 @@ $$;
 
 
 --
+-- Name: reflo_inspect_audio_redrive(uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_inspect_audio_redrive(candidate_message_id uuid, candidate_now timestamp with time zone) RETURNS TABLE(message_id uuid, message_kind text, message_name text, message_version integer, producer text, environment text, correlation_id uuid, causation_id uuid, idempotency_key text, payload jsonb, occurred_at timestamp with time zone, deadline_at timestamp with time zone, operation_state text, rejection_class text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+  SELECT
+    queued.message_id,
+    queued.message_kind,
+    queued.message_name,
+    queued.message_version,
+    queued.producer,
+    queued.environment,
+    queued.correlation_id,
+    queued.causation_id,
+    queued.idempotency_key,
+    queued.payload,
+    queued.occurred_at,
+    queued.deadline_at,
+    operation.state,
+    CASE
+      WHEN queued.message_kind <> 'command'
+        OR queued.message_name <> 'media.audio.generate'
+        OR queued.message_version <> 1
+        OR queued.producer <> 'audio-generation'
+        OR queued.environment <> 'dev'
+        OR operation.operation_name <> 'media.audio.generate'
+        OR operation.operation_version <> 1
+        OR queued.payload <> jsonb_build_object(
+          'courseId', audio.course_id::text,
+          'operationId', audio.id::text,
+          'ownerScopeId', audio.owner_scope_id::text
+        )
+        THEN 'unsupported_contract'
+      WHEN operation.deadline_at <= candidate_now
+        OR queued.deadline_at <= candidate_now
+        THEN 'expired'
+      WHEN source.retention_status <> 'active'
+        OR scope.status <> 'active'
+        THEN 'deleted_scope'
+      WHEN course.status <> 'ready'
+        OR source.parse_status <> 'parsed'
+        OR membership.id IS NULL
+        OR actor.status <> 'active'
+        THEN 'authorization_denied'
+      WHEN queued.published_at IS NULL
+        OR operation.attempt_count >= 5
+        OR (
+          operation.state = 'queued'
+          AND (
+            operation.attempt_count <> 0
+            OR operation.sanitized_failure IS NOT NULL
+          )
+        )
+        OR (
+          operation.state = 'retry_scheduled'
+          AND (
+            operation.sanitized_failure->>'policyVersion' IS DISTINCT FROM
+              'audio-retry-v1'
+            OR operation.sanitized_failure->>'failureClass' IS NULL
+            OR operation.sanitized_failure->>'failureClass' NOT IN (
+              'dependency_timeout',
+              'infrastructure_unavailable',
+              'provider_throttled',
+              'provider_unavailable'
+            )
+          )
+        )
+        OR operation.state NOT IN ('queued', 'retry_scheduled')
+        THEN 'state_conflict'
+      ELSE NULL
+    END
+  FROM outbox_message AS queued
+  JOIN async_operation AS operation
+    ON operation.owner_scope_id = queued.owner_scope_id
+   AND operation.id = queued.operation_id
+  JOIN audio_generation_operation AS audio
+    ON audio.owner_scope_id = queued.owner_scope_id
+   AND audio.id = queued.operation_id
+  JOIN course
+    ON course.owner_scope_id = audio.owner_scope_id
+   AND course.id = audio.course_id
+  JOIN source_document AS source
+    ON source.owner_scope_id = course.owner_scope_id
+   AND source.id = course.source_document_id
+  JOIN owner_scope AS scope
+    ON scope.id = queued.owner_scope_id
+  LEFT JOIN scope_membership AS membership
+    ON membership.owner_scope_id = queued.owner_scope_id
+   AND membership.role = 'owner'
+   AND membership.revoked_at IS NULL
+  LEFT JOIN app_user AS actor
+    ON actor.id = membership.user_id
+  WHERE queued.message_id = candidate_message_id
+$$;
+
+
+--
 -- Name: reflo_learning_scope_delete_is_authorized(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -203,6 +655,81 @@ CREATE FUNCTION public.reflo_learning_scope_delete_is_authorized(p_owner_scope_i
       'reflo.authorized_learning_scope_delete',
       true
     ) = p_owner_scope_id::text
+$$;
+
+
+--
+-- Name: reflo_mark_audio_redrive_published(uuid, uuid, text, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_mark_audio_redrive_published(candidate_message_id uuid, candidate_request_key uuid, candidate_lease_owner text, candidate_now timestamp with time zone) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+DECLARE
+  next_attempt integer;
+BEGIN
+  UPDATE public.rocketmq_redrive_request
+  SET state = 'published',
+      lease_owner = NULL,
+      lease_expires_at = NULL,
+      normalized_failure_class = NULL,
+      updated_at = candidate_now,
+      finalized_at = candidate_now
+  WHERE message_id = candidate_message_id
+    AND request_key = candidate_request_key
+    AND state = 'authorized'
+    AND lease_owner = candidate_lease_owner
+    AND lease_expires_at > candidate_now
+  RETURNING publication_attempt_count INTO next_attempt;
+
+  IF next_attempt IS NULL THEN
+    RETURN false;
+  END IF;
+
+  INSERT INTO public.rocketmq_redrive_audit (
+    message_id,
+    request_key,
+    event_kind,
+    reason_code,
+    attempt_number,
+    occurred_at
+  )
+  SELECT
+    message_id,
+    request_key,
+    'published',
+    reason_code,
+    next_attempt,
+    candidate_now
+  FROM public.rocketmq_redrive_request
+  WHERE message_id = candidate_message_id;
+  RETURN true;
+END
+$$;
+
+
+--
+-- Name: reflo_mark_outbox_published(uuid, text, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_mark_outbox_published(candidate_message_id uuid, candidate_lease_owner text, candidate_now timestamp with time zone) RETURNS boolean
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+  WITH marked AS (
+    UPDATE outbox_message
+    SET published_at = candidate_now,
+        relay_lease_owner = NULL,
+        relay_lease_expires_at = NULL,
+        last_publish_failure_class = NULL
+    WHERE message_id = candidate_message_id
+      AND published_at IS NULL
+      AND relay_lease_owner = candidate_lease_owner
+      AND relay_lease_expires_at > candidate_now
+    RETURNING message_id
+  )
+  SELECT EXISTS (SELECT 1 FROM marked)
 $$;
 
 
@@ -419,6 +946,127 @@ $$;
 
 
 --
+-- Name: reflo_reject_audio_redrive(uuid, uuid, text, text, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_reject_audio_redrive(candidate_message_id uuid, candidate_request_key uuid, candidate_reason_code text, candidate_failure_class text, candidate_now timestamp with time zone) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+DECLARE
+  rejected boolean;
+BEGIN
+  IF candidate_reason_code NOT IN (
+       'configuration_repaired',
+       'provider_recovered',
+       'transient_dependency_recovered'
+     )
+     OR candidate_failure_class NOT IN (
+       'authorization_denied',
+       'changed_intent',
+       'deleted_scope',
+       'expired',
+       'invalid_wrapper',
+       'state_conflict',
+       'unsupported_contract'
+     ) THEN
+    RAISE EXCEPTION 'invalid redrive rejection'
+      USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO public.rocketmq_redrive_request (
+    message_id,
+    request_key,
+    reason_code,
+    state,
+    publication_attempt_count,
+    normalized_failure_class,
+    created_at,
+    updated_at,
+    finalized_at
+  )
+  SELECT
+    queued.message_id,
+    candidate_request_key,
+    candidate_reason_code,
+    'rejected',
+    0,
+    candidate_failure_class,
+    candidate_now,
+    candidate_now,
+    candidate_now
+  FROM public.outbox_message AS queued
+  WHERE queued.message_id = candidate_message_id
+  ON CONFLICT (message_id) DO UPDATE
+  SET state = CASE
+        WHEN rocketmq_redrive_request.request_key = EXCLUDED.request_key
+          THEN 'rejected'
+        ELSE rocketmq_redrive_request.state
+      END,
+      lease_owner = CASE
+        WHEN rocketmq_redrive_request.request_key = EXCLUDED.request_key
+          THEN NULL
+        ELSE rocketmq_redrive_request.lease_owner
+      END,
+      lease_expires_at = CASE
+        WHEN rocketmq_redrive_request.request_key = EXCLUDED.request_key
+          THEN NULL
+        ELSE rocketmq_redrive_request.lease_expires_at
+      END,
+      normalized_failure_class = CASE
+        WHEN rocketmq_redrive_request.request_key = EXCLUDED.request_key
+          THEN EXCLUDED.normalized_failure_class
+        ELSE rocketmq_redrive_request.normalized_failure_class
+      END,
+      updated_at = CASE
+        WHEN rocketmq_redrive_request.request_key = EXCLUDED.request_key
+          THEN EXCLUDED.updated_at
+        ELSE rocketmq_redrive_request.updated_at
+      END,
+      finalized_at = CASE
+        WHEN rocketmq_redrive_request.request_key = EXCLUDED.request_key
+          THEN EXCLUDED.finalized_at
+        ELSE rocketmq_redrive_request.finalized_at
+      END
+  RETURNING (
+    rocketmq_redrive_request.request_key = candidate_request_key
+    AND rocketmq_redrive_request.state = 'rejected'
+  ) INTO rejected;
+
+  IF rejected THEN
+    INSERT INTO public.rocketmq_redrive_audit (
+      message_id,
+      request_key,
+      event_kind,
+      reason_code,
+      attempt_number,
+      normalized_failure_class,
+      occurred_at
+    )
+    SELECT
+      candidate_message_id,
+      candidate_request_key,
+      'rejected',
+      candidate_reason_code,
+      publication_attempt_count,
+      candidate_failure_class,
+      candidate_now
+    FROM public.rocketmq_redrive_request
+    WHERE message_id = candidate_message_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.rocketmq_redrive_audit AS audit
+        WHERE audit.message_id = candidate_message_id
+          AND audit.request_key = candidate_request_key
+          AND audit.event_kind = 'rejected'
+      );
+  END IF;
+  RETURN COALESCE(rejected, false);
+END
+$$;
+
+
+--
 -- Name: reflo_reject_configuration_mutation(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -428,6 +1076,102 @@ CREATE FUNCTION public.reflo_reject_configuration_mutation() RETURNS trigger
 BEGIN
   RAISE EXCEPTION '% is immutable configuration', TG_TABLE_NAME
     USING ERRCODE = '55000';
+END
+$$;
+
+
+--
+-- Name: reflo_release_audio_redrive(uuid, uuid, text, text, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_release_audio_redrive(candidate_message_id uuid, candidate_request_key uuid, candidate_lease_owner text, candidate_failure_class text, candidate_now timestamp with time zone) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+DECLARE
+  next_attempt integer;
+BEGIN
+  IF candidate_failure_class NOT IN (
+    'broker_unavailable',
+    'invalid_receipt',
+    'publication_timeout',
+    'publisher_shutdown'
+  ) THEN
+    RAISE EXCEPTION 'invalid redrive transient failure class'
+      USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE public.rocketmq_redrive_request
+  SET lease_owner = NULL,
+      lease_expires_at = NULL,
+      normalized_failure_class = candidate_failure_class,
+      updated_at = candidate_now
+  WHERE message_id = candidate_message_id
+    AND request_key = candidate_request_key
+    AND state = 'authorized'
+    AND lease_owner = candidate_lease_owner
+  RETURNING publication_attempt_count INTO next_attempt;
+
+  IF next_attempt IS NULL THEN
+    RETURN false;
+  END IF;
+
+  INSERT INTO public.rocketmq_redrive_audit (
+    message_id,
+    request_key,
+    event_kind,
+    reason_code,
+    attempt_number,
+    normalized_failure_class,
+    occurred_at
+  )
+  SELECT
+    message_id,
+    request_key,
+    'publication_failed',
+    reason_code,
+    next_attempt,
+    candidate_failure_class,
+    candidate_now
+  FROM public.rocketmq_redrive_request
+  WHERE message_id = candidate_message_id;
+  RETURN true;
+END
+$$;
+
+
+--
+-- Name: reflo_release_outbox_message(uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reflo_release_outbox_message(candidate_message_id uuid, candidate_lease_owner text, candidate_failure_class text) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+DECLARE
+  released_count integer;
+BEGIN
+  IF candidate_failure_class NOT IN (
+    'broker_unavailable',
+    'invalid_receipt',
+    'publication_timeout',
+    'publisher_shutdown',
+    'throttled',
+    'unknown_transient'
+  ) THEN
+    RAISE EXCEPTION 'invalid outbox failure class'
+      USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE public.outbox_message
+  SET relay_lease_owner = NULL,
+      relay_lease_expires_at = NULL,
+      last_publish_failure_class = candidate_failure_class
+  WHERE message_id = candidate_message_id
+    AND published_at IS NULL
+    AND relay_lease_owner = candidate_lease_owner;
+  GET DIAGNOSTICS released_count = ROW_COUNT;
+  RETURN released_count = 1;
 END
 $$;
 
@@ -2064,11 +2808,19 @@ CREATE TABLE public.outbox_message (
     published_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     priority integer DEFAULT 800 NOT NULL,
+    relay_lease_owner text,
+    relay_lease_expires_at timestamp with time zone,
+    publish_attempt_count integer DEFAULT 0 NOT NULL,
+    last_publish_failure_class text,
     CONSTRAINT outbox_message_check CHECK (((deadline_at IS NULL) OR (deadline_at > occurred_at))),
     CONSTRAINT outbox_message_environment_check CHECK ((environment = ANY (ARRAY['dev'::text, 'staging'::text, 'pilot'::text]))),
     CONSTRAINT outbox_message_message_kind_check CHECK ((message_kind = ANY (ARRAY['command'::text, 'event'::text]))),
     CONSTRAINT outbox_message_message_version_check CHECK ((message_version > 0)),
-    CONSTRAINT outbox_message_priority_check CHECK (((priority >= 1) AND (priority <= 800)))
+    CONSTRAINT outbox_message_priority_check CHECK (((priority >= 1) AND (priority <= 800))),
+    CONSTRAINT outbox_message_publish_attempt_count_check CHECK ((publish_attempt_count >= 0)),
+    CONSTRAINT outbox_message_publish_failure_shape CHECK (((last_publish_failure_class IS NULL) OR (last_publish_failure_class = ANY (ARRAY['broker_unavailable'::text, 'invalid_receipt'::text, 'publication_timeout'::text, 'publisher_shutdown'::text, 'throttled'::text, 'unknown_transient'::text])))),
+    CONSTRAINT outbox_message_published_relay_shape CHECK (((published_at IS NULL) OR ((relay_lease_owner IS NULL) AND (relay_lease_expires_at IS NULL)))),
+    CONSTRAINT outbox_message_relay_lease_shape CHECK (((relay_lease_owner IS NULL) = (relay_lease_expires_at IS NULL)))
 );
 
 ALTER TABLE ONLY public.outbox_message FORCE ROW LEVEL SECURITY;
@@ -2288,6 +3040,65 @@ CREATE TABLE public.review_schedule (
 );
 
 ALTER TABLE ONLY public.review_schedule FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: rocketmq_redrive_audit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.rocketmq_redrive_audit (
+    id bigint NOT NULL,
+    message_id uuid NOT NULL,
+    request_key uuid NOT NULL,
+    event_kind text NOT NULL,
+    reason_code text NOT NULL,
+    attempt_number integer NOT NULL,
+    normalized_failure_class text,
+    occurred_at timestamp with time zone NOT NULL,
+    CONSTRAINT rocketmq_redrive_audit_attempt_number_check CHECK ((attempt_number >= 0)),
+    CONSTRAINT rocketmq_redrive_audit_event_kind_check CHECK ((event_kind = ANY (ARRAY['authorized'::text, 'publication_attempted'::text, 'publication_failed'::text, 'published'::text, 'rejected'::text]))),
+    CONSTRAINT rocketmq_redrive_audit_normalized_failure_class_check CHECK (((normalized_failure_class IS NULL) OR (normalized_failure_class = ANY (ARRAY['authorization_denied'::text, 'broker_unavailable'::text, 'changed_intent'::text, 'deleted_scope'::text, 'expired'::text, 'invalid_receipt'::text, 'invalid_wrapper'::text, 'publication_timeout'::text, 'publisher_shutdown'::text, 'state_conflict'::text, 'unsupported_contract'::text])))),
+    CONSTRAINT rocketmq_redrive_audit_reason_code_check CHECK ((reason_code = ANY (ARRAY['configuration_repaired'::text, 'provider_recovered'::text, 'transient_dependency_recovered'::text])))
+);
+
+
+--
+-- Name: rocketmq_redrive_audit_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.rocketmq_redrive_audit ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.rocketmq_redrive_audit_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: rocketmq_redrive_request; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.rocketmq_redrive_request (
+    message_id uuid NOT NULL,
+    request_key uuid NOT NULL,
+    reason_code text NOT NULL,
+    state text NOT NULL,
+    lease_owner text,
+    lease_expires_at timestamp with time zone,
+    publication_attempt_count integer DEFAULT 0 NOT NULL,
+    normalized_failure_class text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    finalized_at timestamp with time zone,
+    CONSTRAINT rocketmq_redrive_request_check CHECK (((lease_owner IS NULL) = (lease_expires_at IS NULL))),
+    CONSTRAINT rocketmq_redrive_request_check1 CHECK ((((state = 'authorized'::text) AND (finalized_at IS NULL)) OR ((state = ANY (ARRAY['published'::text, 'rejected'::text])) AND (finalized_at IS NOT NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL)))),
+    CONSTRAINT rocketmq_redrive_request_normalized_failure_class_check CHECK (((normalized_failure_class IS NULL) OR (normalized_failure_class = ANY (ARRAY['authorization_denied'::text, 'broker_unavailable'::text, 'changed_intent'::text, 'deleted_scope'::text, 'expired'::text, 'invalid_receipt'::text, 'invalid_wrapper'::text, 'publication_timeout'::text, 'publisher_shutdown'::text, 'state_conflict'::text, 'unsupported_contract'::text])))),
+    CONSTRAINT rocketmq_redrive_request_publication_attempt_count_check CHECK ((publication_attempt_count >= 0)),
+    CONSTRAINT rocketmq_redrive_request_reason_code_check CHECK ((reason_code = ANY (ARRAY['configuration_repaired'::text, 'provider_recovered'::text, 'transient_dependency_recovered'::text]))),
+    CONSTRAINT rocketmq_redrive_request_state_check CHECK ((state = ANY (ARRAY['authorized'::text, 'published'::text, 'rejected'::text])))
+);
 
 
 --
@@ -3565,6 +4376,30 @@ ALTER TABLE ONLY public.review_schedule
 
 
 --
+-- Name: rocketmq_redrive_audit rocketmq_redrive_audit_message_id_request_key_event_kind_at_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rocketmq_redrive_audit
+    ADD CONSTRAINT rocketmq_redrive_audit_message_id_request_key_event_kind_at_key UNIQUE (message_id, request_key, event_kind, attempt_number);
+
+
+--
+-- Name: rocketmq_redrive_audit rocketmq_redrive_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rocketmq_redrive_audit
+    ADD CONSTRAINT rocketmq_redrive_audit_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rocketmq_redrive_request rocketmq_redrive_request_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rocketmq_redrive_request
+    ADD CONSTRAINT rocketmq_redrive_request_pkey PRIMARY KEY (message_id);
+
+
+--
 -- Name: scheduler_delivery_resolution scheduler_delivery_resolution_owner_scope_id_resolution_id__key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3920,6 +4755,13 @@ CREATE INDEX review_schedule_delivery_due_idx ON public.review_schedule USING bt
 
 
 --
+-- Name: rocketmq_redrive_audit_message_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX rocketmq_redrive_audit_message_idx ON public.rocketmq_redrive_audit USING btree (message_id, occurred_at, id);
+
+
+--
 -- Name: scope_membership_one_active_owner_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4176,6 +5018,13 @@ CREATE CONSTRAINT TRIGGER membership_preserves_scope_owner AFTER INSERT OR DELET
 --
 
 CREATE CONSTRAINT TRIGGER owner_scope_requires_owner AFTER INSERT OR UPDATE OF status, retired_at ON public.owner_scope DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.reflo_check_scope_owner_from_scope();
+
+
+--
+-- Name: rocketmq_redrive_audit rocketmq_redrive_audit_is_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER rocketmq_redrive_audit_is_append_only BEFORE DELETE OR UPDATE ON public.rocketmq_redrive_audit FOR EACH ROW EXECUTE FUNCTION public.reflo_reject_append_only_mutation();
 
 
 --
@@ -5282,6 +6131,22 @@ ALTER TABLE ONLY public.review_schedule
 
 
 --
+-- Name: rocketmq_redrive_audit rocketmq_redrive_audit_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rocketmq_redrive_audit
+    ADD CONSTRAINT rocketmq_redrive_audit_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.outbox_message(message_id);
+
+
+--
+-- Name: rocketmq_redrive_request rocketmq_redrive_request_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rocketmq_redrive_request
+    ADD CONSTRAINT rocketmq_redrive_request_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.outbox_message(message_id);
+
+
+--
 -- Name: scheduler_delivery_resolution scheduler_delivery_resolution_owner_scope_id_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6366,4 +7231,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260727000100'),
     ('20260727000200'),
     ('20260727000300'),
-    ('20260728000100');
+    ('20260728000100'),
+    ('20260730000100');

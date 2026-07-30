@@ -168,6 +168,26 @@ variable "rds_runtime_password" {
   }
 }
 
+variable "rds_relay_password" {
+  type      = string
+  sensitive = true
+
+  validation {
+    condition     = can(regex("^[a-f0-9]{48}$", var.rds_relay_password))
+    error_message = "The RDS relay password must be exactly 48 lowercase hexadecimal characters."
+  }
+}
+
+variable "rds_redrive_password" {
+  type      = string
+  sensitive = true
+
+  validation {
+    condition     = can(regex("^[a-f0-9]{48}$", var.rds_redrive_password))
+    error_message = "The RDS redrive password must be exactly 48 lowercase hexadecimal characters."
+  }
+}
+
 variable "analyticdb" {
   description = "Owner-approved AnalyticDB PostgreSQL paid class. No default is intentional."
   type = object({
@@ -201,12 +221,21 @@ variable "analyticdb_runtime_password" {
 variable "rocketmq" {
   description = "Owner-approved RocketMQ paid class. No default is intentional."
   type = object({
+    activation_status       = string
     message_retention_hours = number
     msg_process_spec        = string
     send_receive_ratio      = string
     series_code             = string
     sub_series_code         = string
   })
+
+  validation {
+    condition = (
+      contains(["blocked", "active"], var.rocketmq.activation_status) &&
+      var.rocketmq.message_retention_hours == 24
+    )
+    error_message = "RocketMQ must retain messages for exactly 24 hours and remain blocked until the accepted Singapore activation proof."
+  }
 }
 
 variable "function_compute" {

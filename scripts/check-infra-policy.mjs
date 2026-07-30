@@ -232,6 +232,18 @@ export function checkInfraPolicy(rootDirectory) {
     root,
     "infra/environments/dev/variables.tf",
   );
+  const apiCloudInit = readIfPresent(
+    root,
+    "infra/modules/demo-runtime/templates/api-cloud-init.yaml.tftpl",
+  );
+  const rocketMqAlertSource = readIfPresent(
+    root,
+    "apps/api/src/rocketmq-alert.ts",
+  );
+  const rocketMqRuntimeSources = [
+    readIfPresent(root, "apps/api/src/outbox-relay-main.ts"),
+    readIfPresent(root, "apps/api/src/dlq-redrive-main.ts"),
+  ].join("\n");
   const networkSource = readInfrastructureTree(
     root,
     path.join("infra", "modules", "dev-network"),
@@ -258,6 +270,9 @@ export function checkInfraPolicy(rootDirectory) {
   );
   const normalizedParser = normalizeWhitespace(parserFunction);
   const normalizedRuntime = normalizeWhitespace(runtimeMain);
+  const normalizedRocketMq = normalizeWhitespace(
+    `${runtimeMain}\n${runtimeVariables}`,
+  );
   for (const requiredControl of [
     "cpu = 2",
     "disk_size = 10240",
@@ -340,7 +355,7 @@ export function checkInfraPolicy(rootDirectory) {
     'InstanceNetwork = "PrivateNetwork"',
     'Offset = "CONSUME_FROM_LAST_OFFSET"',
     'mode = "event-streaming"',
-    'errorsTolerance = "NONE"',
+    'errorsTolerance = var.rocketmq.activation_status == "active" ? "ALL" : "NONE"',
     'PushRetryStrategy = "BACKOFF_RETRY"',
     "CountBasedWindow = 1",
     "TimeBasedWindow = 0",
@@ -348,6 +363,83 @@ export function checkInfraPolicy(rootDirectory) {
     if (!normalizedJobs.includes(requiredControl)) {
       errors.push(
         `jobs Function Compute RocketMQ composition is missing required control: ${requiredControl}`,
+      );
+    }
+  }
+  for (const requiredRocketMqControl of [
+    'topic_name = "reflo-dev-audio-generate-v1-dlq"',
+    'consumer_group_id = "reflo-dev-audio-generate-v1-dlq-operator"',
+    'message_type = "NORMAL"',
+    "message_retention_time = var.rocketmq.message_retention_hours",
+    "var.rocketmq.message_retention_hours == 24",
+    "deadLetterQueue = {",
+    'Arn = "acs:mq:${data.alicloud_regions.current.regions[0].id}:${var.fc_account_id}:/instances/${alicloud_rocketmq_instance.events.id}/topic/${alicloud_rocketmq_topic.audio_generate_dlq.topic_name}"',
+    'Network = "PrivateNetwork"',
+    "VpcId = var.vpc_id",
+    "VSwitchIds = [var.vswitch_ids.application]",
+    "SecurityGroupId = var.security_group_ids.application",
+    'count = var.rocketmq.activation_status == "active" ? 1 : 0',
+  ]) {
+    if (!normalizedRocketMq.includes(requiredRocketMqControl)) {
+      errors.push(
+        `RocketMQ DLQ and activation boundary is missing required control: ${requiredRocketMqControl}`,
+      );
+    }
+  }
+  for (const requiredRelayControl of [
+    "name: reflo-relay",
+    "name: reflo-redrive",
+    "EnvironmentFile=/etc/reflo/relay.env",
+    "ExecStart=/usr/bin/node /opt/reflo/current/dist/outbox-relay-main.js",
+    "User=reflo-relay",
+    "TimeoutStopSec=15s",
+    'permissions: "0700"',
+    "/opt/reflo/current/dist/dlq-redrive-main.js",
+    "--uid=reflo-redrive",
+    "--property=EnvironmentFile=/etc/reflo/redrive.env",
+  ]) {
+    if (!apiCloudInit.includes(requiredRelayControl)) {
+      errors.push(
+        `supervised relay and operator boundary is missing required control: ${requiredRelayControl}`,
+      );
+    }
+  }
+  for (const requiredRelayEnvironment of [
+    "REFLO_OUTBOX_RELAY_BATCH_SIZE",
+    "REFLO_OUTBOX_RELAY_LEASE_MS",
+    "REFLO_OUTBOX_RELAY_POLL_MS",
+    "REFLO_ROCKETMQ_PRIVATE_ENDPOINT",
+    "REFLO_ROCKETMQ_NAMESPACE",
+    "REFLO_ROCKETMQ_DLQ_OPERATOR_GROUP",
+    "REFLO_ROCKETMQ_DLQ_TOPIC",
+    "postgresql://reflo_relay:",
+    "postgresql://reflo_redrive:",
+    "REFLO_LOCAL_RELAY_RDS_PASSWORD",
+    "REFLO_LOCAL_REDRIVE_RDS_PASSWORD",
+  ]) {
+    if (!normalizedRuntime.includes(requiredRelayEnvironment)) {
+      errors.push(
+        `RocketMQ runtime composition is missing required environment control: ${requiredRelayEnvironment}`,
+      );
+    }
+  }
+  for (const requiredAlertControl of [
+    "reflo-rocketmq-operational-alert-v1",
+    "dev/media.audio.generate/v1",
+    "configuration_drift",
+    "dlq_backlog",
+    "dlq_handoff",
+    "oldest_record_age",
+    "operator_retry_guard",
+    "validator_rejection",
+    "ambiguous_publication",
+  ]) {
+    if (
+      !rocketMqAlertSource.includes(requiredAlertControl) ||
+      !rocketMqRuntimeSources.includes("emitRocketMqOperationalAlert")
+    ) {
+      errors.push(
+        `RocketMQ structured operational alerts are missing required control: ${requiredAlertControl}`,
       );
     }
   }
@@ -467,7 +559,9 @@ export function checkInfraPolicy(rootDirectory) {
     "reflo-protected-dev-apply",
     "tofu -chdir=infra/environments/dev plan",
     "tofu -chdir=infra/environments/dev apply",
-    'rm -f "$plan_path"',
+    "scripts/summarize-tofu-plan.mjs",
+    "scripts/wait-for-dev-plan-approval.mjs",
+    'rm -f "$REFLO_DEV_PLAN_PATH"',
   ]) {
     if (!deployWorkflow.includes(requiredControl)) {
       errors.push(

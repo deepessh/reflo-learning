@@ -16,36 +16,40 @@ Confirm issue #199 contains owner-authored approval for:
 4. the dedicated staff hostname boundary, if CDN domains will be enabled; and
 5. exactly one dedicated Telegram or email destination.
 
-The current conservative proposal is USD 40/month for the session-isolated
-parser, USD 160/month for Model Studio, and USD 4.75/month for an EventBridge
-stream only if pay-by-event metering is confirmed. These are planning
-allowances, not authorization. Retaining the other previously approved BOM
-lines at USD 196.39/month produces a revised total of USD 401.14/month, which
-exceeds the existing USD 300 ceiling by USD 101.14. Do not silently reduce the
-model usage bound, reallocate approved allowances, or exceed the ceiling. A new
-owner verdict must approve a lower exact service/usage BOM or a higher ceiling
-before any dev plan.
+The owner-approved conservative BOM is USD 401.14/month under a USD 425
+ceiling, with a USD 300 alert and a freeze/teardown review at USD 375. It
+includes the bounded parser, Model Studio, and pay-by-event EventBridge
+allowances recorded on issue #199. Do not reduce, reallocate, or exceed those
+approved bounds silently; any changed class, quantity, metering mode, or
+ceiling requires a new owner verdict before a dev plan.
 
 Singapore `ap-southeast-1` and dev are already the only region/environment
 accepted by this root. Staging, public access, external learners, external
 uploads, external recipients, KMS Secrets Manager, SLS, and Alibaba Container
 Registry remain excluded.
 
-Before requesting a dev plan, resolve these incomplete audio guarantees on
-issue #199:
+ADRs 0045 and 0046 authorize the implementation of the transactional-outbox
+relay, dedicated EventBridge DLQ, and audited operator redrive. The first full
+dev plan must keep
+`approved_runtime_configuration.rocketmq.activation_status=blocked`. That
+creates the private topic and operator group while keeping
+`ErrorsTolerance: NONE` and the relay disabled. After the exact-artifact
+Singapore relay/DLQ proof passes, a new reviewed plan may set the value to
+`active`. Any failed proof retains the blocked state.
 
-1. the transactional outbox still needs an authorized publisher that sends its
-   bounded audio messages to the private RocketMQ topic; and
-2. the current trigger blocks after bounded retries instead of discarding a
-   failed message, but a separately approved dead-letter destination is still
-   required for the accepted end-state; and
-3. the content-addressed Piper layer remains forced to `blocked`. Do not
-   activate or claim the dual-route audio release gate without ADR 0011's
-   legal, security, target-capacity, and listening evidence.
+The RocketMQ alert boundary is the existing ECS system journal. The exact
+artifact emits the closed `reflo-rocketmq-operational-alert-v1` schema and no
+payload, application identity, owner identifier, account or broker identifier,
+private endpoint, or raw diagnostic. Before activation, the Singapore proof
+must trigger and retrieve DLQ handoff/backlog, oldest-record age, operator
+retry-guard, validator-rejection, ambiguous-publication, publication-failure,
+and configuration-drift alerts. Missing or unsafe journal evidence keeps
+activation blocked. Do not activate ARMS, Managed Service for Prometheus, SLS,
+or the unapproved `AliyunServiceRoleForOns` as a shortcut.
 
-Do not plan or apply the dev root while either of the first two items remains
-unresolved. The third item is an activation and claim prohibition, not a
-Demo Day deployment prerequisite under ADR 0042.
+The content-addressed Piper layer remains forced to `blocked`. Do not activate
+or claim the dual-route audio release gate without ADR 0011's legal, security,
+target-capacity, and listening evidence.
 
 ## 2. Prepare the GitHub `dev` environment
 
@@ -83,9 +87,12 @@ Environment secret:
 
 The protected runtime secrets must include `REFLO_QWEN_TTS_API_KEY` and
 `REFLO_QWEN_TTS_DRIFT_CANARY_PASSED=true` for the jobs function, in addition to
-the already approved database, messaging, delivery, and tracing values.
-Configure only secret values in this object; the root derives its non-secret
-bucket, region, topic, timeout, and database connection values.
+the already approved database, messaging, delivery, and tracing values. Supply
+distinct 48-character hexadecimal `rds_relay_password` and
+`rds_redrive_password` values; the migration creates function-only database
+roles for those isolated processes. Configure only secret values in this
+object; the root derives its non-secret bucket, region, topic, timeout, and
+database connection values.
 
 Do not configure an Alibaba AccessKey. Do not put account IDs, role/provider
 ARNs, bucket names, hostnames, messaging identifiers, or secret JSON in issues
@@ -165,11 +172,17 @@ From Actions, run **Deploy protected dev** on `main` with:
 The `dev` environment review happens before the job receives secrets or an
 OIDC token. The job checks out only that commit, verifies the exact OpenTofu
 download, packages artifacts, requests a short-lived GitHub OIDC token, and
-creates one fresh saved plan on encrypted ephemeral runner storage. It records
-only the plan SHA-256 and sanitized metadata, applies that exact file under the
-environment concurrency lock, deletes it, and requires a no-change follow-up
-plan. Any changed configuration, artifact identity, commit, BOM, or approval
-reference requires a new workflow dispatch and environment review.
+creates one fresh saved plan on encrypted ephemeral runner storage. It writes
+only resource actions and logical addresses to the job summary.
+
+After reviewing that bounded summary, the repository owner must post the exact
+standalone approval marker shown by the running job to issue #199. The marker
+binds the merged commit and saved-plan SHA-256 and must be newer than the plan;
+an advance approval cannot pass. The same job re-verifies the digest, applies
+that exact file under the environment concurrency lock, deletes it, and
+requires a no-change follow-up plan. Any changed configuration, artifact
+identity, commit, BOM, or approval reference requires a new workflow dispatch,
+fresh plan, and fresh post-plan owner approval.
 
 Do not copy the console plan, raw state, runner files, hostnames, destination
 identifiers, or secrets into GitHub.

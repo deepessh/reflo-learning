@@ -45,6 +45,30 @@ locals {
     endpoint.endpoint_url
     if endpoint.endpoint_type == "TCP_VPC"
   ])
+  relay_environment = {
+    DATABASE_URL                      = "postgresql://reflo_relay:${urlencode(var.rds_relay_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_OUTBOX_RELAY_BATCH_SIZE     = "5"
+    REFLO_OUTBOX_RELAY_LEASE_MS       = "30000"
+    REFLO_OUTBOX_RELAY_LEASE_OWNER    = "reflo-dev-relay-01"
+    REFLO_OUTBOX_RELAY_POLL_MS        = "500"
+    REFLO_ROCKETMQ_JOBS_TOPIC         = alicloud_rocketmq_topic.jobs.topic_name
+    REFLO_ROCKETMQ_NAMESPACE          = alicloud_rocketmq_instance.events.id
+    REFLO_ROCKETMQ_PRIVATE_ENDPOINT   = local.rocketmq_vpc_endpoint
+    REFLO_ROCKETMQ_REQUEST_TIMEOUT_MS = "3000"
+  }
+  redrive_environment = {
+    DATABASE_URL                      = "postgresql://reflo_redrive:${urlencode(var.rds_redrive_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_REDRIVE_AWAIT_MS            = "1000"
+    REFLO_REDRIVE_INVISIBLE_MS        = "30000"
+    REFLO_REDRIVE_LEASE_MS            = "30000"
+    REFLO_REDRIVE_LEASE_OWNER         = "reflo-dev-redrive-01"
+    REFLO_ROCKETMQ_DLQ_OPERATOR_GROUP = alicloud_rocketmq_consumer_group.audio_generate_dlq_operator.consumer_group_id
+    REFLO_ROCKETMQ_DLQ_TOPIC          = alicloud_rocketmq_topic.audio_generate_dlq.topic_name
+    REFLO_ROCKETMQ_JOBS_TOPIC         = alicloud_rocketmq_topic.jobs.topic_name
+    REFLO_ROCKETMQ_NAMESPACE          = alicloud_rocketmq_instance.events.id
+    REFLO_ROCKETMQ_PRIVATE_ENDPOINT   = local.rocketmq_vpc_endpoint
+    REFLO_ROCKETMQ_REQUEST_TIMEOUT_MS = "3000"
+  }
 }
 
 resource "alicloud_ram_role" "api" {
@@ -144,11 +168,13 @@ locals {
     REFLO_VECTOR_DATABASE_URL                    = "postgresql://reflo_vector_api:${urlencode(var.analyticdb_runtime_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
   })
   migration_environment = {
-    DATABASE_URL                    = "postgresql://reflo_admin:${urlencode(var.rds_admin_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
-    REFLO_ENV                       = "dev"
-    REFLO_LOCAL_API_RDS_PASSWORD    = var.rds_runtime_password
-    REFLO_LOCAL_API_VECTOR_PASSWORD = var.analyticdb_runtime_password
-    REFLO_VECTOR_DATABASE_URL       = "postgresql://reflo_vector:${urlencode(var.analyticdb_account_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
+    DATABASE_URL                     = "postgresql://reflo_admin:${urlencode(var.rds_admin_password)}@${alicloud_db_instance.postgres.connection_string}:5432/reflo?sslmode=require"
+    REFLO_ENV                        = "dev"
+    REFLO_LOCAL_API_RDS_PASSWORD     = var.rds_runtime_password
+    REFLO_LOCAL_REDRIVE_RDS_PASSWORD = var.rds_redrive_password
+    REFLO_LOCAL_RELAY_RDS_PASSWORD   = var.rds_relay_password
+    REFLO_LOCAL_API_VECTOR_PASSWORD  = var.analyticdb_runtime_password
+    REFLO_VECTOR_DATABASE_URL        = "postgresql://reflo_vector:${urlencode(var.analyticdb_account_password)}@${alicloud_gpdb_instance.vectors.connection_string}:${alicloud_gpdb_instance.vectors.port}/reflo_vectors?sslmode=require"
   }
 }
 
@@ -186,6 +212,20 @@ resource "alicloud_instance" "api" {
       join("\n", [
         for key in sort(keys(local.migration_environment)) :
         "${key}=${jsonencode(local.migration_environment[key])}"
+      ]),
+      "\n",
+    ]))
+    redrive_environment_b64 = base64encode(join("", [
+      join("\n", [
+        for key in sort(keys(local.redrive_environment)) :
+        "${key}=${jsonencode(local.redrive_environment[key])}"
+      ]),
+      "\n",
+    ]))
+    relay_environment_b64 = base64encode(join("", [
+      join("\n", [
+        for key in sort(keys(local.relay_environment)) :
+        "${key}=${jsonencode(local.relay_environment[key])}"
       ]),
       "\n",
     ]))
@@ -257,6 +297,30 @@ resource "alicloud_ecs_command" "start_api" {
 
 resource "alicloud_ecs_invocation" "start_api" {
   command_id  = alicloud_ecs_command.start_api.id
+  instance_id = [alicloud_instance.api.id]
+  repeat_mode = "Once"
+
+  depends_on = [alicloud_ecs_invocation.migrate]
+}
+
+resource "alicloud_ecs_command" "start_relay" {
+  count       = var.rocketmq.activation_status == "active" ? 1 : 0
+  name        = "${var.name_prefix}-start-relay-${substr(var.artifact_identity.api_archive_sha256, 0, 12)}"
+  description = "Activate the separately supervised relay only after the accepted Singapore proof"
+  type        = "RunShellScript"
+  timeout     = 120
+  working_dir = "/opt/reflo/current"
+  command_content = base64encode(<<-SCRIPT
+    #!/usr/bin/env bash
+    set -euo pipefail
+    systemctl enable --now reflo-relay.service
+  SCRIPT
+  )
+}
+
+resource "alicloud_ecs_invocation" "start_relay" {
+  count       = var.rocketmq.activation_status == "active" ? 1 : 0
+  command_id  = alicloud_ecs_command.start_relay[0].id
   instance_id = [alicloud_instance.api.id]
   repeat_mode = "Once"
 
@@ -360,6 +424,12 @@ resource "alicloud_rocketmq_topic" "jobs" {
   topic_name   = "reflo-jobs"
 }
 
+resource "alicloud_rocketmq_topic" "audio_generate_dlq" {
+  instance_id  = alicloud_rocketmq_instance.events.id
+  message_type = "NORMAL"
+  topic_name   = "reflo-dev-audio-generate-v1-dlq"
+}
+
 resource "alicloud_rocketmq_consumer_group" "jobs" {
   consumer_group_id   = "reflo-jobs"
   instance_id         = alicloud_rocketmq_instance.events.id
@@ -367,6 +437,16 @@ resource "alicloud_rocketmq_consumer_group" "jobs" {
   consume_retry_policy {
     retry_policy    = "DefaultRetryPolicy"
     max_retry_times = 3
+  }
+}
+
+resource "alicloud_rocketmq_consumer_group" "audio_generate_dlq_operator" {
+  consumer_group_id   = "reflo-dev-audio-generate-v1-dlq-operator"
+  instance_id         = alicloud_rocketmq_instance.events.id
+  delivery_order_type = "Concurrently"
+  consume_retry_policy {
+    retry_policy    = "DefaultRetryPolicy"
+    max_retry_times = 1
   }
 }
 
@@ -549,9 +629,16 @@ resource "alicloud_fcv3_trigger" "jobs" {
     }
     runOptions = {
       mode            = "event-streaming"
-      errorsTolerance = "NONE"
+      errorsTolerance = var.rocketmq.activation_status == "active" ? "ALL" : "NONE"
       retryStrategy = {
         PushRetryStrategy = "BACKOFF_RETRY"
+      }
+      deadLetterQueue = {
+        Arn             = "acs:mq:${data.alicloud_regions.current.regions[0].id}:${var.fc_account_id}:/instances/${alicloud_rocketmq_instance.events.id}/topic/${alicloud_rocketmq_topic.audio_generate_dlq.topic_name}"
+        Network         = "PrivateNetwork"
+        VpcId           = var.vpc_id
+        VSwitchIds      = [var.vswitch_ids.application]
+        SecurityGroupId = var.security_group_ids.application
       }
       batchWindow = {
         CountBasedWindow = 1

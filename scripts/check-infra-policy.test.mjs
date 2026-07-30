@@ -214,6 +214,66 @@ test("infrastructure policy rejects incomplete or mutable API parser client wiri
   });
 });
 
+test("infrastructure policy rejects RocketMQ DLQ, retention, and relay activation drift", () => {
+  withInfrastructureFixture((fixture) => {
+    const runtimePath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/main.tf",
+    );
+    const altered = readFileSync(runtimePath, "utf8")
+      .replace(
+        'topic_name   = "reflo-dev-audio-generate-v1-dlq"',
+        'topic_name   = "reflo-jobs"',
+      )
+      .replace(
+        'Network         = "PrivateNetwork"',
+        'Network         = "PublicNetwork"',
+      )
+      .replace(
+        'errorsTolerance = var.rocketmq.activation_status == "active" ? "ALL" : "NONE"',
+        'errorsTolerance = "ALL"',
+      );
+    writeFileSync(runtimePath, altered);
+
+    const variablesPath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/variables.tf",
+    );
+    writeFileSync(
+      variablesPath,
+      readFileSync(variablesPath, "utf8").replace(
+        "var.rocketmq.message_retention_hours == 24",
+        "var.rocketmq.message_retention_hours <= 720",
+      ),
+    );
+
+    const cloudInitPath = path.join(
+      fixture,
+      "infra/modules/demo-runtime/templates/api-cloud-init.yaml.tftpl",
+    );
+    writeFileSync(
+      cloudInitPath,
+      readFileSync(cloudInitPath, "utf8").replace(
+        "User=reflo-relay",
+        "User=reflo",
+      ),
+    );
+    const alertPath = path.join(fixture, "apps/api/src/rocketmq-alert.ts");
+    writeFileSync(
+      alertPath,
+      readFileSync(alertPath, "utf8").replaceAll(
+        "validator_rejection",
+        "raw_provider_payload",
+      ),
+    );
+
+    const errors = checkInfraPolicy(fixture).join("\n");
+    assert.match(errors, /RocketMQ DLQ and activation boundary/);
+    assert.match(errors, /supervised relay and operator boundary/);
+    assert.match(errors, /structured operational alerts/);
+  });
+});
+
 test("infrastructure policy rejects mutable or incomplete parser artifacts", () => {
   withInfrastructureFixture((fixture) => {
     const variablesPath = path.join(
@@ -278,6 +338,17 @@ function withInfrastructureFixture(run) {
     cpSync(path.join(root, "scripts"), path.join(fixture, "scripts"), {
       recursive: true,
     });
+    mkdirSync(path.join(fixture, "apps/api/src"), { recursive: true });
+    for (const source of [
+      "dlq-redrive-main.ts",
+      "outbox-relay-main.ts",
+      "rocketmq-alert.ts",
+    ]) {
+      cpSync(
+        path.join(root, "apps/api/src", source),
+        path.join(fixture, "apps/api/src", source),
+      );
+    }
     run(fixture);
   } finally {
     rmSync(fixture, { recursive: true, force: true });

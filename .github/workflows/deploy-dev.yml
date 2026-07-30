@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: read
 
 concurrency:
   group: reflo-protected-dev-apply
@@ -25,7 +26,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment: dev
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
@@ -113,11 +114,12 @@ jobs:
             -backend-config="tablestore_endpoint=$REFLO_BACKEND_TABLESTORE_ENDPOINT" \
             -backend-config="tablestore_table=$REFLO_BACKEND_TABLESTORE_TABLE"
           tofu -chdir=infra/environments/dev validate
-      - name: Create and apply one fresh exact plan
+      - name: Create one fresh exact plan and bounded review
         run: |
           plan_path="$RUNNER_TEMP/reflo-dev.tfplan"
           plan_log="$RUNNER_TEMP/reflo-dev-plan.log"
-          apply_log="$RUNNER_TEMP/reflo-dev-apply.log"
+          plan_json="$RUNNER_TEMP/reflo-dev-plan.json"
+          plan_summary="$RUNNER_TEMP/reflo-dev-plan-summary.md"
           if ! tofu -chdir=infra/environments/dev plan \
             -lock=true \
             -var-file="$GITHUB_WORKSPACE/.artifacts/deployment/deployment.tfvars.json" \
@@ -126,14 +128,48 @@ jobs:
             exit 1
           fi
           plan_digest="$(sha256sum "$plan_path" | cut -d' ' -f1)"
+          plan_generated_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          tofu -chdir=infra/environments/dev show -json "$plan_path" >"$plan_json"
+          node scripts/summarize-tofu-plan.mjs "$plan_json" >"$plan_summary"
+          rm -f "$plan_json"
+          cat "$plan_summary" >>"$GITHUB_STEP_SUMMARY"
+          cat >>"$GITHUB_STEP_SUMMARY" <<EOF
+
+          To approve this exact plan after reviewing the summary, the repository
+          owner must add this standalone comment to issue #199:
+
+          \`\`\`
+          <!-- reflo-dev-plan-approval:v1
+          commit: $GITHUB_SHA
+          plan-sha256: $plan_digest
+          decision: approved
+          -->
+          \`\`\`
+          EOF
           echo "::notice title=Sanitized dev plan identity::sha256:$plan_digest commit:$GITHUB_SHA approval:${{ inputs.approval_reference }}"
+          {
+            echo "REFLO_DEV_PLAN_PATH=$plan_path"
+            echo "REFLO_PLAN_COMMIT=$GITHUB_SHA"
+            echo "REFLO_PLAN_DIGEST=$plan_digest"
+            echo "REFLO_PLAN_GENERATED_AT=$plan_generated_at"
+          } >>"$GITHUB_ENV"
+          rm -f "$plan_log" "$plan_summary"
+      - name: Wait for exact post-plan owner approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REFLO_PLAN_APPROVAL_WAIT_SECONDS: "3600"
+        run: node scripts/wait-for-dev-plan-approval.mjs
+      - name: Apply only the exact owner-approved plan
+        run: |
+          apply_log="$RUNNER_TEMP/reflo-dev-apply.log"
+          echo "$REFLO_PLAN_DIGEST  $REFLO_DEV_PLAN_PATH" | sha256sum --check --strict
           if ! tofu -chdir=infra/environments/dev apply \
             -lock=true \
-            "$plan_path" >"$apply_log" 2>&1; then
+            "$REFLO_DEV_PLAN_PATH" >"$apply_log" 2>&1; then
             echo "::error::Protected dev apply failed; inspect only on the ephemeral runner."
             exit 1
           fi
-          rm -f "$plan_path" "$plan_log" "$apply_log"
+          rm -f "$REFLO_DEV_PLAN_PATH" "$apply_log"
       - name: Verify post-apply convergence
         run: |
           convergence_log="$RUNNER_TEMP/reflo-dev-convergence.log"
@@ -155,5 +191,6 @@ jobs:
         run: |
           rm -f "$REFLO_OIDC_TOKEN_FILE"
           find "$RUNNER_TEMP" -maxdepth 1 -type f \
-            \( -name 'reflo-dev.tfplan' -o -name 'reflo-dev-*.log' \) \
+            \( -name 'reflo-dev.tfplan' -o -name 'reflo-dev-plan.json' -o \
+               -name 'reflo-dev-plan-summary.md' -o -name 'reflo-dev-*.log' \) \
             -delete

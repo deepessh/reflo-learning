@@ -78,6 +78,8 @@ module "runtime" {
   api_tls_private_key         = var.runtime_secrets.api_tls_private_key
   rds                         = var.approved_runtime_configuration.rds
   rds_admin_password          = var.runtime_secrets.rds_admin_password
+  rds_redrive_password        = var.runtime_secrets.rds_redrive_password
+  rds_relay_password          = var.runtime_secrets.rds_relay_password
   rds_runtime_password        = var.runtime_secrets.rds_runtime_password
   analyticdb                  = var.approved_runtime_configuration.analyticdb
   analyticdb_account_password = var.runtime_secrets.analyticdb_account_password

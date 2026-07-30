@@ -119,6 +119,7 @@ variable "approved_runtime_configuration" {
       storage_size_gib           = number
     })
     rocketmq = object({
+      activation_status       = string
       message_retention_hours = number
       msg_process_spec        = string
       send_receive_ratio      = string
@@ -136,6 +137,17 @@ variable "approved_runtime_configuration" {
       web_domain_name      = optional(string)
     })
   })
+
+  validation {
+    condition = (
+      contains(
+        ["blocked", "active"],
+        var.approved_runtime_configuration.rocketmq.activation_status,
+      ) &&
+      var.approved_runtime_configuration.rocketmq.message_retention_hours == 24
+    )
+    error_message = "The approved RocketMQ configuration must use 24-hour retention and an explicit blocked or active proof state."
+  }
 }
 
 variable "deployment_manifest" {
@@ -228,6 +240,8 @@ variable "runtime_secrets" {
     }), {})
     function_environment = map(string)
     rds_admin_password   = string
+    rds_redrive_password = string
+    rds_relay_password   = string
     rds_runtime_password = string
   })
   sensitive = true

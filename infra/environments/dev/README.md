@@ -9,8 +9,11 @@ This issue #199 root declares the minimum bounded Alibaba Cloud dev topology:
   parser with no runtime role, VPC attachment, mount, trigger, or Internet
   access;
 - RDS PostgreSQL, AnalyticDB for PostgreSQL, and private RocketMQ;
-- private-VPC Function Compute jobs with zero provisioned concurrency and an
-  EventBridge-managed, synchronous, one-message RocketMQ trigger;
+- private-VPC Function Compute jobs with zero provisioned concurrency, a
+  dedicated 24-hour RocketMQ EventBridge DLQ, and a one-message trigger that
+  stays fail-closed until its Singapore activation proof;
+- one separately supervised outbox relay on the API ECS host and one
+  non-daemon, operator-only audited DLQ redrive command;
 - optional overseas web and private-delivery CDN domains, enabled only after
   the owner supplies the approved hostname boundary; and
 - action-scoped ECS, Function Compute, and deployment identities.
@@ -25,13 +28,27 @@ identity, hostname, messaging destination, plan, or apply.
 
 The managed RocketMQ trigger introduces a separately billed EventBridge event
 stream. It must use the owner-approved metering mode and allowance, and its
-service-linked roles must be activated before the protected plan. The dev apply
-also remains blocked until issue #199 records an authorized transactional
-outbox publisher and dead-letter destination. The immutable Piper layer is
-packaged with the jobs function but forced to `blocked`; a later activation
-still requires ADR 0011's legal, security, capacity, and listening evidence.
-The revised conservative BOM is USD 401.14/month, so it also requires an
-owner-approved cost reduction or a new ceiling before planning.
+service-linked roles must be activated before the protected plan. The initial
+dev configuration must set
+`approved_runtime_configuration.rocketmq.activation_status` to `blocked`.
+Only a separately reviewed exact plan after ADRs 0045 and 0046's Singapore
+proof may set it to `active`, which enables the relay and changes the trigger
+from `ErrorsTolerance: NONE` to `ALL` with the exact private DLQ. The immutable
+Piper layer is packaged with the jobs function but forced to `blocked`; a
+later activation still requires ADR 0011's legal, security, capacity, and
+listening evidence.
+
+RocketMQ operational alerts use the existing ECS `journald` boundary rather
+than activating SLS, ARMS, Managed Service for Prometheus, or an additional
+service-linked role. Relay and operator processes emit only the closed
+`reflo-rocketmq-operational-alert-v1` schema for DLQ handoff/backlog,
+oldest-record age, retry guard, validator rejection, ambiguous publication,
+publication failure, and configuration drift. The Singapore proof must
+exercise every alert, verify its bounded safe fields, and verify the protected
+operator can retrieve it from the exact service journal before activation.
+
+The owner-approved conservative BOM is USD 401.14/month under a USD 425
+ceiling, with a USD 300 alert and a freeze/teardown review at USD 375.
 
 The partial OSS backend receives `bucket`, `region`,
 `tablestore_endpoint`, and `tablestore_table` only from the protected workflow.

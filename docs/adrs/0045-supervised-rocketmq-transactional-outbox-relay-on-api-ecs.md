@@ -12,15 +12,15 @@ ownership:
 authorization:
   decider: "@deepessh, repository owner and named architecture decider for issue #208"
   approval_basis: >-
-    The owner reviewed the provider documentation, exact published client
-    source, repository constraints, and crash-window analysis in the linked
-    evidence comment, then explicitly approved option 1 with every recorded
-    constraint.
+    owner review of the proposal and the evidence/constraints recorded in
+    https://github.com/deepessh/reflo-learning/issues/208#issuecomment-5112951264,
+    followed by the explicit instruction: “Approve option 1 for #208 with the
+    constraints in the evidence comment.”
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/208
   verdict_comment: https://github.com/deepessh/reflo-learning/issues/208#issuecomment-5134476836
-  record_pr: RECORD_PR_URL
+  record_pr: https://github.com/deepessh/reflo-learning/pull/210
 supersedes: []
 superseded_by: null
 deprecation: null

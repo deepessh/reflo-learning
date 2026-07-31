@@ -12,10 +12,8 @@ ownership:
 authorization:
   decider: "@deepessh, repository owner and founding-team product and architecture authority"
   approval_basis: >-
-    On 2026-07-31 the owner approved option 2 for Demo Day only and directed
-    Codex to pick the decision issue: use the existing local Compose profile
-    as the primary operator-hosted connected Demo Day runtime while preserving
-    ADR 0034 and isolating Alibaba resource disposition in issue #213.
+    The owner explicitly instructed Codex in the active task to pick this issue
+    and stated, ‘I approve the ADR.’
 provenance:
   kind: github-decision
   issue: https://github.com/deepessh/reflo-learning/issues/214

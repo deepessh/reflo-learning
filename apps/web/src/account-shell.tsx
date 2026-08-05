@@ -676,10 +676,7 @@ export function ErrorState({
   const previousRetryState = useRef(retryState);
 
   useEffect(() => {
-    if (
-      previousRetryState.current === "pending" &&
-      retryState !== "pending"
-    ) {
+    if (previousRetryState.current === "pending" && retryState !== "pending") {
       retryButton.current?.focus();
     }
     previousRetryState.current = retryState;

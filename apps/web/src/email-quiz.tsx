@@ -7,6 +7,11 @@ import Link from "next/link";
 
 import type { EmailQuizPreview } from "@reflo/delivery";
 
+import {
+  browserApiOrigin,
+  browserCanonicalPageUrl,
+} from "./browser-api-origin";
+
 interface EmailQuizProps {
   readonly apiOrigin: string;
   readonly appName: string;
@@ -32,6 +37,8 @@ interface SubmissionResult {
 }
 
 export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
+  const resolvedApiOrigin = browserApiOrigin(apiOrigin);
+  const canonicalPageUrl = browserCanonicalPageUrl(apiOrigin);
   const token = useRef<string | null>(null);
   const [screen, setScreen] = useState<QuizScreen>("loading");
   const [quiz, setQuiz] = useState<EmailQuizPreview | null>(null);
@@ -39,6 +46,10 @@ export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
   const [results, setResults] = useState<readonly SubmissionResult[]>([]);
 
   useEffect(() => {
+    if (canonicalPageUrl !== null) {
+      window.location.replace(canonicalPageUrl);
+      return;
+    }
     const linkToken = new URLSearchParams(window.location.search).get("token");
     token.current = linkToken;
     if (linkToken === null) {
@@ -48,7 +59,7 @@ export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
     window.history.replaceState(null, "", "/review");
     const controller = new AbortController();
     void fetch(
-      `${apiOrigin}/v1/email-quiz?token=${encodeURIComponent(linkToken)}`,
+      `${resolvedApiOrigin}/v1/email-quiz?token=${encodeURIComponent(linkToken)}`,
       {
         credentials: "include",
         signal: controller.signal,
@@ -82,7 +93,7 @@ export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
       },
     );
     return () => controller.abort();
-  }, [apiOrigin]);
+  }, [canonicalPageUrl, resolvedApiOrigin]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -97,7 +108,7 @@ export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
     }
     setScreen("submitting");
     try {
-      const csrfResponse = await fetch(`${apiOrigin}/v1/csrf-token`, {
+      const csrfResponse = await fetch(`${resolvedApiOrigin}/v1/csrf-token`, {
         credentials: "include",
       });
       if (csrfResponse.status === 401) {
@@ -110,21 +121,24 @@ export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
       const { csrfToken } = (await csrfResponse.json()) as {
         readonly csrfToken: string;
       };
-      const response = await fetch(`${apiOrigin}/v1/email-quiz/submit`, {
-        body: JSON.stringify({
-          answers: quiz.questions.map((question) => ({
-            answer: answers[question.deliveryItemId],
-            deliveryItemId: question.deliveryItemId,
-          })),
-          token: token.current,
-        }),
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-          "x-reflo-csrf": csrfToken,
+      const response = await fetch(
+        `${resolvedApiOrigin}/v1/email-quiz/submit`,
+        {
+          body: JSON.stringify({
+            answers: quiz.questions.map((question) => ({
+              answer: answers[question.deliveryItemId],
+              deliveryItemId: question.deliveryItemId,
+            })),
+            token: token.current,
+          }),
+          credentials: "include",
+          headers: {
+            "content-type": "application/json",
+            "x-reflo-csrf": csrfToken,
+          },
+          method: "POST",
         },
-        method: "POST",
-      });
+      );
       if (response.status === 401) {
         setScreen("authentication-required");
         return;

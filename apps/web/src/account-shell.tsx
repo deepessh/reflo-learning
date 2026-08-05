@@ -34,6 +34,12 @@ import {
   browserApiOrigin,
   browserCanonicalPageUrl,
 } from "./browser-api-origin";
+import {
+  browserCourseId,
+  courseIdToRestore,
+  pushBrowserCourse,
+  replaceBrowserCourse,
+} from "./course-selection-navigation";
 import { DemoUploadPanel } from "./demo-upload-panel";
 import { DeliveryPreferences } from "./delivery-preferences";
 import { FlowBStudy } from "./flow-b-study";
@@ -80,6 +86,7 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
   const [accountStatusMessage, setAccountStatusMessage] = useState(
     accountConnectionStatus("initial", "pending"),
   );
+  const accountRequestId = useRef(0);
   const progressRequestId = useRef(0);
   const retryPending = useRef(false);
 
@@ -124,6 +131,7 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
       preferredCourseId?: string,
       requestKind: AccountRequestKind = "refresh",
     ) => {
+      const requestId = ++accountRequestId.current;
       try {
         const [libraryResponse, historyResponse] = await Promise.all([
           fetch(`${resolvedApiOrigin}/v1/library`, {
@@ -133,6 +141,9 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
             credentials: "include",
           }),
         ]);
+        if (requestId !== accountRequestId.current) {
+          return;
+        }
         if (libraryResponse.status === 401 || historyResponse.status === 401) {
           setScreen("signed-out");
           setRetryState("idle");
@@ -150,12 +161,19 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
         const history = (await historyResponse.json()) as {
           sessions: readonly SessionHistoryItem[];
         };
+        if (requestId !== accountRequestId.current) {
+          return;
+        }
         setCourses(library.courses);
         setSessions(history.sessions);
-        const initialCourse =
-          library.courses.find(
-            (course) => course.courseId === preferredCourseId,
-          ) ?? library.courses[0];
+        const initialCourseId = courseIdToRestore(
+          library.courses.map((course) => course.courseId),
+          preferredCourseId,
+        );
+        const initialCourse = library.courses.find(
+          (course) => course.courseId === initialCourseId,
+        );
+        replaceBrowserCourse(initialCourse?.courseId ?? null);
         setSelectedCourseId(initialCourse?.courseId ?? null);
         if (initialCourse === undefined) {
           progressRequestId.current += 1;
@@ -170,11 +188,13 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
           accountConnectionStatus(requestKind, "success"),
         );
       } catch {
-        setScreen("error");
-        setRetryState(requestKind === "retry" ? "failed" : "idle");
-        setAccountStatusMessage(
-          accountConnectionStatus(requestKind, "failure"),
-        );
+        if (requestId === accountRequestId.current) {
+          setScreen("error");
+          setRetryState(requestKind === "retry" ? "failed" : "idle");
+          setAccountStatusMessage(
+            accountConnectionStatus(requestKind, "failure"),
+          );
+        }
       }
     },
     [loadProgress, resolvedApiOrigin],
@@ -186,11 +206,19 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
       return;
     }
     const timer = window.setTimeout(
-      () => void loadAccount(undefined, "initial"),
+      () => void loadAccount(browserCourseId() ?? undefined, "initial"),
       0,
     );
     return () => window.clearTimeout(timer);
   }, [canonicalPageUrl, loadAccount]);
+
+  useEffect(() => {
+    function restoreBrowserCourse() {
+      void loadAccount(browserCourseId() ?? undefined, "refresh");
+    }
+    window.addEventListener("popstate", restoreBrowserCourse);
+    return () => window.removeEventListener("popstate", restoreBrowserCourse);
+  }, [loadAccount]);
 
   async function retryAccount() {
     if (retryPending.current) {
@@ -200,7 +228,7 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
     setRetryState("pending");
     setAccountStatusMessage(accountConnectionStatus("retry", "pending"));
     try {
-      await loadAccount(undefined, "retry");
+      await loadAccount(browserCourseId() ?? undefined, "retry");
     } finally {
       retryPending.current = false;
     }
@@ -274,10 +302,13 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
               }
             }}
             onSelectCourse={(courseId) => {
+              accountRequestId.current += 1;
+              pushBrowserCourse(courseId);
               setSelectedCourseId(courseId);
               void loadProgress(courseId);
             }}
             onUploadedCourse={(courseId) => {
+              pushBrowserCourse(courseId);
               void loadAccount(courseId);
             }}
             progress={progress}

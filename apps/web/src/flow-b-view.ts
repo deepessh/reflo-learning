@@ -67,6 +67,27 @@ export function studyErrorRetryTarget(input: {
   return { kind: "persisted_state", sessionId: input.viewSessionId };
 }
 
+export function studyRetryPresentation(retrying: boolean): {
+  readonly actionDisabled: boolean;
+  readonly actionLabel: "Try again" | "Trying again…";
+  readonly announcement: string;
+  readonly ariaBusy: boolean;
+} {
+  return retrying
+    ? {
+        actionDisabled: true,
+        actionLabel: "Trying again…",
+        announcement: "Retrying your saved activity…",
+        ariaBusy: true,
+      }
+    : {
+        actionDisabled: false,
+        actionLabel: "Try again",
+        announcement: "",
+        ariaBusy: false,
+      };
+}
+
 export function completedSessionTransition(actionKind: string): {
   readonly loadActiveState: false;
   readonly phase: "summary";
@@ -124,15 +145,30 @@ export interface CourseActivationPlan {
   readonly activationFailure?: ActivationFailure | null;
   readonly activationStatus?: "lesson_failed" | "lesson_pending" | "ready";
   readonly assessmentStatus?: "failed" | "pending" | "ready";
+  readonly demoFlowBPlacementComplete?: true;
   readonly assessments?: {
     readonly chapterQuiz: AssessmentArtifactPlan;
     readonly placementQuiz: AssessmentArtifactPlan;
   };
   readonly nextAction?: string;
+  readonly placement?: {
+    readonly answered: number;
+    readonly status: "complete" | "failed" | "pending" | "question";
+    readonly total: 10;
+  };
   readonly regeneration?: {
     readonly availableAt: string;
     readonly eligible: true;
   } | null;
+}
+
+export function shouldEnterPlacement(
+  plan: CourseActivationPlan | undefined,
+): boolean {
+  return (
+    plan?.demoFlowBPlacementComplete !== true &&
+    plan?.placement?.status !== "complete"
+  );
 }
 
 export interface AssessmentArtifactPlan {

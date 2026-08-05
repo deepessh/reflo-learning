@@ -972,6 +972,20 @@ describe("auth, library, and session-history API", () => {
     };
     const sessions = {
       completeLesson: vi.fn().mockResolvedValue(true),
+      loadPlacement: vi.fn().mockResolvedValue({
+        answered: 3,
+        failure: null,
+        question: {
+          difficulty: 2 as const,
+          id: "60000000-0000-4000-8000-000000000003",
+          itemType: "multiple_choice" as const,
+          position: 4,
+          prompt: "Which option is source-grounded?",
+          responseOptions: ["First", "Second"],
+        },
+        status: "question" as const,
+        total: 10 as const,
+      }),
       loadSummary: vi.fn().mockResolvedValue({
         courseId: "50000000-0000-4000-8000-000000000002",
         sessionId,
@@ -990,6 +1004,10 @@ describe("auth, library, and session-history API", () => {
         resumed: false,
         sessionId,
         status: "active" as const,
+      }),
+      submitPlacementChoice: vi.fn().mockResolvedValue({
+        correct: true,
+        status: "created" as const,
       }),
     };
     const study = {
@@ -1108,12 +1126,73 @@ describe("auth, library, and session-history API", () => {
     });
     expect(activation.schedule).not.toHaveBeenCalled();
 
+    const placement = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/placement`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(placement.status).toBe(200);
+    const placementBody = await placement.json();
+    expect(placementBody).toEqual({
+      placement: {
+        answered: 3,
+        failure: null,
+        question: {
+          difficulty: 2,
+          id: "60000000-0000-4000-8000-000000000003",
+          itemType: "multiple_choice",
+          position: 4,
+          prompt: "Which option is source-grounded?",
+          responseOptions: ["First", "Second"],
+        },
+        status: "question",
+        total: 10,
+      },
+    });
+    expect(JSON.stringify(placementBody)).not.toContain("keyedAnswer");
+
+    const placementSubmission = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/placement/answers`,
+      {
+        body: JSON.stringify({
+          answer: "First",
+          idempotencyKey: "placement/test/item-4",
+          questionId: "60000000-0000-4000-8000-000000000003",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(placementSubmission.status).toBe(200);
+    expect(await placementSubmission.json()).toEqual({
+      result: { correct: true, status: "created" },
+    });
+    expect(sessions.submitPlacementChoice).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+      sessionId,
+      {
+        answer: "First",
+        idempotencyKey: "placement/test/item-4",
+        questionId: "60000000-0000-4000-8000-000000000003",
+      },
+    );
+
     sessions.startOrResume.mockResolvedValueOnce({
       courseId: "50000000-0000-4000-8000-000000000002",
       plan: {
         activationStatus: "lesson_pending",
         contractVersion: "course-study-plan-v1",
         focusConceptId: "40000000-0000-4000-8000-000000000162",
+        generationRequired: true,
         nextAction: "prepare_activation",
         timeBudgetMinutes: 10,
       },
@@ -1140,6 +1219,34 @@ describe("auth, library, and session-history API", () => {
       }),
       courseId: "50000000-0000-4000-8000-000000000002",
     });
+
+    sessions.startOrResume.mockResolvedValueOnce({
+      courseId: "50000000-0000-4000-8000-000000000002",
+      plan: {
+        activationRequired: false,
+        activationStatus: "ready",
+        assessmentStatus: "pending",
+        contractVersion: "course-study-plan-v1",
+        generationRequired: true,
+        nextAction: "placement",
+      },
+      resumed: true,
+      sessionId,
+      status: "active" as const,
+    });
+    const partialReady = await fetch(
+      `${baseUrl}/v1/courses/50000000-0000-4000-8000-000000000002/study-sessions`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(partialReady.status).toBe(200);
+    expect(activation.schedule).toHaveBeenCalledTimes(2);
 
     const lesson = await fetch(
       `${baseUrl}/v1/study-sessions/${sessionId}/lesson`,

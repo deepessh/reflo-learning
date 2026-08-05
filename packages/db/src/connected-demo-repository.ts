@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ACTIVATION_GENERATION_VERSION } from "@reflo/activation";
+import { AssessmentError } from "@reflo/assessment";
 import type { ScopeAuthorizationContext } from "@reflo/retrieval";
 import { stableUuid } from "@reflo/retrieval";
 import {
@@ -32,6 +33,44 @@ export interface ConnectedStudySessionStartResult {
   readonly resumed: boolean;
   readonly sessionId: string;
   readonly status: "active";
+}
+
+export type ConnectedPlacementStatus =
+  "pending" | "failed" | "question" | "complete";
+
+export interface ConnectedPlacementQuestion {
+  readonly difficulty: 1 | 2 | 3 | 4 | 5;
+  readonly id: string;
+  readonly itemType: "concept_linking" | "multiple_choice" | "short_answer";
+  readonly position: number;
+  readonly prompt: string;
+  readonly responseOptions: readonly string[] | null;
+}
+
+export interface ConnectedPlacementState {
+  readonly answered: number;
+  readonly failure: {
+    readonly code:
+      "generation_failed" | "generation_timed_out" | "generation_unavailable";
+    readonly message: string;
+    readonly updatedAt: string | null;
+  } | null;
+  readonly question: ConnectedPlacementQuestion | null;
+  readonly status: ConnectedPlacementStatus;
+  readonly total: 10;
+}
+
+export interface ConnectedPlacementChoiceSubmission {
+  readonly attemptId: string;
+  readonly correct: boolean;
+  readonly evidence: readonly AssessmentEvidenceWrite[];
+  readonly status: "created" | "replayed";
+}
+
+export interface ConnectedPlacementChoiceRequest {
+  readonly answer: string;
+  readonly idempotencyKey: string;
+  readonly questionId: string;
 }
 
 export const ACTIVATION_PROGRESS_CONTRACT_VERSION =
@@ -489,8 +528,11 @@ export class PostgresConnectedDemoRepository {
       if (course === null) {
         return null;
       }
-      const existing = await client.query<{ session_id: string }>(
-        `SELECT id AS session_id
+      const existing = await client.query<{
+        plan: Record<string, unknown>;
+        session_id: string;
+      }>(
+        `SELECT id AS session_id, plan
          FROM study_session
          WHERE owner_scope_id = $1 AND user_id = $2 AND course_id = $3
            AND status = 'active'
@@ -506,6 +548,7 @@ export class PostgresConnectedDemoRepository {
           authorization,
           courseId,
           course,
+          active.plan,
         );
         await client.query(
           `UPDATE study_session SET plan = $4::jsonb
@@ -553,6 +596,245 @@ export class PostgresConnectedDemoRepository {
         sessionId,
         status: "active" as const,
       };
+    });
+  }
+
+  async loadPlacement(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<ConnectedPlacementState | null> {
+    validateAuthorization(authorization);
+    if (!isUuid(sessionId)) {
+      return null;
+    }
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      return loadPlacementState(client, authorization, sessionId);
+    });
+  }
+
+  async submitPlacementChoice(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+    request: ConnectedPlacementChoiceRequest,
+  ): Promise<ConnectedPlacementChoiceSubmission> {
+    validateAuthorization(authorization);
+    if (
+      !isUuid(sessionId) ||
+      !isUuid(request.questionId) ||
+      request.answer.length < 1 ||
+      request.answer.length > 10_000 ||
+      request.idempotencyKey.length < 1 ||
+      request.idempotencyKey.length > 240
+    ) {
+      throw new AssessmentError("invalid_input");
+    }
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      await client.query("SELECT pg_advisory_xact_lock(214765003, 166)");
+      const replayResult = await client.query<PlacementReplayRow>(
+        `SELECT attempt.id AS attempt_id, attempt.owner_scope_id,
+                attempt.user_id, attempt.session_id,
+                attempt.quiz_item_id AS question_id,
+                attempt.answer #>> '{option}' AS answer,
+                question.item_type, question.keyed_answer #>> '{}' AS keyed_answer,
+                question.response_options,
+                ARRAY(
+                  SELECT link.concept_id::text
+                  FROM quiz_item_concept AS link
+                  WHERE link.owner_scope_id = question.owner_scope_id
+                    AND link.quiz_item_id = question.id
+                  ORDER BY link.concept_id
+                ) AS concept_ids
+         FROM attempt
+         JOIN quiz_item AS question
+           ON question.owner_scope_id = attempt.owner_scope_id
+          AND question.id = attempt.quiz_item_id
+         JOIN study_session AS session
+           ON session.owner_scope_id = attempt.owner_scope_id
+          AND session.id = attempt.session_id
+         JOIN app_user AS actor ON actor.id = $2
+         JOIN owner_scope AS scope ON scope.id = attempt.owner_scope_id
+         JOIN scope_membership AS membership
+           ON membership.owner_scope_id = attempt.owner_scope_id
+          AND membership.user_id = actor.id
+         WHERE attempt.submission_idempotency_key = $1
+           AND attempt.owner_scope_id = $3
+           AND actor.status = 'active'
+           AND scope.status = 'active'
+           AND membership.role = 'owner'
+           AND membership.revoked_at IS NULL
+         LIMIT 1`,
+        [
+          request.idempotencyKey,
+          authorization.actorId,
+          authorization.ownerScopeId,
+        ],
+      );
+      const replay = replayResult.rows[0];
+      if (replay !== undefined) {
+        if (
+          replay.user_id !== authorization.actorId ||
+          replay.session_id !== sessionId ||
+          replay.question_id !== request.questionId ||
+          replay.answer !== request.answer
+        ) {
+          throw new AssessmentError("conflicting_duplicate");
+        }
+        if (
+          (replay.item_type !== "multiple_choice" &&
+            replay.item_type !== "concept_linking") ||
+          replay.concept_ids.length !== 1
+        ) {
+          throw new AssessmentError("invalid_input");
+        }
+        return placementChoiceSubmission(
+          replay.attempt_id,
+          {
+            concept_ids: replay.concept_ids,
+            id: replay.question_id,
+            item_type: replay.item_type,
+            keyed_answer: replay.keyed_answer,
+            response_options: replay.response_options,
+          },
+          request.answer,
+          "replayed",
+        );
+      }
+      const questionResult = await client.query<PlacementChoiceQuestionRow>(
+        `SELECT question.id, question.item_type,
+                question.keyed_answer #>> '{}' AS keyed_answer,
+                question.response_options,
+                ARRAY(
+                  SELECT link.concept_id::text
+                  FROM quiz_item_concept AS link
+                  WHERE link.owner_scope_id = question.owner_scope_id
+                    AND link.quiz_item_id = question.id
+                  ORDER BY link.concept_id
+                ) AS concept_ids
+         FROM study_session AS session
+         JOIN app_user AS actor ON actor.id = $1
+         JOIN owner_scope AS scope ON scope.id = session.owner_scope_id
+         JOIN scope_membership AS membership
+           ON membership.owner_scope_id = session.owner_scope_id
+          AND membership.user_id = actor.id
+         JOIN quiz_bank AS bank
+           ON bank.owner_scope_id = session.owner_scope_id
+          AND bank.course_id = session.course_id
+          AND bank.bank_kind = 'placement'
+         JOIN activation_generation_operation AS generation
+           ON generation.owner_scope_id = bank.owner_scope_id
+          AND generation.id = bank.generation_operation_id
+         JOIN quiz_item AS question
+           ON question.owner_scope_id = bank.owner_scope_id
+          AND question.quiz_bank_id = bank.id
+          AND question.id = $4
+         WHERE session.owner_scope_id = $2
+           AND session.id = $3
+           AND session.user_id = $1
+           AND session.status = 'active'
+           AND actor.status = 'active'
+           AND scope.status = 'active'
+           AND membership.role = 'owner'
+           AND membership.revoked_at IS NULL
+           AND bank.id = (
+             SELECT selected.id
+             FROM quiz_bank AS selected
+             JOIN activation_generation_operation AS selected_generation
+               ON selected_generation.owner_scope_id = selected.owner_scope_id
+              AND selected_generation.id = selected.generation_operation_id
+             WHERE selected.owner_scope_id = session.owner_scope_id
+               AND selected.course_id = session.course_id
+               AND selected.bank_kind = 'placement'
+             ORDER BY selected_generation.regeneration_ordinal DESC,
+                      selected.created_at DESC, selected.id DESC
+             LIMIT 1
+           )`,
+        [
+          authorization.actorId,
+          authorization.ownerScopeId,
+          sessionId,
+          request.questionId,
+        ],
+      );
+      const question = questionResult.rows[0];
+      if (question === undefined) {
+        throw new AssessmentError("question_unavailable");
+      }
+      const placement = await loadPlacementState(
+        client,
+        authorization,
+        sessionId,
+      );
+      if (
+        placement?.status !== "question" ||
+        placement.question?.id !== request.questionId
+      ) {
+        throw new AssessmentError("question_unavailable");
+      }
+      if (
+        question.item_type !== "multiple_choice" &&
+        question.item_type !== "concept_linking"
+      ) {
+        throw new AssessmentError("invalid_input");
+      }
+      const responseOptions = stringArray(question.response_options);
+      if (
+        responseOptions === null ||
+        !responseOptions.includes(request.answer) ||
+        question.keyed_answer.length === 0 ||
+        question.concept_ids.length !== 1
+      ) {
+        throw new AssessmentError("invalid_input");
+      }
+
+      const priorQuestionAttempt = await client.query<{ id: string }>(
+        `SELECT id
+         FROM attempt
+         WHERE owner_scope_id = $1 AND user_id = $2
+           AND quiz_item_id = $3
+         LIMIT 1`,
+        [authorization.ownerScopeId, authorization.actorId, request.questionId],
+      );
+      if (priorQuestionAttempt.rows[0] !== undefined) {
+        throw new AssessmentError("conflicting_duplicate");
+      }
+
+      const attemptId = stableUuid({
+        idempotencyKey: request.idempotencyKey,
+        ownerScopeId: authorization.ownerScopeId,
+        sessionId,
+        version: "placement-keyed-v1",
+      });
+      await client.query(
+        `INSERT INTO attempt
+           (id, owner_scope_id, user_id, session_id, quiz_item_id, answer,
+            outcome, overall_grade, grading_confidence, grader_provenance,
+            submission_idempotency_key, grading_policy_version,
+            rating_mapping_version, replacement_for_attempt_id)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'graded', NULL, NULL,
+                 $7::jsonb, $8, 'grading-policy-v1', 'rating-mapping-v1', NULL)`,
+        [
+          attemptId,
+          authorization.ownerScopeId,
+          authorization.actorId,
+          sessionId,
+          request.questionId,
+          JSON.stringify({ option: request.answer }),
+          JSON.stringify({
+            gradingMethod: "keyed_mc",
+            itemType: question.item_type,
+            policyVersion: "placement-keyed-v1",
+          }),
+          request.idempotencyKey,
+        ],
+      );
+      return placementChoiceSubmission(
+        attemptId,
+        question,
+        request.answer,
+        "created",
+      );
     });
   }
 
@@ -737,6 +1019,7 @@ export class PostgresConnectedDemoRepository {
            ON question.owner_scope_id = question_link.owner_scope_id
           AND question.id = question_link.quiz_item_id
           AND question.course_id = course.id
+          AND question.quiz_bank_id IS NULL
           AND question.normalized_prompt_hash IS NOT NULL
          JOIN app_user AS actor ON actor.id = $1
          JOIN owner_scope AS scope ON scope.id = course.owner_scope_id
@@ -825,7 +1108,7 @@ export class PostgresConnectedDemoRepository {
         `INSERT INTO study_session
            (id, owner_scope_id, user_id, course_id, status, plan)
          VALUES ($1, $2, $3, $4, 'active',
-                 '{"contractVersion":"connected-demo-plan-v1","demoOnly":true}'::jsonb)`,
+                 '{"contractVersion":"connected-demo-plan-v1","demoFlowBPlacementComplete":true,"demoOnly":true}'::jsonb)`,
         [
           sessionId,
           authorization.ownerScopeId,
@@ -943,6 +1226,347 @@ interface AuthorizedStudyCourse {
   readonly hasQuestion: boolean;
 }
 
+interface PlacementChoiceQuestionRow extends Record<string, unknown> {
+  readonly concept_ids: string[];
+  readonly id: string;
+  readonly item_type: "concept_linking" | "multiple_choice" | "short_answer";
+  readonly keyed_answer: string;
+  readonly response_options: unknown;
+}
+
+interface PlacementReplayRow extends Record<string, unknown> {
+  readonly answer: string;
+  readonly attempt_id: string;
+  readonly concept_ids: string[];
+  readonly item_type: PlacementChoiceQuestionRow["item_type"];
+  readonly keyed_answer: string;
+  readonly owner_scope_id: string;
+  readonly question_id: string;
+  readonly response_options: unknown;
+  readonly session_id: string | null;
+  readonly user_id: string;
+}
+
+interface PlacementItemRow extends Record<string, unknown> {
+  readonly attempted: boolean;
+  readonly difficulty: number;
+  readonly id: string;
+  readonly item_order: number;
+  readonly item_type: ConnectedPlacementQuestion["itemType"];
+  readonly prompt: string;
+  readonly response_options: unknown;
+}
+
+async function loadPlacementState(
+  client: PoolClient,
+  authorization: ScopeAuthorizationContext,
+  sessionId: string,
+): Promise<ConnectedPlacementState | null> {
+  const sessionResult = await client.query<{
+    course_id: string;
+    plan: Record<string, unknown>;
+  }>(
+    `SELECT session.course_id, session.plan
+     FROM study_session AS session
+     JOIN course
+       ON course.owner_scope_id = session.owner_scope_id
+      AND course.id = session.course_id
+     JOIN source_document AS source
+       ON source.owner_scope_id = course.owner_scope_id
+      AND source.id = course.source_document_id
+     JOIN app_user AS actor ON actor.id = $1
+     JOIN owner_scope AS scope ON scope.id = session.owner_scope_id
+     JOIN scope_membership AS membership
+       ON membership.owner_scope_id = session.owner_scope_id
+      AND membership.user_id = actor.id
+     WHERE session.owner_scope_id = $2
+       AND session.id = $3
+       AND session.user_id = $1
+       AND session.status = 'active'
+       AND source.retention_status = 'active'
+       AND actor.status = 'active'
+       AND scope.status = 'active'
+       AND membership.role = 'owner'
+       AND membership.revoked_at IS NULL`,
+    [authorization.actorId, authorization.ownerScopeId, sessionId],
+  );
+  const session = sessionResult.rows[0];
+  if (session === undefined) {
+    return null;
+  }
+  if (session.plan.demoFlowBPlacementComplete === true) {
+    return {
+      answered: 10,
+      failure: null,
+      question: null,
+      status: "complete",
+      total: 10,
+    };
+  }
+
+  const bankResult = await client.query<{
+    created_at: Date;
+    id: string;
+  }>(
+    `SELECT bank.id, bank.created_at
+     FROM quiz_bank AS bank
+     JOIN activation_generation_operation AS generation
+       ON generation.owner_scope_id = bank.owner_scope_id
+      AND generation.id = bank.generation_operation_id
+     WHERE bank.owner_scope_id = $1
+       AND bank.course_id = $2
+       AND bank.bank_kind = 'placement'
+     ORDER BY generation.regeneration_ordinal DESC,
+              bank.created_at DESC, bank.id DESC
+     LIMIT 1`,
+    [authorization.ownerScopeId, session.course_id],
+  );
+  const bank = bankResult.rows[0];
+  if (bank === undefined) {
+    const operationResult = await client.query<ActivationProgressOperationRow>(
+      `SELECT artifact_kind, attempt_count, failure_class,
+              regeneration_ordinal, status, updated_at
+       FROM activation_generation_operation
+       WHERE owner_scope_id = $1 AND course_id = $2
+         AND artifact_kind = 'placement_quiz'
+         AND generation_version = $3
+       ORDER BY regeneration_ordinal DESC, updated_at DESC, id DESC
+       LIMIT 1`,
+      [
+        authorization.ownerScopeId,
+        session.course_id,
+        ACTIVATION_GENERATION_VERSION,
+      ],
+    );
+    const operation = operationResult.rows[0];
+    const failed =
+      operation !== undefined && isTerminalActivationStatus(operation.status);
+    const failure = failed
+      ? sanitizedActivationFailure(operation.failure_class, "questions")
+      : null;
+    return {
+      answered: 0,
+      failure:
+        failure === null
+          ? null
+          : {
+              ...failure,
+              updatedAt: operation?.updated_at.toISOString() ?? null,
+            },
+      question: null,
+      status: failed ? "failed" : "pending",
+      total: 10,
+    };
+  }
+
+  const itemsResult = await client.query<PlacementItemRow>(
+    `SELECT item.id, item.item_type, item.difficulty, item.prompt,
+            item.response_options, item.item_order,
+            EXISTS (
+              SELECT 1
+              FROM attempt
+              WHERE attempt.owner_scope_id = item.owner_scope_id
+                AND attempt.user_id = $2
+                AND attempt.quiz_item_id = item.id
+                AND (
+                  (
+                    attempt.outcome = 'graded'
+                    AND NOT EXISTS (
+                      SELECT 1
+                      FROM quiz_item_concept AS required_link
+                      WHERE required_link.owner_scope_id = item.owner_scope_id
+                        AND required_link.quiz_item_id = item.id
+                        AND (
+                          NOT EXISTS (
+                          SELECT 1
+                          FROM attempt_concept_evidence AS evidence
+                          WHERE evidence.owner_scope_id = attempt.owner_scope_id
+                            AND evidence.attempt_id = attempt.id
+                            AND evidence.concept_id = required_link.concept_id
+                          )
+                          OR NOT EXISTS (
+                            SELECT 1
+                            FROM knowledge_state AS projected
+                            WHERE projected.owner_scope_id = item.owner_scope_id
+                              AND projected.user_id = $2
+                              AND projected.concept_id = required_link.concept_id
+                              AND projected.algorithm_version = $4
+                              AND projected.knowledge_configuration_id = $5
+                              AND projected.evidence_count = (
+                                SELECT count(*)::integer
+                                FROM attempt_concept_evidence AS ledger
+                                WHERE ledger.owner_scope_id = item.owner_scope_id
+                                  AND ledger.attempt_user_id = $2
+                                  AND ledger.concept_id = required_link.concept_id
+                                  AND ledger.eligible_for_mastery
+                              )
+                          )
+                        )
+                    )
+                  )
+                  OR (
+                    attempt.outcome = 'abstained'
+                    AND EXISTS (
+                      SELECT 1
+                      FROM attempt AS replacement
+                      WHERE replacement.owner_scope_id = attempt.owner_scope_id
+                        AND replacement.user_id = attempt.user_id
+                        AND replacement.replacement_for_attempt_id = attempt.id
+                        AND replacement.outcome = 'graded'
+                        AND NOT EXISTS (
+                          SELECT 1
+                          FROM quiz_item_concept AS required_link
+                          WHERE required_link.owner_scope_id = item.owner_scope_id
+                            AND required_link.quiz_item_id = item.id
+                            AND (
+                              NOT EXISTS (
+                              SELECT 1
+                              FROM attempt_concept_evidence AS evidence
+                              WHERE evidence.owner_scope_id = replacement.owner_scope_id
+                                AND evidence.attempt_id = replacement.id
+                                AND evidence.concept_id = required_link.concept_id
+                              )
+                              OR NOT EXISTS (
+                                SELECT 1
+                                FROM knowledge_state AS projected
+                                WHERE projected.owner_scope_id = item.owner_scope_id
+                                  AND projected.user_id = $2
+                                  AND projected.concept_id = required_link.concept_id
+                                  AND projected.algorithm_version = $4
+                                  AND projected.knowledge_configuration_id = $5
+                                  AND projected.evidence_count = (
+                                    SELECT count(*)::integer
+                                    FROM attempt_concept_evidence AS ledger
+                                    WHERE ledger.owner_scope_id = item.owner_scope_id
+                                      AND ledger.attempt_user_id = $2
+                                      AND ledger.concept_id = required_link.concept_id
+                                      AND ledger.eligible_for_mastery
+                                  )
+                              )
+                            )
+                        )
+                    )
+                  )
+                )
+            ) AS attempted
+     FROM quiz_item AS item
+     WHERE item.owner_scope_id = $1 AND item.quiz_bank_id = $3
+     ORDER BY item.item_order, item.id`,
+    [
+      authorization.ownerScopeId,
+      authorization.actorId,
+      bank.id,
+      KNOWLEDGE_ALGORITHM_VERSION,
+      KNOWLEDGE_CONFIGURATION_ID,
+    ],
+  );
+  if (itemsResult.rows.length !== 10) {
+    return {
+      answered: itemsResult.rows.filter((item) => item.attempted).length,
+      failure: {
+        code: "generation_failed",
+        message: "The placement quiz could not be completed.",
+        updatedAt: bank.created_at.toISOString(),
+      },
+      question: null,
+      status: "failed",
+      total: 10,
+    };
+  }
+  const answered = itemsResult.rows.filter((item) => item.attempted).length;
+  const next = itemsResult.rows.find((item) => !item.attempted);
+  if (next === undefined) {
+    return {
+      answered,
+      failure: null,
+      question: null,
+      status: "complete",
+      total: 10,
+    };
+  }
+  const responseOptions = stringArray(next.response_options);
+  if (
+    next.difficulty < 1 ||
+    next.difficulty > 5 ||
+    !Number.isInteger(next.difficulty) ||
+    next.item_order < 0 ||
+    !Number.isInteger(next.item_order) ||
+    ((next.item_type === "multiple_choice" ||
+      next.item_type === "concept_linking") &&
+      responseOptions === null) ||
+    (next.item_type === "short_answer" && responseOptions !== null)
+  ) {
+    return {
+      answered,
+      failure: {
+        code: "generation_failed",
+        message: "The placement quiz could not be completed.",
+        updatedAt: bank.created_at.toISOString(),
+      },
+      question: null,
+      status: "failed",
+      total: 10,
+    };
+  }
+  return {
+    answered,
+    failure: null,
+    question: {
+      difficulty: next.difficulty as ConnectedPlacementQuestion["difficulty"],
+      id: next.id,
+      itemType: next.item_type,
+      position: next.item_order + 1,
+      prompt: next.prompt,
+      responseOptions,
+    },
+    status: "question",
+    total: 10,
+  };
+}
+
+function placementChoiceSubmission(
+  attemptId: string,
+  question: PlacementChoiceQuestionRow,
+  answer: string,
+  status: ConnectedPlacementChoiceSubmission["status"],
+): ConnectedPlacementChoiceSubmission {
+  const correct = answer === question.keyed_answer;
+  return {
+    attemptId,
+    correct,
+    evidence: question.concept_ids.map((conceptId) => ({
+      attemptId,
+      conceptId,
+      eligibleForMastery: true,
+      fsrsRating: correct ? 3 : 1,
+      graderConfidence: null,
+      gradingMethod: "keyed_mc",
+      gradingPolicyVersion: "grading-policy-v1",
+      ineligibilityReason: null,
+      judgmentKind: "scored",
+      knowledgeAlgorithmVersion: KNOWLEDGE_ALGORITHM_VERSION,
+      knowledgeConfigurationId: KNOWLEDGE_CONFIGURATION_ID,
+      rationaleRef: `placement-keyed/${question.id}`,
+      ratingMappingVersion: "rating-mapping-v1",
+      replacementForAttemptId: null,
+      rubricBand: correct ? "correct" : "incorrect",
+      rubricId: `placement-keyed/${question.id}`,
+      rubricVersion: "placement-keyed-v1",
+      score: correct ? "1.00000" : "0.00000",
+      unanswerableReason: null,
+    })),
+    status,
+  };
+}
+
+function stringArray(value: unknown): readonly string[] | null {
+  return Array.isArray(value) &&
+    value.length >= 2 &&
+    value.every((entry) => typeof entry === "string" && entry.length > 0)
+    ? value
+    : null;
+}
+
 interface ActivationProgressOperationRow extends Record<string, unknown> {
   readonly artifact_kind:
     "chapter_quiz" | "first_text_lesson" | "placement_quiz";
@@ -989,12 +1613,23 @@ function activationProgressView(
         : planReportsFailure
           ? "failed"
           : "pending";
-  const assessmentStatus = readiness.hasChapterQuestion
+  const assessmentReady =
+    readiness.hasChapterQuestion && readiness.hasPlacementQuestion;
+  const failedAssessmentOperation = [chapterOperation, placementOperation].find(
+    (operation) =>
+      operation !== undefined &&
+      isTerminalActivationStatus(operation.status) &&
+      !(operation.artifact_kind === "chapter_quiz"
+        ? readiness.hasChapterQuestion
+        : readiness.hasPlacementQuestion),
+  );
+  const assessmentStatus = assessmentReady
     ? "ready"
-    : chapterOperation?.status === "retry_scheduled"
+    : [chapterOperation, placementOperation].some(
+          (operation) => operation?.status === "retry_scheduled",
+        )
       ? "retrying"
-      : chapterOperation === undefined ||
-          !isTerminalActivationStatus(chapterOperation.status)
+      : failedAssessmentOperation === undefined
         ? "pending"
         : "failed";
   const selectedAssessmentOperation =
@@ -1223,6 +1858,7 @@ async function deriveStudyPlan(
   authorization: ScopeAuthorizationContext,
   courseId: string,
   course: AuthorizedStudyCourse,
+  priorPlan?: Readonly<Record<string, unknown>>,
 ): Promise<Readonly<Record<string, unknown>>> {
   const activation = await client.query<{
     artifact_kind: "chapter_quiz" | "first_text_lesson" | "placement_quiz";
@@ -1303,7 +1939,132 @@ async function deriveStudyPlan(
      LIMIT 1`,
     [authorization.ownerScopeId, authorization.actorId, courseId],
   );
+  const placementProgress = await client.query<{ answered: number }>(
+    `SELECT count(DISTINCT item.id)::integer AS answered
+     FROM quiz_bank AS bank
+     JOIN activation_generation_operation AS generation
+       ON generation.owner_scope_id = bank.owner_scope_id
+      AND generation.id = bank.generation_operation_id
+     JOIN quiz_item AS item
+       ON item.owner_scope_id = bank.owner_scope_id
+      AND item.quiz_bank_id = bank.id
+     JOIN attempt
+      ON attempt.owner_scope_id = item.owner_scope_id
+      AND attempt.quiz_item_id = item.id
+      AND attempt.user_id = $2
+      AND (
+        (
+          attempt.outcome = 'graded'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM quiz_item_concept AS required_link
+            WHERE required_link.owner_scope_id = item.owner_scope_id
+              AND required_link.quiz_item_id = item.id
+              AND (
+                NOT EXISTS (
+                SELECT 1
+                FROM attempt_concept_evidence AS evidence
+                WHERE evidence.owner_scope_id = attempt.owner_scope_id
+                  AND evidence.attempt_id = attempt.id
+                  AND evidence.concept_id = required_link.concept_id
+                )
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM knowledge_state AS projected
+                  WHERE projected.owner_scope_id = item.owner_scope_id
+                    AND projected.user_id = $2
+                    AND projected.concept_id = required_link.concept_id
+                    AND projected.algorithm_version = $4
+                    AND projected.knowledge_configuration_id = $5
+                    AND projected.evidence_count = (
+                      SELECT count(*)::integer
+                      FROM attempt_concept_evidence AS ledger
+                      WHERE ledger.owner_scope_id = item.owner_scope_id
+                        AND ledger.attempt_user_id = $2
+                        AND ledger.concept_id = required_link.concept_id
+                        AND ledger.eligible_for_mastery
+                    )
+                )
+              )
+          )
+        )
+        OR (
+          attempt.outcome = 'abstained'
+          AND EXISTS (
+            SELECT 1
+            FROM attempt AS replacement
+            WHERE replacement.owner_scope_id = attempt.owner_scope_id
+              AND replacement.user_id = attempt.user_id
+              AND replacement.replacement_for_attempt_id = attempt.id
+              AND replacement.outcome = 'graded'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM quiz_item_concept AS required_link
+                WHERE required_link.owner_scope_id = item.owner_scope_id
+                  AND required_link.quiz_item_id = item.id
+                  AND (
+                    NOT EXISTS (
+                    SELECT 1
+                    FROM attempt_concept_evidence AS evidence
+                    WHERE evidence.owner_scope_id = replacement.owner_scope_id
+                      AND evidence.attempt_id = replacement.id
+                      AND evidence.concept_id = required_link.concept_id
+                    )
+                    OR NOT EXISTS (
+                      SELECT 1
+                      FROM knowledge_state AS projected
+                      WHERE projected.owner_scope_id = item.owner_scope_id
+                        AND projected.user_id = $2
+                        AND projected.concept_id = required_link.concept_id
+                        AND projected.algorithm_version = $4
+                        AND projected.knowledge_configuration_id = $5
+                        AND projected.evidence_count = (
+                          SELECT count(*)::integer
+                          FROM attempt_concept_evidence AS ledger
+                          WHERE ledger.owner_scope_id = item.owner_scope_id
+                            AND ledger.attempt_user_id = $2
+                            AND ledger.concept_id = required_link.concept_id
+                            AND ledger.eligible_for_mastery
+                        )
+                    )
+                  )
+              )
+          )
+        )
+      )
+     JOIN study_session AS session
+       ON session.owner_scope_id = attempt.owner_scope_id
+      AND session.id = attempt.session_id
+      AND session.user_id = attempt.user_id
+      AND session.course_id = bank.course_id
+     WHERE bank.owner_scope_id = $1 AND bank.course_id = $3
+       AND bank.bank_kind = 'placement'
+       AND bank.id = (
+         SELECT selected.id
+         FROM quiz_bank AS selected
+         JOIN activation_generation_operation AS selected_generation
+           ON selected_generation.owner_scope_id = selected.owner_scope_id
+          AND selected_generation.id = selected.generation_operation_id
+         WHERE selected.owner_scope_id = $1 AND selected.course_id = $3
+           AND selected.bank_kind = 'placement'
+         ORDER BY selected_generation.regeneration_ordinal DESC,
+                  selected.created_at DESC, selected.id DESC
+         LIMIT 1
+       )`,
+    [
+      authorization.ownerScopeId,
+      authorization.actorId,
+      courseId,
+      KNOWLEDGE_ALGORITHM_VERSION,
+      KNOWLEDGE_CONFIGURATION_ID,
+    ],
+  );
   const selected = focus.rows[0];
+  const demoFlowBPlacementComplete =
+    priorPlan?.demoFlowBPlacementComplete === true;
+  const placementAnswered = demoFlowBPlacementComplete
+    ? 10
+    : (placementProgress.rows[0]?.answered ?? 0);
   const lessonOperation = activation.rows.find(
     (operation) => operation.artifact_kind === "first_text_lesson",
   );
@@ -1339,11 +2100,26 @@ async function deriveStudyPlan(
     : lessonFailure === null
       ? "lesson_pending"
       : "lesson_failed";
-  const assessmentStatus = course.hasChapterQuestion
-    ? "ready"
-    : chapterQuizOperation?.status === "failed_permanent"
-      ? "failed"
-      : "pending";
+  const assessmentFailed = [chapterQuizOperation, placementQuizOperation].some(
+    (operation) =>
+      operation !== undefined &&
+      !(operation.artifact_kind === "chapter_quiz"
+        ? course.hasChapterQuestion
+        : course.hasPlacementQuestion) &&
+      isTerminalActivationStatus(operation.status),
+  );
+  const assessmentStatus =
+    course.hasChapterQuestion && course.hasPlacementQuestion
+      ? "ready"
+      : assessmentFailed
+        ? "failed"
+        : "pending";
+  const placementFailed =
+    placementQuizOperation !== undefined &&
+    !course.hasPlacementQuestion &&
+    isTerminalActivationStatus(placementQuizOperation.status);
+  const activationRequired = !course.hasLesson || !course.hasPlacementQuestion;
+  const generationRequired = activationRequired || !course.hasChapterQuestion;
   return {
     activationFailure:
       lessonFailure === null
@@ -1371,8 +2147,11 @@ async function deriveStudyPlan(
           },
         }),
     assessmentStatus,
+    activationRequired,
     contractVersion: "course-study-plan-v1",
+    ...(demoFlowBPlacementComplete ? { demoFlowBPlacementComplete: true } : {}),
     focusConceptId: selected?.concept_id ?? null,
+    generationRequired,
     regeneration:
       !regenerationEligible || lessonFailure === null
         ? null
@@ -1382,12 +2161,24 @@ async function deriveStudyPlan(
             ).toISOString(),
             eligible: true,
           },
-    nextAction:
-      activationStatus === "ready"
-        ? (selected?.kind ?? "session_complete")
-        : activationStatus === "lesson_failed"
-          ? "activation_failed"
-          : "prepare_activation",
+    nextAction: activationRequired
+      ? activationStatus === "lesson_failed" || placementFailed
+        ? "activation_failed"
+        : "prepare_activation"
+      : placementAnswered < 10
+        ? "placement"
+        : (selected?.kind ?? "session_complete"),
+    placement: {
+      answered: placementAnswered,
+      status: !course.hasPlacementQuestion
+        ? assessmentFailed
+          ? "failed"
+          : "pending"
+        : placementAnswered < 10
+          ? "question"
+          : "complete",
+      total: 10,
+    },
     timeBudgetMinutes: 10,
   };
 }

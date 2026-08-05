@@ -9,6 +9,8 @@ import {
   completedSessionTransition,
   lessonMediaPresentation,
   studyErrorRetryTarget,
+  studyRetryPresentation,
+  shouldEnterPlacement,
   unavailableDependencyNames,
   type BrowserAssessmentResult,
 } from "./flow-b-view";
@@ -47,6 +49,38 @@ describe("Flow B browser presentation", () => {
         viewSessionId: "session",
       }),
     ).toEqual({ kind: "short_answer" });
+  });
+
+  it("disables duplicate retry activation and announces pending recovery", () => {
+    expect(studyRetryPresentation(true)).toEqual({
+      actionDisabled: true,
+      actionLabel: "Trying again…",
+      announcement: "Retrying your saved activity…",
+      ariaBusy: true,
+    });
+    expect(studyRetryPresentation(false)).toEqual({
+      actionDisabled: false,
+      actionLabel: "Try again",
+      announcement: "",
+      ariaBusy: false,
+    });
+  });
+
+  it("does not reopen placement after the durable plan marks it complete", () => {
+    expect(
+      shouldEnterPlacement({
+        placement: { answered: 10, status: "complete", total: 10 },
+      }),
+    ).toBe(false);
+    expect(
+      shouldEnterPlacement({
+        placement: { answered: 4, status: "question", total: 10 },
+      }),
+    ).toBe(true);
+    expect(shouldEnterPlacement({ demoFlowBPlacementComplete: true })).toBe(
+      false,
+    );
+    expect(shouldEnterPlacement(undefined)).toBe(true);
   });
 
   it("explains replay-safe recovery after grading or projection failure", () => {

@@ -236,6 +236,8 @@ button,
 
 .center-state {
   display: flex;
+  width: 100%;
+  min-width: 0;
   min-height: calc(100vh - 76px);
   align-items: flex-start;
   justify-content: center;
@@ -254,6 +256,9 @@ button,
 .center-state button,
 .center-state .button-link {
   margin-top: 1.7rem;
+}
+.center-state > button {
+  white-space: nowrap;
 }
 
 .loading-ring {
@@ -1778,6 +1783,14 @@ button:disabled {
 @media (max-width: 480px) {
   .app-shell {
     padding-inline: 0.8rem;
+  }
+  .center-state {
+    min-height: calc(100vh - 64px);
+  }
+  .center-state h1,
+  .center-state .lede {
+    width: 100%;
+    max-width: 100%;
   }
   .topbar {
     min-height: 64px;

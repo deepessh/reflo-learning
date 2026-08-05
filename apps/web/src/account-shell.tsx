@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 
 import Image from "next/image";
@@ -22,6 +23,17 @@ import {
   sessionDuration,
   sessionSummaryPresentation,
 } from "./account-view";
+import {
+  accountConnectionStatus,
+  isLinkActivationKey,
+  retryPresentation,
+  type AccountRequestKind,
+  type RetryState,
+} from "./account-shell-accessibility";
+import {
+  browserApiOrigin,
+  browserCanonicalPageUrl,
+} from "./browser-api-origin";
 import { DemoUploadPanel } from "./demo-upload-panel";
 import { DeliveryPreferences } from "./delivery-preferences";
 import { FlowBStudy } from "./flow-b-study";
@@ -35,7 +47,17 @@ interface AccountShellProps {
 type Screen = "loading" | "signed-out" | "email-sent" | "dashboard" | "error";
 type ProgressScreen = "idle" | "loading" | "ready" | "error";
 
+function activateLinkFromKeyboard(event: KeyboardEvent<HTMLAnchorElement>) {
+  if (!isLinkActivationKey(event.key)) {
+    return;
+  }
+  event.preventDefault();
+  event.currentTarget.click();
+}
+
 export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
+  const resolvedApiOrigin = browserApiOrigin(apiOrigin);
+  const canonicalPageUrl = browserCanonicalPageUrl(apiOrigin);
   const [screen, setScreen] = useState<Screen>("loading");
   const [email, setEmail] = useState("");
   const [courses, setCourses] = useState<readonly LibraryCourse[]>([]);
@@ -43,7 +65,12 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [progress, setProgress] = useState<CourseProgress | null>(null);
   const [progressScreen, setProgressScreen] = useState<ProgressScreen>("idle");
+  const [retryState, setRetryState] = useState<RetryState>("idle");
+  const [accountStatusMessage, setAccountStatusMessage] = useState(
+    accountConnectionStatus("initial", "pending"),
+  );
   const progressRequestId = useRef(0);
+  const retryPending = useRef(false);
 
   const loadProgress = useCallback(
     async (courseId: string) => {
@@ -52,7 +79,7 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
       setProgress(null);
       try {
         const response = await fetch(
-          `${apiOrigin}/v1/courses/${encodeURIComponent(courseId)}/progress`,
+          `${resolvedApiOrigin}/v1/courses/${encodeURIComponent(courseId)}/progress`,
           { credentials: "include" },
         );
         if (requestId !== progressRequestId.current) {
@@ -78,18 +105,29 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
         }
       }
     },
-    [apiOrigin],
+    [resolvedApiOrigin],
   );
 
   const loadAccount = useCallback(
-    async (preferredCourseId?: string) => {
+    async (
+      preferredCourseId?: string,
+      requestKind: AccountRequestKind = "refresh",
+    ) => {
       try {
         const [libraryResponse, historyResponse] = await Promise.all([
-          fetch(`${apiOrigin}/v1/library`, { credentials: "include" }),
-          fetch(`${apiOrigin}/v1/session-history`, { credentials: "include" }),
+          fetch(`${resolvedApiOrigin}/v1/library`, {
+            credentials: "include",
+          }),
+          fetch(`${resolvedApiOrigin}/v1/session-history`, {
+            credentials: "include",
+          }),
         ]);
         if (libraryResponse.status === 401 || historyResponse.status === 401) {
           setScreen("signed-out");
+          setRetryState("idle");
+          setAccountStatusMessage(
+            accountConnectionStatus(requestKind, "signed-out"),
+          );
           return;
         }
         if (!libraryResponse.ok || !historyResponse.ok) {
@@ -116,21 +154,50 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
           void loadProgress(initialCourse.courseId);
         }
         setScreen("dashboard");
+        setRetryState("idle");
+        setAccountStatusMessage(
+          accountConnectionStatus(requestKind, "success"),
+        );
       } catch {
         setScreen("error");
+        setRetryState(requestKind === "retry" ? "failed" : "idle");
+        setAccountStatusMessage(
+          accountConnectionStatus(requestKind, "failure"),
+        );
       }
     },
-    [apiOrigin, loadProgress],
+    [loadProgress, resolvedApiOrigin],
   );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadAccount(), 0);
+    if (canonicalPageUrl !== null) {
+      window.location.replace(canonicalPageUrl);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => void loadAccount(undefined, "initial"),
+      0,
+    );
     return () => window.clearTimeout(timer);
-  }, [loadAccount]);
+  }, [canonicalPageUrl, loadAccount]);
+
+  async function retryAccount() {
+    if (retryPending.current) {
+      return;
+    }
+    retryPending.current = true;
+    setRetryState("pending");
+    setAccountStatusMessage(accountConnectionStatus("retry", "pending"));
+    try {
+      await loadAccount(undefined, "retry");
+    } finally {
+      retryPending.current = false;
+    }
+  }
 
   async function requestLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const response = await fetch(`${apiOrigin}/v1/auth/magic-link`, {
+    const response = await fetch(`${resolvedApiOrigin}/v1/auth/magic-link`, {
       body: JSON.stringify({ email }),
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -141,11 +208,33 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
 
   return (
     <section className="app-shell">
-      <a className="skip-link" href="#main-content">
+      <p
+        className="visually-hidden"
+        role="status"
+        aria-atomic="true"
+        aria-live="polite"
+      >
+        {accountStatusMessage}
+      </p>
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={() => {
+          window.setTimeout(() => {
+            document.getElementById("main-content")?.focus();
+          }, 0);
+        }}
+        onKeyDown={activateLinkFromKeyboard}
+      >
         Skip to learning dashboard
       </a>
       <nav className="topbar" aria-label="Primary">
-        <Link className="brand" href="/" aria-label={`${appName} home`}>
+        <Link
+          className="brand"
+          href="/"
+          aria-label={`${appName} home`}
+          onKeyDown={activateLinkFromKeyboard}
+        >
           <Image alt="" height={28} src="/reflo-mark.svg" width={28} />
           <span>{appName}</span>
         </Link>
@@ -159,11 +248,14 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
         ) : null}
         {screen === "email-sent" ? <EmailSent email={email} /> : null}
         {screen === "error" ? (
-          <ErrorState onRetry={() => void loadAccount()} />
+          <ErrorState
+            onRetry={() => void retryAccount()}
+            retryState={retryState}
+          />
         ) : null}
         {screen === "dashboard" ? (
           <Dashboard
-            apiOrigin={apiOrigin}
+            apiOrigin={resolvedApiOrigin}
             courses={courses}
             onRetryProgress={() => {
               if (selectedCourseId !== null) {
@@ -571,14 +663,28 @@ function LoadingState() {
   );
 }
 
-function ErrorState({ onRetry }: { readonly onRetry: () => void }) {
+export function ErrorState({
+  onRetry,
+  retryState,
+}: {
+  readonly onRetry: () => void;
+  readonly retryState: RetryState;
+}) {
+  const presentation = retryPresentation(retryState);
   return (
-    <div className="center-state">
+    <div className="center-state" aria-busy={presentation.ariaBusy}>
       <p className="eyebrow">Connection paused</p>
       <h1>We couldn’t open your library.</h1>
       <p className="lede">Your progress is safe. Try the connection again.</p>
-      <button onClick={onRetry} type="button">
-        Try again
+      {presentation.visibleStatus === null ? null : (
+        <p>{presentation.visibleStatus}</p>
+      )}
+      <button
+        disabled={presentation.buttonDisabled}
+        onClick={onRetry}
+        type="button"
+      >
+        {presentation.buttonLabel}
       </button>
     </div>
   );

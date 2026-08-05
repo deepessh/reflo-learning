@@ -4,16 +4,27 @@ import { useEffect, useState } from "react";
 
 import Link from "next/link";
 
+import {
+  browserApiOrigin,
+  browserCanonicalPageUrl,
+} from "./browser-api-origin";
+
 export function AuthCallback({ apiOrigin }: { readonly apiOrigin: string }) {
+  const resolvedApiOrigin = browserApiOrigin(apiOrigin);
+  const canonicalPageUrl = browserCanonicalPageUrl(apiOrigin);
   const [status, setStatus] = useState<"working" | "failed">("working");
 
   useEffect(() => {
+    if (canonicalPageUrl !== null) {
+      window.location.replace(canonicalPageUrl);
+      return;
+    }
     const token = new URLSearchParams(window.location.search).get("token");
     if (token === null) {
       const timer = window.setTimeout(() => setStatus("failed"), 0);
       return () => window.clearTimeout(timer);
     }
-    void fetch(`${apiOrigin}/v1/auth/magic-link/redeem`, {
+    void fetch(`${resolvedApiOrigin}/v1/auth/magic-link/redeem`, {
       body: JSON.stringify({ token }),
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -28,7 +39,7 @@ export function AuthCallback({ apiOrigin }: { readonly apiOrigin: string }) {
       },
       () => setStatus("failed"),
     );
-  }, [apiOrigin]);
+  }, [canonicalPageUrl, resolvedApiOrigin]);
 
   return (
     <div className="center-state">

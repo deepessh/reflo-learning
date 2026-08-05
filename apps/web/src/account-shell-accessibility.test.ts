@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   accountConnectionStatus,
+  isButtonActivationKey,
   isLinkActivationKey,
   retryPresentation,
 } from "./account-shell-accessibility";
@@ -13,6 +14,14 @@ describe("account shell accessibility presentation", () => {
     expect(isLinkActivationKey("Spacebar")).toBe(true);
     expect(isLinkActivationKey("Tab")).toBe(false);
     expect(isLinkActivationKey("Escape")).toBe(false);
+  });
+
+  it("supports Enter and Space activation for the connection retry button", () => {
+    expect(isButtonActivationKey("Enter")).toBe(true);
+    expect(isButtonActivationKey(" ")).toBe(true);
+    expect(isButtonActivationKey("Spacebar")).toBe(true);
+    expect(isButtonActivationKey("Tab")).toBe(false);
+    expect(isButtonActivationKey("Escape")).toBe(false);
   });
 
   it("disables retry and exposes visible progress while pending", () => {

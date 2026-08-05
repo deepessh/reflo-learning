@@ -12,6 +12,10 @@ export function isLinkActivationKey(key: string): boolean {
   return key === "Enter" || key === " " || key === "Spacebar";
 }
 
+export function isButtonActivationKey(key: string): boolean {
+  return key === "Enter" || key === " " || key === "Spacebar";
+}
+
 export function retryPresentation(state: RetryState): RetryPresentation {
   if (state === "pending") {
     return {

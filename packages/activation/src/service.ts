@@ -203,7 +203,11 @@ export class ActivationGenerationService {
     const routed = await this.dependencies.models.execute(
       "assessment.quiz.v1",
       {
-        conceptIds: concepts.map((concept) => concept.id),
+        concepts: concepts.map((concept) => ({
+          id: concept.id,
+          name: concept.name,
+          sourceSpanIds: concept.sourceSpans.map((span) => span.id),
+        })),
         count,
         courseId: course.courseId,
         requiredItemTypes: REQUIRED_QUIZ_ITEM_TYPES,

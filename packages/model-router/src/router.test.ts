@@ -294,7 +294,13 @@ describe("typed model router", () => {
       router.execute(
         "assessment.quiz.v1",
         {
-          conceptIds: ["concept-1"],
+          concepts: [
+            {
+              id: "concept-1",
+              name: "Concept one",
+              sourceSpanIds: ["span-1"],
+            },
+          ],
           count: 1,
           courseId: "course-1",
           sourceSpans: [{ id: "span-1", text: "Grounding" }],

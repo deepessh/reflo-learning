@@ -57,7 +57,7 @@ const OUTPUT_CONTRACTS = Object.freeze({
   ),
   "assessment.quiz.v1": exactOutputContract(
     '{"items":[{"conceptIds":authorized-concept-id[],"difficulty":1|2|3|4|5,"itemType":"multiple_choice"|"concept_linking","keyedAnswer":string,"prompt":string,"sourceSpanIds":authorized-source-span-id[],"responseOptions":string[]}|{"conceptIds":authorized-concept-id[],"difficulty":1|2|3|4|5,"itemType":"short_answer","keyedAnswer":string,"prompt":string,"sourceSpanIds":authorized-source-span-id[],"rubric":string}]}',
-    "The items array length must equal typedInput.count and include every typedInput.requiredItemTypes value. For multiple_choice and concept_linking, responseOptions must contain at least two unique strings including keyedAnswer and rubric must be absent. For short_answer, rubric is required and responseOptions must be absent.",
+    "The items array length must equal typedInput.count and include every typedInput.requiredItemTypes value. Every tagged concept must cite at least one sourceSpanId listed for that concept in typedInput.concepts. For multiple_choice and concept_linking, responseOptions must contain at least two unique strings including keyedAnswer and rubric must be absent. For short_answer, conceptIds must contain exactly one concept, rubric is required, and responseOptions must be absent.",
   ),
   "curriculum.structure.v1": exactOutputContract(
     '{"chapters":[{"concepts":[{"key":unique-lowercase-key,"name":string,"prerequisiteKeys":earlier-concept-key[],"sourceSpanIds":authorized-source-span-id[]}],"sourceSpanIds":authorized-source-span-id[],"title":string}]}',
@@ -104,8 +104,9 @@ const definitions = {
     fixedInstructions: [
       ...COMMON_GROUNDING_INSTRUCTIONS,
       "Generate answerable quiz items with type, difficulty, keyed answers, and source provenance.",
+      "For every tagged concept, cite at least one source span assigned to that concept in the typed input.",
       "For every multiple-choice or concept-linking item, emit responseOptions with at least two unique choices containing keyedAnswer, and do not emit rubric.",
-      "For every short-answer item, emit rubric and do not emit responseOptions.",
+      "For every short-answer item, tag exactly one concept, emit rubric, and do not emit responseOptions.",
       "Cover every required item type supplied in the typed input.",
     ],
     generationParameters: { temperature: 0.2 },
@@ -114,7 +115,7 @@ const definitions = {
     outputContract: OUTPUT_CONTRACTS["assessment.quiz.v1"],
     outputSchemaId: "quiz-generation-result-v2",
     tools: [],
-    version: "3",
+    version: "4",
   }),
   "curriculum.structure.v1": definePrompt({
     fixedInstructions: [

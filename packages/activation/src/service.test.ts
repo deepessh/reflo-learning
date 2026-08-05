@@ -173,9 +173,9 @@ describe("activation generation", () => {
         new Set(["multiple_choice", "short_answer", "concept_linking"]),
       );
       expect(bank.modelProvenance).toMatchObject({
-        inputSchemaVersion: "quiz-generation-input-v2",
+        inputSchemaVersion: "quiz-generation-input-v3",
         promptId: "assessment-quiz",
-        promptVersion: "3",
+        promptVersion: "4",
         resultSchemaVersion: "quiz-generation-result-v2",
       });
       expect(bank.items.every((item) => item.sourceSpanIds.length > 0)).toBe(

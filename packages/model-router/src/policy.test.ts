@@ -37,8 +37,8 @@ describe("route-policy-v6", () => {
   it("versions the discriminated quiz contract without weakening validation", () => {
     const quiz = PROMPT_REGISTRY_V1["assessment.quiz.v1"];
 
-    expect(ROUTE_POLICY_V6["assessment.quiz.v1"].promptVersion).toBe("3");
-    expect(quiz.version).toBe("3");
+    expect(ROUTE_POLICY_V6["assessment.quiz.v1"].promptVersion).toBe("4");
+    expect(quiz.version).toBe("4");
     expect(quiz.outputSchemaId).toBe("quiz-generation-result-v2");
     expect(quiz.outputContract).not.toContain('"responseOptions"?:');
     expect(quiz.outputContract).not.toContain('"rubric"?:');
@@ -50,7 +50,10 @@ describe("route-policy-v6", () => {
       "responseOptions must contain at least two unique strings including keyedAnswer",
     );
     expect(quiz.outputContract).toContain(
-      "For short_answer, rubric is required and responseOptions must be absent",
+      "Every tagged concept must cite at least one sourceSpanId listed for that concept in typedInput.concepts",
+    );
+    expect(quiz.outputContract).toContain(
+      "For short_answer, conceptIds must contain exactly one concept, rubric is required, and responseOptions must be absent",
     );
   });
 

@@ -265,6 +265,7 @@ function isQuizGenerationResult(
   if (!Array.isArray(value.items) || value.items.length !== input.count) {
     return false;
   }
+  const conceptIds = input.concepts.map((concept) => concept.id);
   const itemTypes = new Set<string>();
   for (const entry of value.items) {
     if (!isRecord(entry)) {
@@ -284,7 +285,7 @@ function isQuizGenerationResult(
         "sourceSpanIds",
         ...optionalKeys,
       ]) ||
-      !isAuthorizedIds(entry.conceptIds, input.conceptIds) ||
+      !isAuthorizedIds(entry.conceptIds, conceptIds) ||
       !isQuizDifficulty(entry.difficulty) ||
       !isQuizItemType(entry.itemType) ||
       !isString(entry.keyedAnswer) ||

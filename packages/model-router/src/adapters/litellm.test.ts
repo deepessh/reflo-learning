@@ -109,14 +109,7 @@ describe("LiteLLM development adapters", () => {
         stream: false,
       });
       const responseFormat = requests[0]?.body.response_format;
-      if (task === "curriculum.segment.v1" || task === "tutor.answer.v1") {
-        expect(responseFormat).toEqual({ type: "json_object" });
-      } else {
-        expect(responseFormat).toMatchObject({
-          json_schema: { strict: true },
-          type: "json_schema",
-        });
-      }
+      expect(responseFormat).toEqual({ type: "json_object" });
       const messages = requests[0]?.body.messages as Array<{
         readonly content: string;
         readonly role: string;
@@ -138,34 +131,6 @@ describe("LiteLLM development adapters", () => {
           '"itemType":"multiple_choice"|"concept_linking"',
         );
         expect(system.outputContract).toContain('"itemType":"short_answer"');
-        expect(responseFormat).toMatchObject({
-          json_schema: {
-            schema: {
-              properties: {
-                items: {
-                  maxItems: 1,
-                  minItems: 1,
-                  type: "array",
-                },
-              },
-            },
-          },
-        });
-        const serializedResponseFormat = JSON.stringify(responseFormat);
-        expect(serializedResponseFormat).toContain('"span-1"');
-        expect(serializedResponseFormat).toContain('"vpc"');
-        expect(serializedResponseFormat).not.toContain("A VPC is isolated.");
-      }
-      if (task === "lesson.text.v1") {
-        expect(responseFormat).toMatchObject({
-          json_schema: {
-            schema: {
-              properties: {
-                content: { minLength: 2_400, type: "string" },
-              },
-            },
-          },
-        });
       }
       if (task === "curriculum.segment.v1") {
         expect(system.promptVersion).toBe("2");
@@ -187,6 +152,68 @@ describe("LiteLLM development adapters", () => {
       expect(user.typedInput).not.toHaveProperty("answer");
     },
   );
+
+  it("uses Qwen JSON-object mode while rejecting a partial placement result", async () => {
+    const requests: Record<string, unknown>[] = [];
+    const input: ModelTaskInput<"assessment.quiz.v1"> = {
+      concepts: [
+        {
+          id: "vpc",
+          name: "Virtual private clouds",
+          sourceSpanIds: ["span-1"],
+        },
+      ],
+      count: 10,
+      courseId: "cloud",
+      requiredItemTypes: ["multiple_choice", "short_answer", "concept_linking"],
+      sourceSpans: [
+        {
+          id: "span-1",
+          inputHash: "a".repeat(64),
+          sourceOrder: 0,
+          text: "A VPC is an isolated network.",
+        },
+      ],
+    };
+    const adapters = createLiteLlmDevAdapters(environment, {
+      fetch: async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return chatResponse({
+          items: [
+            {
+              conceptIds: ["vpc"],
+              difficulty: 1,
+              itemType: "multiple_choice",
+              keyedAnswer: "An isolated network",
+              prompt: "What is a VPC?",
+              responseOptions: ["An isolated network", "A public DNS record"],
+              sourceSpanIds: ["span-1"],
+            },
+          ],
+        });
+      },
+    });
+
+    await expect(
+      createModelRouter({
+        adapters: adapters.adapters,
+        deployment: "dev",
+        traceSink: new InMemoryTraceSink(),
+      }).execute("assessment.quiz.v1", input, { deadlineMs: 1_000 }),
+    ).rejects.toMatchObject({ code: "invalid_result" });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.response_format).toEqual({ type: "json_object" });
+    const messages = requests[0]?.messages as Array<{
+      readonly content: string;
+    }>;
+    const system = JSON.parse(messages[0]?.content ?? "null");
+    const user = JSON.parse(messages[1]?.content ?? "null");
+    expect(system.outputContract).toContain("items array length must equal");
+    expect(system.outputContract).toContain("requiredItemTypes");
+    expect(user.typedInput.concepts).toEqual(input.concepts);
+    expect(user.typedInput).not.toHaveProperty("sourceSpans");
+  });
 
   it("replaces provider-echoed non-instructional segment metadata", async () => {
     const fixture = textFixtures().find(
@@ -519,7 +546,13 @@ function textFixtures(): readonly {
     {
       capability: "quiz generation",
       input: {
-        conceptIds: ["vpc"],
+        concepts: [
+          {
+            id: "vpc",
+            name: "Virtual private clouds",
+            sourceSpanIds: ["span-1"],
+          },
+        ],
         count: 1,
         courseId: "cloud",
         requiredItemTypes: ["multiple_choice"],

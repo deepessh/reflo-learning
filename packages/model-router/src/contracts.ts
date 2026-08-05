@@ -53,9 +53,15 @@ export const QUIZ_ITEM_TYPES = [
 
 export type QuizItemType = (typeof QUIZ_ITEM_TYPES)[number];
 
+export interface QuizGenerationConcept {
+  readonly id: string;
+  readonly name: string;
+  readonly sourceSpanIds: readonly string[];
+}
+
 export interface QuizGenerationInput {
+  readonly concepts: readonly QuizGenerationConcept[];
   readonly courseId: string;
-  readonly conceptIds: readonly string[];
   readonly count: number;
   readonly requiredItemTypes?: readonly QuizItemType[];
   readonly sourceSpans: readonly AuthorizedSourceSpan[];

@@ -33,10 +33,10 @@ export const ROUTE_POLICY_V6 = Object.freeze({
   "assessment.quiz.v1": route({
     capability: "structured",
     fallback: null,
-    inputSchemaVersion: "quiz-generation-input-v2",
+    inputSchemaVersion: "quiz-generation-input-v3",
     maxImmediateAttempts: 2,
     promptId: "assessment-quiz",
-    promptVersion: "3",
+    promptVersion: "4",
     requestedSelector: "qwen.structured",
     resultSchemaVersion: "quiz-generation-result-v2",
     task: "assessment.quiz.v1",

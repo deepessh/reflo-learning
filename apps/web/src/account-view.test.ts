@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   conceptProgressPresentation,
   courseProgress,
+  courseStudyAvailability,
   exactPercentLabel,
   masteryDeltaLabel,
   readinessPresentation,
@@ -11,6 +12,97 @@ import {
 } from "./account-view";
 
 describe("account shell presentation", () => {
+  it.each([
+    ["course failure", { courseStatus: "failed", sourceStatus: "parsed" }],
+    ["source failure", { courseStatus: "generating", sourceStatus: "failed" }],
+  ] as const)(
+    "blocks study after %s without claiming learning evidence",
+    (_case, overrides) => {
+      const availability = courseStudyAvailability(
+        libraryCourse({ ...overrides, chapterCount: 0 }),
+      );
+
+      expect(availability).toMatchObject({ kind: "failed" });
+      expect(availability).toHaveProperty(
+        "copy",
+        expect.stringContaining("will not start a study session"),
+      );
+      expect(availability).toHaveProperty(
+        "copy",
+        expect.stringContaining("record learning evidence"),
+      );
+    },
+  );
+
+  it("keeps OCR and nonterminal zero-outline courses out of study without calling them ready", () => {
+    expect(
+      courseStudyAvailability(
+        libraryCourse({
+          chapterCount: 0,
+          sourceStatus: "ocr_required",
+        }),
+      ),
+    ).toMatchObject({ kind: "ocr_required" });
+
+    for (const sourceStatus of [
+      "quarantined",
+      "validating",
+      "queued",
+      "parsing",
+      "parsed",
+    ] as const) {
+      expect(
+        courseStudyAvailability(
+          libraryCourse({ chapterCount: 0, sourceStatus }),
+        ),
+      ).toMatchObject({ kind: "preparing" });
+    }
+  });
+
+  it.each(["generating", "ready"] as const)(
+    "allows a parsed outlined %s course",
+    (courseStatus) => {
+      expect(
+        courseStudyAvailability(
+          libraryCourse({ chapterCount: 3, courseStatus }),
+        ),
+      ).toEqual({ kind: "available" });
+    },
+  );
+
+  it("fails closed when a ready course has no usable outline", () => {
+    const course = libraryCourse({ chapterCount: 0, courseStatus: "ready" });
+    expect(courseStudyAvailability(course)).toMatchObject({
+      kind: "failed",
+      title: "A usable course outline is unavailable.",
+    });
+    expect(courseProgress(course)).toEqual({
+      label: "Needs attention",
+      percent: 0,
+      tone: "danger",
+    });
+  });
+
+  it.each([0, 3])(
+    "never labels a non-parsed course with %i chapters ready to study",
+    (chapterCount) => {
+      const course = libraryCourse({
+        chapterCount,
+        chaptersReady: chapterCount,
+        courseStatus: "ready",
+        sourceStatus: "parsing",
+      });
+      expect(courseStudyAvailability(course)).toMatchObject({
+        kind: "preparing",
+      });
+      expect(courseProgress(course)).toEqual({
+        label: "Building outline",
+        percent: null,
+        tone: "waiting",
+      });
+    },
+  );
+
   it("makes progressive course state explicit", () => {
     expect(
       courseProgress({
@@ -195,3 +287,18 @@ describe("account shell presentation", () => {
     });
   });
 });
+
+function libraryCourse(
+  overrides: Partial<Parameters<typeof courseStudyAvailability>[0]> = {},
+): Parameters<typeof courseStudyAvailability>[0] {
+  return {
+    chapterCount: 1,
+    chaptersReady: 1,
+    courseId: "course-a",
+    courseStatus: "generating",
+    sourceStatus: "parsed",
+    title: "Course A",
+    updatedAt: new Date("2026-08-05T12:00:00.000Z"),
+    ...overrides,
+  };
+}

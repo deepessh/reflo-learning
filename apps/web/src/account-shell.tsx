@@ -19,6 +19,7 @@ import type {
 } from "@reflo/accounts";
 
 import {
+  courseStudyAvailability,
   courseProgress,
   sessionDuration,
   sessionSummaryPresentation,
@@ -410,6 +411,11 @@ function Dashboard({
     sessions.find(
       (session) => session.sessionId === selectedHistorySessionId,
     ) ?? null;
+  const selectedCourse =
+    courses.find((course) => course.courseId === selectedCourseId) ?? null;
+  const studyAvailability =
+    selectedCourse === null ? null : courseStudyAvailability(selectedCourse);
+  const courseSetupDisclosure = useRef<HTMLDetailsElement>(null);
 
   function scrollToStudy() {
     window.setTimeout(() => {
@@ -429,6 +435,18 @@ function Dashboard({
     setSelectedHistorySessionId((selected) =>
       selected === session.sessionId ? null : session.sessionId,
     );
+  }
+
+  function openCourseSetup() {
+    const disclosure = courseSetupDisclosure.current;
+    if (disclosure === null) {
+      return;
+    }
+    disclosure.open = true;
+    window.setTimeout(() => {
+      disclosure.querySelector<HTMLElement>("summary")?.focus();
+      disclosure.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   }
 
   return (
@@ -571,7 +589,7 @@ function Dashboard({
         </section>
       </div>
 
-      {selectedCourseId !== null ? (
+      {selectedCourseId !== null && studyAvailability?.kind === "available" ? (
         <FlowBStudy
           apiOrigin={apiOrigin}
           courseId={selectedCourseId}
@@ -590,6 +608,14 @@ function Dashboard({
                 session.status === "active",
             )?.sessionId ?? null
           }
+        />
+      ) : null}
+      {selectedCourse !== null &&
+      studyAvailability !== null &&
+      studyAvailability.kind !== "available" ? (
+        <CourseStudyUnavailable
+          availability={studyAvailability}
+          onReviewCourseSetup={openCourseSetup}
         />
       ) : null}
 
@@ -623,7 +649,11 @@ function Dashboard({
           <p>Choose when and where Reflo sends your next review.</p>
           <DeliveryPreferences apiOrigin={apiOrigin} />
         </details>
-        <details className="import-disclosure">
+        <details
+          className="import-disclosure"
+          id="course-setup-disclosure"
+          ref={courseSetupDisclosure}
+        >
           <summary>Add course material</summary>
           <p>
             Course setup accepts approved PDF sources and builds a source-backed
@@ -636,6 +666,43 @@ function Dashboard({
         </details>
       </div>
     </div>
+  );
+}
+
+function CourseStudyUnavailable({
+  availability,
+  onReviewCourseSetup,
+}: {
+  readonly availability: Exclude<
+    ReturnType<typeof courseStudyAvailability>,
+    { readonly kind: "available" }
+  >;
+  readonly onReviewCourseSetup: () => void;
+}) {
+  return (
+    <section
+      className="panel flow-panel"
+      id="study-session"
+      aria-labelledby="study-unavailable-title"
+      tabIndex={-1}
+    >
+      <p className="eyebrow">Today’s session</p>
+      <h2 id="study-unavailable-title">Study is not available</h2>
+      <div
+        className="flow-notice"
+        role={availability.kind === "preparing" ? "status" : "alert"}
+      >
+        <strong>{availability.title}</strong>
+        <p>{availability.copy}</p>
+        <button
+          aria-controls="course-setup-disclosure"
+          onClick={onReviewCourseSetup}
+          type="button"
+        >
+          Review upload options
+        </button>
+      </div>
+    </section>
   );
 }
 

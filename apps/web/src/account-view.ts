@@ -26,16 +26,92 @@ export interface SessionSummaryPresentation {
   readonly successfulReviewCount: number;
 }
 
+export type CourseStudyAvailability =
+  | { readonly kind: "available" }
+  | {
+      readonly copy: string;
+      readonly kind: "failed" | "ocr_required" | "preparing";
+      readonly title: string;
+    };
+
+export function courseStudyAvailability(
+  course: LibraryCourse,
+): CourseStudyAvailability {
+  if (course.courseStatus === "failed" || course.sourceStatus === "failed") {
+    const outlineMissing = course.chapterCount === 0;
+    return {
+      copy: outlineMissing
+        ? "The approved PDF stopped before a source-backed outline was ready. Reflo will not start a study session or record learning evidence from this unavailable course. Review course setup to validate the approved PDF again."
+        : "This course is marked as failed and cannot start a study session. Reflo will not record learning evidence from it. Review course setup before trying the approved PDF again.",
+      kind: "failed",
+      title: outlineMissing
+        ? "Course setup stopped before the outline was ready."
+        : "Course preparation needs attention.",
+    };
+  }
+  if (course.sourceStatus === "ocr_required") {
+    return {
+      copy: "Text recognition is required before this source can become a course. For this Demo Day surface, review course setup and choose the matching digitally generated approved PDF.",
+      kind: "ocr_required",
+      title: "Text recognition is needed before study can begin.",
+    };
+  }
+  if (
+    course.sourceStatus === "parsed" &&
+    (course.courseStatus === "generating" || course.courseStatus === "ready") &&
+    course.chapterCount > 0
+  ) {
+    return { kind: "available" };
+  }
+  if (
+    course.sourceStatus === "parsed" &&
+    course.courseStatus === "ready" &&
+    course.chapterCount === 0
+  ) {
+    return {
+      copy: "This course has no usable source-backed outline, so Reflo will not start a study session or record learning evidence from it. Review course setup to validate the approved PDF again.",
+      kind: "failed",
+      title: "A usable course outline is unavailable.",
+    };
+  }
+  if (course.courseStatus === "archived") {
+    return {
+      copy: "This archived course is not available for study. Reflo will not start a session or record learning evidence from it.",
+      kind: "failed",
+      title: "This course is unavailable.",
+    };
+  }
+  return {
+    copy: "Source-backed chapters and concepts are still being prepared. Study will become available after the outline is ready. You can wait here or review course setup options.",
+    kind: "preparing",
+    title: "The course outline is still being prepared.",
+  };
+}
+
 export function courseProgress(course: LibraryCourse): {
   readonly label: string;
   readonly percent: number | null;
   readonly tone: "active" | "danger" | "ready" | "waiting";
 } {
-  if (course.courseStatus === "failed" || course.sourceStatus === "failed") {
+  if (
+    course.courseStatus === "failed" ||
+    course.courseStatus === "archived" ||
+    course.sourceStatus === "failed"
+  ) {
     return { label: "Needs attention", percent: 0, tone: "danger" };
   }
   if (course.sourceStatus === "ocr_required") {
     return { label: "OCR queued", percent: null, tone: "waiting" };
+  }
+  if (course.sourceStatus !== "parsed") {
+    return {
+      label: ingestionLabel(course.sourceStatus),
+      percent: null,
+      tone: "waiting",
+    };
+  }
+  if (course.courseStatus === "ready" && course.chapterCount === 0) {
+    return { label: "Needs attention", percent: 0, tone: "danger" };
   }
   if (course.courseStatus === "ready") {
     return { label: "Ready to study", percent: 100, tone: "ready" };

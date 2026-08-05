@@ -25,8 +25,7 @@ import {
 } from "./account-view";
 import {
   accountConnectionStatus,
-  isButtonActivationKey,
-  isLinkActivationKey,
+  activateControlFromKeyboard,
   retryPresentation,
   type AccountRequestKind,
   type RetryState,
@@ -49,11 +48,22 @@ type Screen = "loading" | "signed-out" | "email-sent" | "dashboard" | "error";
 type ProgressScreen = "idle" | "loading" | "ready" | "error";
 
 function activateLinkFromKeyboard(event: KeyboardEvent<HTMLAnchorElement>) {
-  if (!isLinkActivationKey(event.key)) {
+  activateControlFromKeyboard(event);
+}
+
+function activateDashboardControlFromKeyboard(
+  event: KeyboardEvent<HTMLDivElement>,
+) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !target.matches("button, summary")) {
     return;
   }
-  event.preventDefault();
-  event.currentTarget.click();
+  activateControlFromKeyboard({
+    currentTarget: target,
+    key: event.key,
+    preventDefault: () => event.preventDefault(),
+    repeat: event.repeat,
+  });
 }
 
 export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
@@ -391,7 +401,7 @@ function Dashboard({
   }
 
   return (
-    <div className="dashboard">
+    <div className="dashboard" onKeyDown={activateDashboardControlFromKeyboard}>
       <div className="dashboard-heading">
         <div>
           <p className="eyebrow">Personal library</p>
@@ -693,13 +703,7 @@ export function ErrorState({
       <button
         disabled={presentation.buttonDisabled}
         onClick={onRetry}
-        onKeyDown={(event) => {
-          if (!isButtonActivationKey(event.key)) {
-            return;
-          }
-          event.preventDefault();
-          onRetry();
-        }}
+        onKeyDown={activateControlFromKeyboard}
         ref={retryButton}
         type="button"
       >

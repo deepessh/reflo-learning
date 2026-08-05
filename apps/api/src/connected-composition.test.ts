@@ -155,9 +155,11 @@ describe("connected demo composition", () => {
       [0, 0],
     );
 
-    await expect(service.gradeShortAnswer(gradingInput())).rejects.toMatchObject<
-      Partial<AssessmentError>
-    >({ code: "projection_unavailable" });
+    await expect(
+      service.gradeShortAnswer(gradingInput()),
+    ).rejects.toMatchObject<Partial<AssessmentError>>({
+      code: "projection_unavailable",
+    });
     expect(project).toHaveBeenCalledTimes(1);
   });
 });

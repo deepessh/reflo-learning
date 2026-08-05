@@ -918,9 +918,8 @@ export function FlowBStudy({
             } else if (target.kind === "replacement") {
               void submitFallback();
             } else if (target.kind === "course_lesson") {
-              void loadCourseLesson(target.sessionId).catch(
-                (error: unknown) =>
-                  fail(error, "The lesson remains unavailable."),
+              void loadCourseLesson(target.sessionId).catch((error: unknown) =>
+                fail(error, "The lesson remains unavailable."),
               );
             } else if (target.kind === "idle") {
               setPhase("idle");

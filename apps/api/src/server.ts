@@ -667,10 +667,7 @@ export function createApiRequestListener(
             url.pathname,
             "assessments/pending-fallback",
           );
-          if (
-            request.method === "GET" &&
-            pendingAssessmentSessionId !== null
-          ) {
+          if (request.method === "GET" && pendingAssessmentSessionId !== null) {
             const assessment = dependencies.assessment;
             if (assessment === undefined) {
               sendJson(response, 503, { error: "service_unavailable" });

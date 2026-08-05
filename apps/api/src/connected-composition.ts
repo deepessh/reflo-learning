@@ -415,9 +415,7 @@ export async function createConnectedDemoRuntime(
   };
 }
 
-export class KnowledgeProjectingAssessment
-  implements ConnectedAssessmentRuntime
-{
+export class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime {
   constructor(
     private readonly assessment: Pick<
       AssessmentService,

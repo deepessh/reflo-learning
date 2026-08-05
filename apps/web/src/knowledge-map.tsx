@@ -113,60 +113,60 @@ export function KnowledgeMap({
                 </summary>
                 <div className="concept-grid">
                   {chapter.concepts.map((concept) => {
-                  const presentation = conceptProgressPresentation(concept);
-                  return (
-                    <article
-                      className={`concept-tile tone-${presentation.tone}`}
-                      key={concept.conceptId}
-                    >
-                      <div className="concept-heading">
-                        <span>{presentation.label}</span>
-                        <span>{reviewLabel(concept.review.state)}</span>
-                      </div>
-                      <h4>{concept.name}</h4>
-                      <div className="concept-measure">
-                        <strong>
-                          {presentation.masteryPercent === null
-                            ? "—"
-                            : `${presentation.masteryPercent}%`}
-                        </strong>
-                        <span>mastery estimate</span>
-                      </div>
-                      <div
-                        aria-label={
-                          presentation.masteryPercent === null
-                            ? "No eligible mastery evidence"
-                            : `${presentation.masteryPercent}% mastery estimate`
-                        }
-                        aria-valuemax={100}
-                        aria-valuemin={0}
-                        aria-valuenow={
-                          presentation.masteryPercent === null
-                            ? undefined
-                            : presentation.masteryPercent
-                        }
-                        className="mastery-meter"
-                        role="meter"
+                    const presentation = conceptProgressPresentation(concept);
+                    return (
+                      <article
+                        className={`concept-tile tone-${presentation.tone}`}
+                        key={concept.conceptId}
                       >
-                        <span
-                          style={{
-                            width: `${presentation.masteryPercent ?? 0}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="concept-meta">
-                        <span>{concept.evidenceCount} assessed answers</span>
-                        {concept.lastReviewedAt === null ? null : (
-                          <span>
-                            Reviewed{" "}
-                            {new Date(
-                              concept.lastReviewedAt,
-                            ).toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
-                    </article>
-                  );
+                        <div className="concept-heading">
+                          <span>{presentation.label}</span>
+                          <span>{reviewLabel(concept.review.state)}</span>
+                        </div>
+                        <h4>{concept.name}</h4>
+                        <div className="concept-measure">
+                          <strong>
+                            {presentation.masteryPercent === null
+                              ? "—"
+                              : `${presentation.masteryPercent}%`}
+                          </strong>
+                          <span>mastery estimate</span>
+                        </div>
+                        <div
+                          aria-label={
+                            presentation.masteryPercent === null
+                              ? "No eligible mastery evidence"
+                              : `${presentation.masteryPercent}% mastery estimate`
+                          }
+                          aria-valuemax={100}
+                          aria-valuemin={0}
+                          aria-valuenow={
+                            presentation.masteryPercent === null
+                              ? undefined
+                              : presentation.masteryPercent
+                          }
+                          className="mastery-meter"
+                          role="meter"
+                        >
+                          <span
+                            style={{
+                              width: `${presentation.masteryPercent ?? 0}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="concept-meta">
+                          <span>{concept.evidenceCount} assessed answers</span>
+                          {concept.lastReviewedAt === null ? null : (
+                            <span>
+                              Reviewed{" "}
+                              {new Date(
+                                concept.lastReviewedAt,
+                              ).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </article>
+                    );
                   })}
                 </div>
               </details>

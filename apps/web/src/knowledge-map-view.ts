@@ -2,7 +2,10 @@ import type { CourseProgress } from "@reflo/accounts";
 
 export function chapterProgressPresentation(
   chapter: CourseProgress["chapters"][number],
-): { readonly label: string; readonly tone: "attention" | "neutral" | "ready" } {
+): {
+  readonly label: string;
+  readonly tone: "attention" | "neutral" | "ready";
+} {
   const dueCount = chapter.concepts.filter(
     (concept) => concept.review.state === "due",
   ).length;

@@ -124,7 +124,7 @@ logs_apps() {
   REFLO_LOG_VIEW=${1:-all}
   case "$REFLO_LOG_VIEW" in
     all)
-      run_compose logs --since 30m --tail 200 app-setup api jobs web
+      run_compose logs --tail 200 app-setup api jobs web
       if bridge_configured; then
         node "$REFLO_APPS_ROOT/scripts/local-ingestion-bridge.mjs" logs
       fi
@@ -150,8 +150,8 @@ logs_apps() {
 down_apps() {
   prepare
   stop_bridge
-  run_compose down --remove-orphans
-  echo "Removed only reflo-local containers and network; named volumes were preserved"
+  run_compose rm --force --stop app-setup api jobs web
+  echo "Removed only reflo-local application containers; shared services and named volumes were preserved"
 }
 
 reset_apps() {

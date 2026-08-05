@@ -220,9 +220,11 @@ describe("versioned short-answer grading", () => {
     ]);
     const command = gradingCommand(fixture.policy, "attempt/timeout-retry");
 
-    await expect(fixture.service.gradeShortAnswer(command)).rejects.toMatchObject<
-      Partial<AssessmentError>
-    >({ code: "grading_unavailable" });
+    await expect(
+      fixture.service.gradeShortAnswer(command),
+    ).rejects.toMatchObject<Partial<AssessmentError>>({
+      code: "grading_unavailable",
+    });
     const created = await fixture.service.gradeShortAnswer(command);
     const replayed = await fixture.service.gradeShortAnswer(command);
 
@@ -445,9 +447,7 @@ function gradingFixture(results: readonly unknown[]) {
   );
 }
 
-function gradingFixtureWithActions(
-  actions: readonly ScriptedAdapterAction[],
-) {
+function gradingFixtureWithActions(actions: readonly ScriptedAdapterAction[]) {
   const question = shortAnswerQuestion();
   const answer = "A VPC is isolated and subnets divide its address space.";
   const prompt = buildPromptBundle("assessment.grade-short-answer.v1", {

@@ -109,10 +109,7 @@ describe("auth-v1 account service", () => {
     );
     expect(emailPort.messages).toHaveLength(1);
     await expect(
-      service.requestMagicLink(
-        "staff@example.test",
-        "http://reflo.example",
-      ),
+      service.requestMagicLink("staff@example.test", "http://reflo.example"),
     ).rejects.toBeInstanceOf(AccountInputError);
   });
 

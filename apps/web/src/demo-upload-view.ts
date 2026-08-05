@@ -1,4 +1,8 @@
-import type { DemoUploadFailureCode, DemoUploadState } from "@reflo/contracts";
+import type {
+  DemoUploadFailureCode,
+  DemoUploadState,
+  DemoUploadView,
+} from "@reflo/contracts";
 
 export interface DemoUploadPresentation {
   readonly detail: string;
@@ -7,6 +11,27 @@ export interface DemoUploadPresentation {
   readonly poll: boolean;
   readonly progress: string;
   readonly tone: "attention" | "negative" | "neutral" | "positive";
+}
+
+export type DemoUploadFailureAction =
+  | {
+      readonly label: "Try again";
+      readonly replacesUploadId: string;
+    }
+  | {
+      readonly label: "Validate another PDF";
+      readonly replacesUploadId: null;
+    };
+
+export function demoUploadFailureAction(
+  upload: DemoUploadView,
+): DemoUploadFailureAction | null {
+  if (upload.state !== "failed") {
+    return null;
+  }
+  return upload.failure?.retryable === true
+    ? { label: "Try again", replacesUploadId: upload.uploadId }
+    : { label: "Validate another PDF", replacesUploadId: null };
 }
 
 export function demoUploadPresentation(

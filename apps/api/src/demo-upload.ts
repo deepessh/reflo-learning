@@ -155,6 +155,7 @@ export class ApprovedDemoUploadService {
       readonly approvalId: string;
       readonly bytes: Uint8Array;
       readonly mediaType: string;
+      readonly replacesUploadId?: string;
     },
   ): Promise<DemoUploadView> {
     this.#assertOperator(authorization);
@@ -189,6 +190,20 @@ export class ApprovedDemoUploadService {
         this.#clock(),
       );
     }
+    if (input.replacesUploadId !== undefined) {
+      const replaced = await this.#repository.get(
+        authorization,
+        input.replacesUploadId,
+      );
+      if (
+        replaced === null ||
+        replaced.checksum !== actualSha256 ||
+        uploadState(replaced, processingLane(replaced)) !== "failed" ||
+        !isRetryableFailureClass(replaced.failureClass)
+      ) {
+        throw new DemoUploadAccessError("not_found");
+      }
+    }
     const courseId = this.#createId();
     const operationId = this.#createId();
     const generationOperationId = this.#createId();
@@ -214,6 +229,7 @@ export class ApprovedDemoUploadService {
       mediaType: approval.mediaType,
       objectKey,
       operationId,
+      replacesSourceDocumentId: input.replacesUploadId,
       sourceDocumentId: uploadId,
       title: approval.title,
     });
@@ -295,13 +311,8 @@ export class ApprovedDemoUploadService {
     snapshot: DemoUploadSnapshot,
     approval: ApprovedDemoSource,
   ): DemoUploadView {
-    const processingLane =
-      snapshot.byteSize > STANDARD_MAX_BYTES ||
-      (snapshot.pageCount ?? 0) > STANDARD_MAX_PAGES ||
-      snapshot.parseStatus === "ocr_required"
-        ? "large"
-        : "standard";
-    const state = uploadState(snapshot, processingLane);
+    const lane = processingLane(snapshot);
+    const state = uploadState(snapshot, lane);
     const failureCode =
       state === "failed" ? mapFailure(snapshot.failureClass) : null;
     return {
@@ -313,16 +324,29 @@ export class ApprovedDemoUploadService {
           ? null
           : {
               code: failureCode,
-              retryable:
-                failureCode === "dependency_unavailable" ||
-                failureCode === "parser_failed",
+              retryable: isRetryableFailureClass(snapshot.failureClass),
             },
-      processingLane,
+      processingLane: lane,
       state,
       statusUpdatedAt: snapshot.updatedAt.toISOString(),
       uploadId: snapshot.sourceDocumentId,
     };
   }
+}
+
+function isRetryableFailureClass(value: string | null): boolean {
+  return (
+    value === "infrastructure_unavailable" ||
+    value === "generation_dependency_unavailable"
+  );
+}
+
+function processingLane(snapshot: DemoUploadSnapshot): "large" | "standard" {
+  return snapshot.byteSize > STANDARD_MAX_BYTES ||
+    (snapshot.pageCount ?? 0) > STANDARD_MAX_PAGES ||
+    snapshot.parseStatus === "ocr_required"
+    ? "large"
+    : "standard";
 }
 
 function uploadState(
@@ -385,8 +409,12 @@ function mapFailure(value: string | null): DemoUploadFailureCode {
     case "unsupported_type":
       return "unsupported_type";
     case "infrastructure_unavailable":
+    case "generation_dependency_unavailable":
     case "scan_db_stale":
       return "dependency_unavailable";
+    case "generation_authorization_denied":
+    case "generation_deadline_exceeded":
+    case "generation_invalid_result":
     case "curriculum_generation_failed":
       return "generation_failed";
     case "parse_timeout":

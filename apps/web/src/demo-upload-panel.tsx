@@ -18,7 +18,10 @@ import {
   DEMO_UPLOAD_FILE_ACCEPT,
   isDemoPdfSelection,
 } from "./demo-upload-file";
-import { demoUploadPresentation } from "./demo-upload-view";
+import {
+  demoUploadFailureAction,
+  demoUploadPresentation,
+} from "./demo-upload-view";
 
 type ApprovalScreen = "error" | "hidden" | "loading" | "ready";
 type SubmissionScreen = "idle" | "submitting" | "tracking";
@@ -189,6 +192,8 @@ export function DemoUploadPanel({
     upload === null
       ? null
       : demoUploadPresentation(upload.state, upload.failure?.code ?? null);
+  const failureAction =
+    upload === null ? null : demoUploadFailureAction(upload);
   const isBusy =
     submissionScreen === "submitting" || presentation?.poll === true;
   const formLocked =
@@ -214,7 +219,6 @@ export function DemoUploadPanel({
       );
       return;
     }
-    setUpload(null);
     setLastCheckedAt(null);
     setSubmissionScreen("submitting");
     const csrfResponse = await fetch(`${apiOrigin}/v1/csrf-token`, {
@@ -234,6 +238,12 @@ export function DemoUploadPanel({
         "content-type": approval.mediaType,
         "x-reflo-csrf": csrfToken,
         "x-reflo-demo-source-approval": approval.approvalId,
+        ...(failureAction?.replacesUploadId !== null &&
+        failureAction?.replacesUploadId !== undefined
+          ? {
+              "x-reflo-demo-upload-retry-of": failureAction.replacesUploadId,
+            }
+          : {}),
       },
       method: "POST",
     }).catch(() => null);
@@ -363,8 +373,8 @@ export function DemoUploadPanel({
                     ? "Outline ready"
                     : upload?.state === "ocr_required"
                       ? "Validate another PDF"
-                      : upload?.state === "failed"
-                        ? "Try again"
+                      : failureAction !== null
+                        ? failureAction.label
                         : "Validate and build outline"}
             </button>
           </form>

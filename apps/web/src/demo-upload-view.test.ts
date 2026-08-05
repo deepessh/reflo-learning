@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { demoUploadPresentation } from "./demo-upload-view";
+import {
+  demoUploadFailureAction,
+  demoUploadPresentation,
+} from "./demo-upload-view";
 
 describe("course upload presentation", () => {
   it("keeps live standard-profile work polling until an outline is ready", () => {
@@ -88,5 +91,36 @@ describe("course upload presentation", () => {
     expect(
       demoUploadPresentation("failed", "unsupported_type").detail,
     ).toContain("matching approved PDF");
+  });
+
+  it("offers retry lineage only for failures the server marks retryable", () => {
+    const failedUpload = {
+      approvalId: "approved-pdf-v1",
+      contractVersion: "demo-upload-v2" as const,
+      courseId: "55000000-0000-4000-8000-000000000002",
+      processingLane: "standard" as const,
+      state: "failed" as const,
+      statusUpdatedAt: "2026-08-05T20:00:00.000Z",
+      uploadId: "55000000-0000-4000-8000-000000000001",
+    };
+
+    expect(
+      demoUploadFailureAction({
+        ...failedUpload,
+        failure: { code: "dependency_unavailable", retryable: true },
+      }),
+    ).toEqual({
+      label: "Try again",
+      replacesUploadId: failedUpload.uploadId,
+    });
+    expect(
+      demoUploadFailureAction({
+        ...failedUpload,
+        failure: { code: "generation_failed", retryable: false },
+      }),
+    ).toEqual({
+      label: "Validate another PDF",
+      replacesUploadId: null,
+    });
   });
 });

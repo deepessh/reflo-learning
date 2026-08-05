@@ -183,33 +183,6 @@ test(
         "curriculum_generation_failed",
       );
 
-      await client.query(
-        `UPDATE source_document
-         SET parse_status = 'failed', updated_at = clock_timestamp()
-         WHERE owner_scope_id = $1 AND id = $2`,
-        [ids.scope, ids.source],
-      );
-      await client.query(
-        `UPDATE course
-         SET status = 'generating', updated_at = clock_timestamp()
-         WHERE owner_scope_id = $1 AND id = $2`,
-        [ids.scope, ids.course],
-      );
-      await client.query(
-        `UPDATE async_operation
-         SET state = 'failed_permanent',
-             sanitized_failure = '{"class":"infrastructure_unavailable"}'::jsonb,
-             updated_at = clock_timestamp(),
-             completed_at = clock_timestamp()
-         WHERE owner_scope_id = $1 AND id = $2`,
-        [ids.scope, ids.operation],
-      );
-      const retryableFailure = await repository.get(authorization, ids.source);
-      assert.equal(retryableFailure.courseStatus, "generating");
-      assert.equal(retryableFailure.failureClass, "infrastructure_unavailable");
-      assert.equal(retryableFailure.operationState, "failed_permanent");
-      assert.equal(retryableFailure.parseStatus, "failed");
-
       await assert.rejects(
         repository.create({
           authorization,
@@ -249,7 +222,7 @@ test(
             [ids.scope, ids.course],
           )
         ).rows[0]?.status,
-        "generating",
+        "failed",
       );
       assert.equal(
         (

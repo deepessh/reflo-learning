@@ -190,11 +190,18 @@ export function FlowBStudy({
   );
   const [retryAnnouncement, setRetryAnnouncement] = useState("");
   const [retryingError, setRetryingError] = useState(false);
+  const focusHandoffOrigin = useRef<HTMLElement | null>(null);
+  const focusHandoffRequested = useRef(false);
+  const studyPanel = useRef<HTMLElement>(null);
   const retryInFlight = useRef(false);
   const placementSubmissionInFlight = useRef(false);
   const tutorInputId = useId();
 
-  async function start(): Promise<boolean> {
+  async function start(focusAfterReplacement = false): Promise<boolean> {
+    if (focusAfterReplacement) {
+      focusHandoffOrigin.current = document.activeElement as HTMLElement | null;
+      focusHandoffRequested.current = true;
+    }
     setPhase("checking");
     setCompletedFromNextAction(false);
     setMessage("");
@@ -232,6 +239,28 @@ export function FlowBStudy({
     const timer = window.setTimeout(() => void restoreDurableSession(), 0);
     return () => window.clearTimeout(timer);
   }, [resumeSessionId]);
+
+  useEffect(() => {
+    if (
+      !focusHandoffRequested.current ||
+      (phase !== "checking" && phase !== "placement_pending")
+    ) {
+      return;
+    }
+    const origin = focusHandoffOrigin.current;
+    const activeElement = document.activeElement;
+    if (
+      (origin?.isConnected === true && activeElement !== origin) ||
+      (origin?.isConnected === false && activeElement !== document.body)
+    ) {
+      focusHandoffRequested.current = false;
+      focusHandoffOrigin.current = null;
+      return;
+    }
+    studyPanel.current?.focus();
+    focusHandoffRequested.current = false;
+    focusHandoffOrigin.current = null;
+  }, [phase]);
 
   async function checkPreparedLesson() {
     if (preparingSessionId === null || checkingPreparation) {
@@ -693,6 +722,7 @@ export function FlowBStudy({
 
   async function regeneratePlacement() {
     if (placementSessionId === null || placementRetrying) return;
+    studyPanel.current?.focus();
     setPlacementRetrying(true);
     setRetryAnnouncement("Requesting a new placement quiz…");
     try {
@@ -1015,7 +1045,7 @@ export function FlowBStudy({
           throw new Error("The lesson remains unavailable.");
         }
       } else if (target.kind === "idle") {
-        recovered = await start();
+        recovered = await start(true);
       } else {
         await loadView(target.sessionId);
         recovered = true;
@@ -1220,6 +1250,8 @@ export function FlowBStudy({
         retryPresentation.ariaBusy
       }
       aria-labelledby="study-title"
+      ref={studyPanel}
+      tabIndex={-1}
     >
       <p
         aria-atomic="true"
@@ -1254,7 +1286,7 @@ export function FlowBStudy({
             </p>
           </div>
           <div className="flow-actions">
-            <button onClick={() => void start()} type="button">
+            <button onClick={() => void start(true)} type="button">
               {resumeSessionId === null
                 ? "Start today’s session"
                 : "Continue studying"}
@@ -1463,7 +1495,7 @@ export function FlowBStudy({
             </small>
           )}
           {activationFailureCopy.retryable ? (
-            <button onClick={() => void start()} type="button">
+            <button onClick={() => void start(true)} type="button">
               Try again
             </button>
           ) : regenerationAvailability?.eligible === true ? (
@@ -1491,7 +1523,7 @@ export function FlowBStudy({
         <FlowNotice
           title="A required dependency is unavailable."
           copy={`Study is temporarily paused while ${friendlyDependencyList(unavailable)} recovers. Your progress is safe.`}
-          onRetry={() => void start()}
+          onRetry={() => void start(true)}
         />
       ) : null}
 

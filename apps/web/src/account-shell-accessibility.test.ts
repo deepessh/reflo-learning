@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activateControlFromKeyboard,
   accountConnectionStatus,
   isButtonActivationKey,
   isLinkActivationKey,
@@ -22,6 +23,43 @@ describe("account shell accessibility presentation", () => {
     expect(isButtonActivationKey("Spacebar")).toBe(true);
     expect(isButtonActivationKey("Tab")).toBe(false);
     expect(isButtonActivationKey("Escape")).toBe(false);
+  });
+
+  it.each(["Enter", " ", "Spacebar"])(
+    "activates %s exactly once through the pointer path",
+    (key) => {
+      let clicks = 0;
+      let prevented = 0;
+      expect(
+        activateControlFromKeyboard({
+          currentTarget: { click: () => (clicks += 1) },
+          key,
+          preventDefault: () => (prevented += 1),
+          repeat: false,
+        }),
+      ).toBe(true);
+      expect(clicks).toBe(1);
+      expect(prevented).toBe(1);
+    },
+  );
+
+  it("ignores key repeats and non-activation keys", () => {
+    let clicks = 0;
+    let prevented = 0;
+    const event = {
+      currentTarget: { click: () => (clicks += 1) },
+      key: "Enter",
+      preventDefault: () => (prevented += 1),
+      repeat: true,
+    };
+    expect(activateControlFromKeyboard(event)).toBe(false);
+    expect(clicks).toBe(0);
+    expect(prevented).toBe(1);
+    expect(
+      activateControlFromKeyboard({ ...event, key: "Tab", repeat: false }),
+    ).toBe(false);
+    expect(clicks).toBe(0);
+    expect(prevented).toBe(1);
   });
 
   it("disables retry and exposes visible progress while pending", () => {

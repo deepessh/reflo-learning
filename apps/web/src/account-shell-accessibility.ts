@@ -16,6 +16,23 @@ export function isButtonActivationKey(key: string): boolean {
   return key === "Enter" || key === " " || key === "Spacebar";
 }
 
+export function activateControlFromKeyboard(event: {
+  readonly currentTarget: { click(): void };
+  readonly key: string;
+  preventDefault(): void;
+  readonly repeat: boolean;
+}): boolean {
+  if (!isButtonActivationKey(event.key)) {
+    return false;
+  }
+  event.preventDefault();
+  if (event.repeat) {
+    return false;
+  }
+  event.currentTarget.click();
+  return true;
+}
+
 export function retryPresentation(state: RetryState): RetryPresentation {
   if (state === "pending") {
     return {

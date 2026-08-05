@@ -25,6 +25,7 @@ import {
 } from "./account-view";
 import {
   accountConnectionStatus,
+  isButtonActivationKey,
   isLinkActivationKey,
   retryPresentation,
   type AccountRequestKind,
@@ -671,6 +672,16 @@ export function ErrorState({
   readonly retryState: RetryState;
 }) {
   const presentation = retryPresentation(retryState);
+  const retryButton = useRef<HTMLButtonElement>(null);
+  const previousRetryState = useRef(retryState);
+
+  useEffect(() => {
+    if (previousRetryState.current === "pending" && retryState !== "pending") {
+      retryButton.current?.focus();
+    }
+    previousRetryState.current = retryState;
+  }, [retryState]);
+
   return (
     <div className="center-state" aria-busy={presentation.ariaBusy}>
       <p className="eyebrow">Connection paused</p>
@@ -682,6 +693,14 @@ export function ErrorState({
       <button
         disabled={presentation.buttonDisabled}
         onClick={onRetry}
+        onKeyDown={(event) => {
+          if (!isButtonActivationKey(event.key)) {
+            return;
+          }
+          event.preventDefault();
+          onRetry();
+        }}
+        ref={retryButton}
         type="button"
       >
         {presentation.buttonLabel}

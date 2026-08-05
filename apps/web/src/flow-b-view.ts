@@ -44,6 +44,12 @@ export type StudyErrorRetryTarget =
   | { readonly kind: "replacement" }
   | { readonly kind: "short_answer" };
 
+export function initialStudyPhase(
+  resumeSessionId: string | null,
+): "checking" | "idle" {
+  return resumeSessionId === null ? "idle" : "checking";
+}
+
 export function studyErrorRetryTarget(input: {
   readonly courseLessonSessionId: string | null;
   readonly submissionRetry: "replacement" | "short_answer" | null;

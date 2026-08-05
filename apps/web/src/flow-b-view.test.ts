@@ -7,6 +7,7 @@ import {
   assessmentDisposition,
   assessmentRequestErrorCopy,
   completedSessionTransition,
+  initialStudyPhase,
   lessonMediaPresentation,
   studyErrorRetryTarget,
   studyRetryPresentation,
@@ -16,6 +17,11 @@ import {
 } from "./flow-b-view";
 
 describe("Flow B browser presentation", () => {
+  it("restores a durable session before offering any continuation action", () => {
+    expect(initialStudyPhase("active-session")).toBe("checking");
+    expect(initialStudyPhase(null)).toBe("idle");
+  });
+
   it("shows a durable summary after session completion without reloading active state", () => {
     expect(completedSessionTransition("session_complete")).toEqual({
       loadActiveState: false,

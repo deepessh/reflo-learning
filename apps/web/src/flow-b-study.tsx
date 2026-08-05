@@ -23,6 +23,7 @@ import {
   assessmentDisposition,
   assessmentRequestErrorCopy,
   completedSessionTransition,
+  initialStudyPhase,
   lessonMediaPresentation,
   shouldEnterPlacement,
   studyErrorRetryTarget,
@@ -126,7 +127,9 @@ export function FlowBStudy({
   readonly onProgressRefresh: () => void;
   readonly resumeSessionId: string | null;
 }) {
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<Phase>(() =>
+    initialStudyPhase(resumeSessionId),
+  );
   const [view, setView] = useState<ConnectedStudyView | null>(null);
   const [courseLesson, setCourseLesson] = useState<CourseStudyLesson | null>(
     null,
@@ -219,6 +222,16 @@ export function FlowBStudy({
       return false;
     }
   }
+
+  const restoreDurableSession = useEffectEvent(async () => {
+    await start();
+  });
+
+  useEffect(() => {
+    if (resumeSessionId === null) return;
+    const timer = window.setTimeout(() => void restoreDurableSession(), 0);
+    return () => window.clearTimeout(timer);
+  }, [resumeSessionId]);
 
   async function checkPreparedLesson() {
     if (preparingSessionId === null || checkingPreparation) {

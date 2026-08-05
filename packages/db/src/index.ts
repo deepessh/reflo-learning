@@ -33,6 +33,13 @@ export { PostgresConnectedDemoRepository } from "./connected-demo-repository.js"
 export { PostgresDemoUploadRepository } from "./demo-upload-repository.js";
 export type { ConnectedDemoSessionSummary } from "./connected-demo-repository.js";
 export type { ConnectedDemoSeedResult } from "./connected-demo-repository.js";
+export type {
+  ConnectedPlacementChoiceRequest,
+  ConnectedPlacementChoiceSubmission,
+  ConnectedPlacementQuestion,
+  ConnectedPlacementState,
+  ConnectedPlacementStatus,
+} from "./connected-demo-repository.js";
 export {
   ACTIVATION_PROGRESS_CONTRACT_VERSION,
   type ConnectedActivationProgress,

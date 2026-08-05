@@ -40,7 +40,11 @@ import {
   LOCAL_BRIDGE_HTTP,
   LOCAL_INGESTION_BRIDGE_VERSION,
 } from "@reflo/ingestion";
-import type { ConnectedActivationProgress } from "@reflo/db";
+import type {
+  ConnectedActivationProgress,
+  ConnectedPlacementChoiceRequest,
+  ConnectedPlacementState,
+} from "@reflo/db";
 
 import { DemoUploadAccessError } from "./demo-upload.js";
 import {
@@ -170,6 +174,10 @@ export interface ApiDependencies {
       authorization: ReturnType<typeof deliveryAuthorization>,
       sessionId: string,
     ): Promise<ConnectedActivationProgress | null>;
+    loadPlacement?(
+      authorization: ReturnType<typeof deliveryAuthorization>,
+      sessionId: string,
+    ): Promise<ConnectedPlacementState | null>;
     regenerateLesson?(
       authorization: ReturnType<typeof deliveryAuthorization>,
       sessionId: string,
@@ -209,6 +217,14 @@ export interface ApiDependencies {
       readonly sessionId: string;
       readonly status: "active";
     } | null>;
+    submitPlacementChoice?(
+      authorization: ReturnType<typeof deliveryAuthorization>,
+      sessionId: string,
+      request: ConnectedPlacementChoiceRequest,
+    ): Promise<{
+      readonly correct: boolean;
+      readonly status: "created" | "replayed";
+    }>;
   };
   readonly study?: {
     load(
@@ -623,6 +639,30 @@ export function createApiRequestListener(
             sendJson(response, 200, { session: summary });
             return;
           }
+          const placementSessionId = studySessionRoute(
+            url.pathname,
+            "placement",
+          );
+          if (request.method === "GET" && placementSessionId !== null) {
+            const loadPlacement = dependencies.sessions?.loadPlacement;
+            if (loadPlacement === undefined) {
+              sendJson(response, 503, { error: "service_unavailable" });
+              return;
+            }
+            const placement = await loadPlacement(
+              deliveryAuthorization(account),
+              placementSessionId,
+            );
+            if (placement === null) {
+              sendJson(response, 404, { error: "study_session_not_found" });
+              return;
+            }
+            if (origin !== undefined && accounts.isTrustedOrigin(origin)) {
+              writeCors(response, origin);
+            }
+            sendJson(response, 200, { placement });
+            return;
+          }
           const activationEventsSessionId = studySessionRoute(
             url.pathname,
             "activation/events",
@@ -852,7 +892,7 @@ export function createApiRequestListener(
                 sendJson(response, 404, { error: "course_not_found" });
                 return;
               }
-              if (session.plan.nextAction === "prepare_activation") {
+              if (session.plan.generationRequired === true) {
                 dependencies.activation?.schedule({
                   authorization: deliveryAuthorization(account),
                   courseId: studyCourseId,
@@ -1074,6 +1114,31 @@ export function createApiRequestListener(
                 questionId: stringField(body, "questionId"),
                 sessionId: shortAnswerSessionId,
               });
+              writeCors(response, origin!);
+              sendJson(response, 200, { result });
+              return;
+            }
+            const placementAnswerSessionId = studySessionRoute(
+              url.pathname,
+              "placement/answers",
+            );
+            if (placementAnswerSessionId !== null) {
+              const submitPlacementChoice =
+                dependencies.sessions?.submitPlacementChoice;
+              if (submitPlacementChoice === undefined) {
+                sendJson(response, 503, { error: "service_unavailable" });
+                return;
+              }
+              const body = await readJsonBody(request);
+              const result = await submitPlacementChoice(
+                deliveryAuthorization(account),
+                placementAnswerSessionId,
+                {
+                  answer: stringField(body, "answer"),
+                  idempotencyKey: stringField(body, "idempotencyKey"),
+                  questionId: stringField(body, "questionId"),
+                },
+              );
               writeCors(response, origin!);
               sendJson(response, 200, { result });
               return;
@@ -1882,6 +1947,8 @@ function studySessionRoute(
     | "lesson"
     | "lesson/complete"
     | "next"
+    | "placement"
+    | "placement/answers"
     | "state"
     | "summary",
 ): string | null {

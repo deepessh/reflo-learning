@@ -4,6 +4,7 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -23,7 +24,9 @@ import {
   assessmentRequestErrorCopy,
   completedSessionTransition,
   lessonMediaPresentation,
+  shouldEnterPlacement,
   studyErrorRetryTarget,
+  studyRetryPresentation,
   unavailableDependencyNames,
   type BrowserAssessmentResult,
   type ActivationFailure,
@@ -40,6 +43,18 @@ import {
   type ActivationProgressConnection,
   type ActivationProgressEvent,
 } from "./activation-progress";
+import {
+  PLACEMENT_POLL_INTERVAL_MS,
+  placementAnswerReady,
+  placementFailureAction,
+  placementProgressLabel,
+  placementResultCopy,
+  placementResumeState,
+  shouldContinuePlacementPolling,
+  validPlacementView,
+  type PlacementAnswerResult,
+  type PlacementView,
+} from "./placement-view";
 
 type Phase =
   | "activation_failed"
@@ -48,6 +63,11 @@ type Phase =
   | "error"
   | "idle"
   | "lesson"
+  | "placement_complete"
+  | "placement_failed"
+  | "placement_pending"
+  | "placement_question"
+  | "placement_result"
   | "preparing"
   | "question"
   | "result"
@@ -124,6 +144,16 @@ export function FlowBStudy({
   const [submissionRetry, setSubmissionRetry] =
     useState<SubmissionRetry | null>(null);
   const [fallbackAnswer, setFallbackAnswer] = useState("");
+  const [placement, setPlacement] = useState<PlacementView | null>(null);
+  const [placementAnswer, setPlacementAnswer] = useState("");
+  const [placementFallbackAnswer, setPlacementFallbackAnswer] = useState("");
+  const [placementResult, setPlacementResult] =
+    useState<PlacementAnswerResult | null>(null);
+  const [placementRetrying, setPlacementRetrying] = useState(false);
+  const [placementSubmitting, setPlacementSubmitting] = useState(false);
+  const [placementSessionId, setPlacementSessionId] = useState<string | null>(
+    null,
+  );
   const [unavailable, setUnavailable] = useState<readonly string[]>([]);
   const [message, setMessage] = useState("");
   const [tutorQuestion, setTutorQuestion] = useState("");
@@ -155,9 +185,13 @@ export function FlowBStudy({
   const [activationProgress, setActivationProgress] = useState(
     "Preparing your first lesson…",
   );
+  const [retryAnnouncement, setRetryAnnouncement] = useState("");
+  const [retryingError, setRetryingError] = useState(false);
+  const retryInFlight = useRef(false);
+  const placementSubmissionInFlight = useRef(false);
   const tutorInputId = useId();
 
-  async function start() {
+  async function start(): Promise<boolean> {
     setPhase("checking");
     setCompletedFromNextAction(false);
     setMessage("");
@@ -171,7 +205,7 @@ export function FlowBStudy({
       if (missing.length > 0) {
         setUnavailable(missing);
         setPhase("blocked");
-        return;
+        return false;
       }
       setUnavailable([]);
       const started = await postJson<StartedStudySession>(
@@ -179,8 +213,10 @@ export function FlowBStudy({
         `/v1/courses/${encodeURIComponent(courseId)}/study-sessions`,
       );
       await applyStartedSession(started, false);
+      return true;
     } catch (error) {
       fail(error, "Your study session could not be opened.");
+      return false;
     }
   }
 
@@ -211,11 +247,18 @@ export function FlowBStudy({
   async function applyStartedSession(
     started: StartedStudySession,
     preparationCheck: boolean,
+    skipCompletedPlacement = false,
   ) {
     if (started.session.courseId !== courseId) {
       throw new Error("The study session opened for a different course.");
     }
     const plan = started.session.plan;
+    setAssessmentStatus(plan?.assessmentStatus ?? null);
+    setAssessmentArtifacts(plan?.assessments ?? null);
+    if (!skipCompletedPlacement && shouldEnterPlacement(plan)) {
+      await loadPlacement(started.session.sessionId);
+      return;
+    }
     const disposition = activationPlanDisposition(plan);
     if (disposition === "failed") {
       setActivationFailure(plan?.activationFailure ?? null);
@@ -234,8 +277,6 @@ export function FlowBStudy({
       setPhase("preparing");
       return;
     }
-    setAssessmentStatus(plan?.assessmentStatus ?? null);
-    setAssessmentArtifacts(plan?.assessments ?? null);
     if (await loadPendingAssessment(started.session.sessionId)) {
       await loadView(started.session.sessionId);
       setPreparingSessionId(null);
@@ -346,7 +387,10 @@ export function FlowBStudy({
     );
     const disposition = activationPlanDisposition(started.session.plan);
     await applyStartedSession(started, true);
-    return disposition === "pending" ? "continue" : "stop";
+    const placementStatus = started.session.plan?.placement?.status;
+    return disposition === "pending" || placementStatus === "pending"
+      ? "continue"
+      : "stop";
   });
 
   const handleActivationEvent = useEffectEvent(
@@ -389,6 +433,16 @@ export function FlowBStudy({
           // Reload only durable eligibility/cooldown metadata; this never
           // schedules generation because the lesson itself is already ready.
           void pollActivationPlan();
+        }
+        if (
+          artifact.artifactKind === "placement_quiz" &&
+          phase === "placement_pending" &&
+          preparingSessionId !== null &&
+          (artifact.status === "ready" || artifact.status === "failed")
+        ) {
+          void loadPlacement(preparingSessionId).catch((error: unknown) =>
+            reportPlacementRefreshError(error),
+          );
         }
       }
       if (event.activationStatus === "failed") {
@@ -444,7 +498,9 @@ export function FlowBStudy({
     if (
       progressSessionId === null ||
       progressSessionId === undefined ||
-      (phase !== "preparing" && !(phase === "lesson" && assessmentStreaming))
+      (phase !== "preparing" &&
+        phase !== "placement_pending" &&
+        !(phase === "lesson" && assessmentStreaming))
     )
       return;
     const controller = createActivationProgressController({
@@ -467,6 +523,46 @@ export function FlowBStudy({
     phase,
     preparingSessionId,
   ]);
+
+  const pollPlacementStatus = useEffectEvent(async (sessionId: string) =>
+    loadPlacement(sessionId),
+  );
+
+  useEffect(() => {
+    if (phase !== "placement_pending" || placementSessionId === null) return;
+    let cancelled = false;
+    let completedPolls = 0;
+    let handle: number | null = null;
+    const schedule = () => {
+      if (cancelled || handle !== null) return;
+      handle = window.setTimeout(() => {
+        handle = null;
+        if (cancelled) return;
+        completedPolls += 1;
+        void pollPlacementStatus(placementSessionId)
+          .then((latest) => {
+            if (
+              !cancelled &&
+              shouldContinuePlacementPolling(latest.status, completedPolls)
+            ) {
+              schedule();
+            }
+          })
+          .catch((error: unknown) => {
+            if (cancelled) return;
+            reportPlacementRefreshError(error);
+            if (shouldContinuePlacementPolling("pending", completedPolls)) {
+              schedule();
+            }
+          });
+      }, PLACEMENT_POLL_INTERVAL_MS);
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (handle !== null) window.clearTimeout(handle);
+    };
+  }, [phase, placementSessionId]);
 
   async function loadView(sessionId: string) {
     const loaded = await requestJson<{ view: ConnectedStudyView }>(
@@ -500,6 +596,249 @@ export function FlowBStudy({
       throw new Error("The next question is not available yet.");
     }
     showQuestion(loaded.view.question, "initial");
+  }
+
+  async function loadPlacement(sessionId: string): Promise<PlacementView> {
+    const loaded = await requestJson<{ placement: PlacementView }>(
+      `${apiOrigin}/v1/study-sessions/${encodeURIComponent(sessionId)}/placement`,
+    );
+    if (!validPlacementView(loaded.placement)) {
+      throw new Error("Placement status could not be verified.");
+    }
+    setMessage("");
+    setPlacement(loaded.placement);
+    setPlacementSessionId(sessionId);
+    setCourseLesson(null);
+    setView(null);
+    setAssessment(null);
+    setPlacementResult(null);
+    setPlacementAnswer("");
+    setPlacementFallbackAnswer("");
+    if (loaded.placement.status === "pending") {
+      setPreparingSessionId(sessionId);
+      setActivationConnection("idle");
+      setAssessmentProgress("Preparing your 10-question placement quiz…");
+      setPhase("placement_pending");
+      return loaded.placement;
+    }
+    setPreparingSessionId(null);
+    if (loaded.placement.status === "failed") {
+      setPhase("placement_failed");
+      return loaded.placement;
+    }
+    if (loaded.placement.status === "complete") {
+      setPhase("placement_complete");
+      onProgressRefresh();
+      return loaded.placement;
+    }
+    const pendingAssessment = await requestJson<{
+      readonly result: BrowserAssessmentResult | null;
+    }>(
+      `${apiOrigin}/v1/study-sessions/${encodeURIComponent(sessionId)}/assessments/pending-fallback`,
+    );
+    if (
+      placementResumeState(loaded.placement, pendingAssessment.result) ===
+        "result" &&
+      pendingAssessment.result !== null
+    ) {
+      setPlacementResult({
+        assessment: pendingAssessment.result,
+        kind: "short_answer",
+      });
+      setPhase("placement_result");
+      return loaded.placement;
+    }
+    setPhase("placement_question");
+    return loaded.placement;
+  }
+
+  function reportPlacementRefreshError(error: unknown) {
+    setMessage(
+      error instanceof Error
+        ? error.message
+        : "Placement status could not be refreshed.",
+    );
+    setActivationConnection("offline");
+    setRetryAnnouncement(
+      "Placement refresh failed. The saved placement state is unchanged.",
+    );
+  }
+
+  async function refreshPlacement() {
+    if (placementSessionId === null || placementRetrying) return;
+    setPlacementRetrying(true);
+    setRetryAnnouncement("Refreshing placement status…");
+    try {
+      await loadPlacement(placementSessionId);
+      setRetryAnnouncement("Placement status refreshed.");
+    } catch (error) {
+      reportPlacementRefreshError(error);
+    } finally {
+      setPlacementRetrying(false);
+    }
+  }
+
+  async function regeneratePlacement() {
+    if (placementSessionId === null || placementRetrying) return;
+    setPlacementRetrying(true);
+    setRetryAnnouncement("Requesting a new placement quiz…");
+    try {
+      await postJson(
+        apiOrigin,
+        `/v1/study-sessions/${encodeURIComponent(placementSessionId)}/assessments/placement_quiz/regenerate`,
+        { courseId },
+        { "idempotency-key": crypto.randomUUID() },
+      );
+      setMessage("");
+      setAssessmentProgress("Preparing a new 10-question placement quiz…");
+      setPreparingSessionId(placementSessionId);
+      setPhase("placement_pending");
+      setRetryAnnouncement("A new placement quiz was requested.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "A new placement quiz could not be requested.",
+      );
+      setRetryAnnouncement(
+        "Placement regeneration failed. The latest error is shown.",
+      );
+    } finally {
+      setPlacementRetrying(false);
+    }
+  }
+
+  async function submitPlacementAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const placementQuestion = placement?.question ?? null;
+    if (
+      placementSubmissionInFlight.current ||
+      placementSessionId === null ||
+      !placementAnswerReady(placementQuestion, placementAnswer)
+    ) {
+      return;
+    }
+    placementSubmissionInFlight.current = true;
+    setPlacementSubmitting(true);
+    setMessage("");
+    try {
+      if (placementQuestion!.itemType === "short_answer") {
+        const response = await postJson<{ result: BrowserAssessmentResult }>(
+          apiOrigin,
+          `/v1/study-sessions/${encodeURIComponent(placementSessionId)}/answers/short-answer`,
+          {
+            answer: placementAnswer,
+            idempotencyKey: await stableKey(
+              "placement-short-answer",
+              placementSessionId,
+              placementQuestion!.id,
+              placementAnswer,
+            ),
+            questionId: placementQuestion!.id,
+          },
+        );
+        setPlacementResult({
+          assessment: response.result,
+          kind: "short_answer",
+        });
+        if (assessmentDisposition(response.result) !== "abstained") {
+          onProgressRefresh();
+        }
+      } else {
+        const response = await postJson<{
+          result: {
+            readonly correct: boolean;
+            readonly status: "created" | "replayed";
+          };
+        }>(
+          apiOrigin,
+          `/v1/study-sessions/${encodeURIComponent(placementSessionId)}/placement/answers`,
+          {
+            answer: placementAnswer,
+            idempotencyKey: await stableKey(
+              "placement-keyed-answer",
+              placementSessionId,
+              placementQuestion!.id,
+              placementAnswer,
+            ),
+            questionId: placementQuestion!.id,
+          },
+        );
+        setPlacementResult({ kind: "keyed", ...response.result });
+        onProgressRefresh();
+      }
+      setPhase("placement_result");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Your placement answer was not confirmed. Retrying is safe.",
+      );
+    } finally {
+      placementSubmissionInFlight.current = false;
+      setPlacementSubmitting(false);
+    }
+  }
+
+  async function submitPlacementFallback() {
+    if (
+      placementSessionId === null ||
+      placementResult?.kind !== "short_answer" ||
+      placementSubmissionInFlight.current ||
+      placementFallbackAnswer === ""
+    ) {
+      return;
+    }
+    const bundle = placementResult.assessment.fallback;
+    const item = bundle?.items[0];
+    if (bundle === null || bundle === undefined || item === undefined) return;
+    placementSubmissionInFlight.current = true;
+    setPlacementSubmitting(true);
+    setMessage("");
+    try {
+      const response = await postJson<{ result: BrowserAssessmentResult }>(
+        apiOrigin,
+        `/v1/study-sessions/${encodeURIComponent(placementSessionId)}/answers/replacement`,
+        {
+          answer: placementFallbackAnswer,
+          bundleId: bundle.id,
+          idempotencyKey: await stableKey(
+            "placement-replacement",
+            placementSessionId,
+            item.id,
+            placementFallbackAnswer,
+          ),
+          itemId: item.id,
+        },
+      );
+      setPlacementResult({ assessment: response.result, kind: "short_answer" });
+      onProgressRefresh();
+      setPhase("placement_result");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "The replacement answer was not confirmed. Retrying is safe.",
+      );
+    } finally {
+      placementSubmissionInFlight.current = false;
+      setPlacementSubmitting(false);
+    }
+  }
+
+  async function continueAfterPlacement() {
+    if (placementSessionId === null) return;
+    setPhase("checking");
+    setMessage("");
+    try {
+      const started = await postJson<StartedStudySession>(
+        apiOrigin,
+        `/v1/courses/${encodeURIComponent(courseId)}/study-sessions`,
+      );
+      await applyStartedSession(started, false, true);
+    } catch (error) {
+      fail(error, "Your first lesson could not be opened.");
+    }
   }
 
   async function loadPendingAssessment(sessionId: string): Promise<boolean> {
@@ -562,9 +901,9 @@ export function FlowBStudy({
     await gradeShortAnswer();
   }
 
-  async function gradeShortAnswer() {
+  async function gradeShortAnswer(): Promise<boolean> {
     if (view === null || question === null || answer.trim() === "") {
-      return;
+      return false;
     }
     setPhase("submitting");
     try {
@@ -586,15 +925,17 @@ export function FlowBStudy({
       setAssessment(response.result);
       setSubmissionRetry(null);
       setPhase("result");
+      return true;
     } catch (error) {
       setSubmissionRetry("short_answer");
       fail(error, "The answer was not confirmed. Retrying is replay-safe.", {
         preserveSubmissionRetry: true,
       });
+      return false;
     }
   }
 
-  async function submitFallback() {
+  async function submitFallback(): Promise<boolean> {
     const bundle = assessment?.fallback;
     const item = bundle?.items[0];
     if (
@@ -604,7 +945,7 @@ export function FlowBStudy({
       item === undefined ||
       fallbackAnswer === ""
     ) {
-      return;
+      return false;
     }
     setPhase("submitting");
     try {
@@ -627,6 +968,7 @@ export function FlowBStudy({
       setAssessment(response.result);
       setSubmissionRetry(null);
       setPhase("result");
+      return true;
     } catch (error) {
       setSubmissionRetry("replacement");
       fail(
@@ -634,6 +976,52 @@ export function FlowBStudy({
         "The replacement answer was not confirmed. Retrying is replay-safe.",
         { preserveSubmissionRetry: true },
       );
+      return false;
+    }
+  }
+
+  async function retryStudyError() {
+    if (retryInFlight.current) return;
+    retryInFlight.current = true;
+    setRetryingError(true);
+    setRetryAnnouncement("Retrying your saved activity…");
+    const target = studyErrorRetryTarget({
+      courseLessonSessionId: courseLesson?.sessionId ?? null,
+      submissionRetry,
+      viewSessionId: view?.sessionId ?? null,
+    });
+    try {
+      let recovered = false;
+      if (target.kind === "short_answer") {
+        recovered = await gradeShortAnswer();
+      } else if (target.kind === "replacement") {
+        recovered = await submitFallback();
+      } else if (target.kind === "course_lesson") {
+        recovered = await loadCourseLesson(target.sessionId);
+        if (!recovered) {
+          throw new Error("The lesson remains unavailable.");
+        }
+      } else if (target.kind === "idle") {
+        recovered = await start();
+      } else {
+        await loadView(target.sessionId);
+        recovered = true;
+      }
+      setRetryAnnouncement(
+        recovered
+          ? "Retry succeeded. Your saved activity is ready."
+          : "Retry failed. The latest error is shown.",
+      );
+    } catch (error) {
+      const fallback =
+        target.kind === "course_lesson"
+          ? "The lesson remains unavailable."
+          : "The persisted study state remains unavailable.";
+      fail(error, fallback);
+      setRetryAnnouncement("Retry failed. The latest error is shown.");
+    } finally {
+      retryInFlight.current = false;
+      setRetryingError(false);
     }
   }
 
@@ -793,14 +1181,41 @@ export function FlowBStudy({
   const placementQuizPlan = assessmentArtifacts?.placementQuiz ?? null;
   const activationConnectionCopy =
     activationConnectionText(activationConnection);
+  const retryPresentation = studyRetryPresentation(retryingError);
+  const placementQuestion = placement?.question ?? null;
+  const placementAssessment =
+    placementResult?.kind === "short_answer"
+      ? placementResult.assessment
+      : null;
+  const placementAssessmentDisposition =
+    placementAssessment === null
+      ? null
+      : assessmentDisposition(placementAssessment);
+  const placementFallback = placementAssessment?.fallback?.items[0] ?? null;
+  const placementFailurePresentation = placementFailureAction(
+    placementQuizPlan?.regeneration,
+  );
 
   return (
     <section
       className="panel flow-panel"
       id="study-session"
-      aria-busy={phase === "checking" || phase === "submitting"}
+      aria-busy={
+        phase === "checking" ||
+        phase === "submitting" ||
+        placementSubmitting ||
+        retryPresentation.ariaBusy
+      }
       aria-labelledby="study-title"
     >
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="visually-hidden"
+        role="status"
+      >
+        {retryAnnouncement || retryPresentation.announcement}
+      </p>
       <div className="flow-heading">
         <div>
           <p className="eyebrow">Today’s session</p>
@@ -858,6 +1273,170 @@ export function FlowBStudy({
         </div>
       ) : null}
 
+      {phase === "placement_pending" && placement !== null ? (
+        <div className="flow-notice" role="status" aria-live="polite">
+          <strong>Your placement quiz is getting ready.</strong>
+          <p>{assessmentProgress || placementProgressLabel(placement)}</p>
+          {message === "" ? null : <p role="alert">{message}</p>}
+          {activationConnectionCopy === null ? null : (
+            <small>{activationConnectionCopy}</small>
+          )}
+          <button
+            disabled={placementRetrying}
+            onClick={() => void refreshPlacement()}
+            type="button"
+          >
+            {placementRetrying ? "Refreshing…" : "Refresh status"}
+          </button>
+        </div>
+      ) : null}
+
+      {phase === "placement_failed" && placement !== null ? (
+        <div className="flow-notice" role="alert">
+          <strong>Your placement quiz couldn’t be prepared.</strong>
+          <p>
+            {message ||
+              placement.failure?.message ||
+              "Question preparation stopped. Your progress is unchanged."}
+          </p>
+          {placement.failure?.updatedAt === null ||
+          placement.failure?.updatedAt === undefined ? null : (
+            <small>
+              Last checked{" "}
+              <time dateTime={placement.failure.updatedAt}>
+                {new Date(placement.failure.updatedAt).toLocaleString()}
+              </time>
+            </small>
+          )}
+          <p>{placementFailurePresentation.guidance}</p>
+          <button
+            disabled={placementRetrying}
+            onClick={() =>
+              void (placementFailurePresentation.action === "regenerate"
+                ? regeneratePlacement()
+                : refreshPlacement())
+            }
+            type="button"
+          >
+            {placementRetrying
+              ? placementFailurePresentation.action === "regenerate"
+                ? "Requesting…"
+                : "Refreshing…"
+              : placementFailurePresentation.action === "regenerate"
+                ? "Regenerate placement quiz"
+                : "Refresh status"}
+          </button>
+        </div>
+      ) : null}
+
+      {phase === "placement_question" &&
+      placement !== null &&
+      placementQuestion !== null ? (
+        <form className="flow-question" onSubmit={submitPlacementAnswer}>
+          <p className="question-stage">{placementProgressLabel(placement)}</p>
+          <h3>{placementQuestion.prompt}</h3>
+          {placementQuestion.itemType === "short_answer" ? (
+            <>
+              <label htmlFor="placement-answer">Your answer</label>
+              <textarea
+                id="placement-answer"
+                onChange={(event) => setPlacementAnswer(event.target.value)}
+                required
+                rows={4}
+                value={placementAnswer}
+              />
+            </>
+          ) : (
+            <fieldset>
+              <legend>Choose the best source-backed answer</legend>
+              {placementQuestion.responseOptions?.map((option) => (
+                <label className="choice-row" key={option}>
+                  <input
+                    checked={placementAnswer === option}
+                    name="placement-answer"
+                    onChange={() => setPlacementAnswer(option)}
+                    required
+                    type="radio"
+                  />
+                  <span>{option}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <button
+            disabled={
+              placementSubmitting ||
+              !placementAnswerReady(placementQuestion, placementAnswer)
+            }
+            type="submit"
+          >
+            {placementSubmitting ? "Checking…" : "Check my answer"}
+          </button>
+          {message === "" ? null : <p role="alert">{message}</p>}
+        </form>
+      ) : null}
+
+      {phase === "placement_result" && placementResult !== null ? (
+        <div className="flow-result" aria-live="polite">
+          <p className="question-stage">
+            {placement === null
+              ? "Placement"
+              : placementProgressLabel(placement)}
+          </p>
+          <h3>{placementResultCopy(placementResult)}</h3>
+          {placementAssessmentDisposition === "abstained" &&
+          placementFallback !== null ? (
+            <div className="fallback-card">
+              <strong>Choose the best answer instead</strong>
+              <p>{placementFallback.question.prompt}</p>
+              {placementFallback.question.responseOptions.map((option) => (
+                <label className="choice-row" key={option}>
+                  <input
+                    checked={placementFallbackAnswer === option}
+                    name="placement-fallback"
+                    onChange={() => setPlacementFallbackAnswer(option)}
+                    type="radio"
+                  />
+                  <span>{option}</span>
+                </label>
+              ))}
+              <button
+                disabled={placementSubmitting || placementFallbackAnswer === ""}
+                onClick={() => void submitPlacementFallback()}
+                type="button"
+              >
+                {placementSubmitting ? "Checking…" : "Check answer"}
+              </button>
+            </div>
+          ) : (
+            <button
+              disabled={placementRetrying}
+              onClick={() => void refreshPlacement()}
+              type="button"
+            >
+              {placementRetrying
+                ? "Loading next question…"
+                : "Next placement question"}
+            </button>
+          )}
+          {message === "" ? null : <p role="alert">{message}</p>}
+        </div>
+      ) : null}
+
+      {phase === "placement_complete" && placement !== null ? (
+        <div className="flow-summary" aria-live="polite">
+          <p className="eyebrow">{placementProgressLabel(placement)}</p>
+          <h3>Your initial Knowledge Map is ready.</h3>
+          <p>
+            Reflo used your confidently graded answers to choose what to study
+            next. The map below reflects that evidence.
+          </p>
+          <button onClick={() => void continueAfterPlacement()} type="button">
+            Continue to the first lesson
+          </button>
+        </div>
+      ) : null}
+
       {phase === "activation_failed" ? (
         <div className="flow-notice" role="alert">
           <strong>This lesson couldn’t be prepared.</strong>
@@ -905,30 +1484,11 @@ export function FlowBStudy({
 
       {phase === "error" ? (
         <FlowNotice
+          actionDisabled={retryPresentation.actionDisabled}
+          actionLabel={retryPresentation.actionLabel}
           title="The loop paused safely."
           copy={message}
-          onRetry={() => {
-            const target = studyErrorRetryTarget({
-              courseLessonSessionId: courseLesson?.sessionId ?? null,
-              submissionRetry,
-              viewSessionId: view?.sessionId ?? null,
-            });
-            if (target.kind === "short_answer") {
-              void gradeShortAnswer();
-            } else if (target.kind === "replacement") {
-              void submitFallback();
-            } else if (target.kind === "course_lesson") {
-              void loadCourseLesson(target.sessionId).catch((error: unknown) =>
-                fail(error, "The lesson remains unavailable."),
-              );
-            } else if (target.kind === "idle") {
-              setPhase("idle");
-            } else {
-              void loadView(target.sessionId).catch((error: unknown) =>
-                fail(error, "The persisted study state remains unavailable."),
-              );
-            }
-          }}
+          onRetry={() => void retryStudyError()}
         />
       ) : null}
 

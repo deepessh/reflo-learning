@@ -162,6 +162,64 @@ describe("connected demo composition", () => {
     });
     expect(project).toHaveBeenCalledTimes(1);
   });
+
+  it("projects native placement evidence before returning the bounded choice result", async () => {
+    const evidence = {
+      attemptId: "80000000-0000-4000-8000-000000000009",
+      conceptId: "40000000-0000-4000-8000-000000000009",
+      eligibleForMastery: true,
+      fsrsRating: 3 as const,
+      graderConfidence: null,
+      gradingMethod: "keyed_mc" as const,
+      gradingPolicyVersion: "grading-policy-v1",
+      ineligibilityReason: null,
+      judgmentKind: "scored" as const,
+      knowledgeAlgorithmVersion: KNOWLEDGE_ALGORITHM_VERSION,
+      knowledgeConfigurationId: KNOWLEDGE_CONFIGURATION_ID,
+      rationaleRef: "placement-keyed/question-9",
+      ratingMappingVersion: "rating-mapping-v1",
+      replacementForAttemptId: null,
+      rubricBand: "correct" as const,
+      rubricId: "placement-keyed/question-9",
+      rubricVersion: "placement-keyed-v1",
+      score: "1.00000",
+      unanswerableReason: null,
+    };
+    const project = vi.fn().mockResolvedValue(knowledgeState());
+    const submitPlacementChoice = vi.fn().mockResolvedValue({
+      attemptId: evidence.attemptId,
+      correct: true,
+      evidence: [evidence],
+      status: "replayed" as const,
+    });
+    const service = new KnowledgeProjectingAssessment(
+      { gradeReplacement: vi.fn(), gradeShortAnswer: vi.fn() },
+      { recordEvidenceAndReplay: project },
+      gradingPolicy(),
+      { loadPreference: vi.fn().mockResolvedValue(null) },
+      { chosenLocalTime: "09:00", timeZone: "UTC" },
+      [],
+      undefined,
+      { submitPlacementChoice },
+    );
+    const input = gradingInput();
+
+    await expect(
+      service.gradePlacementChoice({
+        authorization: input.authorization,
+        request: {
+          answer: "Correct",
+          idempotencyKey: "placement/test/question-9",
+          questionId: input.questionId,
+        },
+        sessionId: input.sessionId,
+      }),
+    ).resolves.toEqual({ correct: true, status: "replayed" });
+    expect(project).toHaveBeenCalledWith(input.authorization, evidence, {
+      chosenLocalTime: "09:00",
+      timeZone: "UTC",
+    });
+  });
 });
 
 function assessmentResult(): AssessmentFinalizationView {

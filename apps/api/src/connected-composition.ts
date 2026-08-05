@@ -30,6 +30,8 @@ import {
   PostgresTutorAgentRepository,
   type ConnectedActivationProgress,
   type ConnectedDemoSessionSummary,
+  type ConnectedPlacementChoiceRequest,
+  type ConnectedPlacementState,
   type ConnectedStudyLessonCompletion,
   type ConnectedStudySessionStartResult,
 } from "@reflo/db";
@@ -142,6 +144,10 @@ export interface ConnectedDemoRuntime {
       authorization: ScopeAuthorizationContext,
       sessionId: string,
     ): Promise<ConnectedActivationProgress | null>;
+    loadPlacement(
+      authorization: ScopeAuthorizationContext,
+      sessionId: string,
+    ): Promise<ConnectedPlacementState | null>;
     regenerateLesson(
       authorization: ScopeAuthorizationContext,
       sessionId: string,
@@ -165,6 +171,14 @@ export interface ConnectedDemoRuntime {
       authorization: ScopeAuthorizationContext,
       courseId: string,
     ): Promise<ConnectedStudySessionStartResult | null>;
+    submitPlacementChoice(
+      authorization: ScopeAuthorizationContext,
+      sessionId: string,
+      request: ConnectedPlacementChoiceRequest,
+    ): Promise<{
+      readonly correct: boolean;
+      readonly status: "created" | "replayed";
+    }>;
   };
   readonly study?: Pick<ConnectedStudyService, "load" | "loadLesson">;
   readonly tutorAgent?: TutorAgentService;
@@ -284,6 +298,7 @@ export async function createConnectedDemoRuntime(
     preference,
     undefined,
     assessmentRepository,
+    connectedRepository,
   );
   const privateAssets =
     artifactRoot === undefined
@@ -340,6 +355,8 @@ export async function createConnectedDemoRuntime(
         connectedRepository.loadSessionSummary(authorization, sessionId),
       loadActivationProgress: (authorization, sessionId) =>
         connectedRepository.loadActivationProgress(authorization, sessionId),
+      loadPlacement: (authorization, sessionId) =>
+        connectedRepository.loadPlacement(authorization, sessionId),
       regenerateLesson: async (
         authorization,
         sessionId,
@@ -382,6 +399,12 @@ export async function createConnectedDemoRuntime(
       },
       startOrResume: (authorization, courseId) =>
         connectedRepository.startOrResumeStudySession(authorization, courseId),
+      submitPlacementChoice: (authorization, sessionId, request) =>
+        assessment.gradePlacementChoice({
+          authorization,
+          request,
+          sessionId,
+        }),
     },
     seed: new ConnectedDemoSeedService(
       connectedRepository,
@@ -436,6 +459,10 @@ export class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime
       PostgresAssessmentRepository,
       "loadPendingFallback"
     >,
+    private readonly placement?: Pick<
+      PostgresConnectedDemoRepository,
+      "submitPlacementChoice"
+    >,
   ) {}
 
   loadPendingFallback(
@@ -470,14 +497,44 @@ export class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime
     return result;
   }
 
+  async gradePlacementChoice(input: {
+    readonly authorization: ScopeAuthorizationContext;
+    readonly request: ConnectedPlacementChoiceRequest;
+    readonly sessionId: string;
+  }): Promise<{
+    readonly correct: boolean;
+    readonly status: "created" | "replayed";
+  }> {
+    if (this.placement === undefined) {
+      throw new AssessmentError("question_unavailable");
+    }
+    const result = await this.placement.submitPlacementChoice(
+      input.authorization,
+      input.sessionId,
+      input.request,
+    );
+    await this.#projectEvidence(input.authorization, result.evidence);
+    return { correct: result.correct, status: result.status };
+  }
+
   async #project(
     authorization: ScopeAuthorizationContext,
     result: AssessmentFinalizationView,
   ): Promise<void> {
+    await this.#projectEvidence(
+      authorization,
+      result.evidence.map((evidence) => assessmentEvidence(result, evidence)),
+    );
+  }
+
+  async #projectEvidence(
+    authorization: ScopeAuthorizationContext,
+    evidenceWrites: readonly AssessmentEvidenceWrite[],
+  ): Promise<void> {
     const preference =
       (await this.preferences.loadPreference(authorization)) ??
       this.defaultPreference;
-    for (const evidence of result.evidence) {
+    for (const evidence of evidenceWrites) {
       for (
         let projectionAttempt = 0;
         projectionAttempt <= this.projectionRetryDelaysMs.length;
@@ -486,7 +543,7 @@ export class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime
         try {
           await this.knowledge.recordEvidenceAndReplay(
             authorization,
-            assessmentEvidence(result, evidence),
+            evidence,
             preference,
           );
           break;

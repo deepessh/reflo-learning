@@ -54,6 +54,7 @@ export type LocalIngestionBridge = IsolatedDocumentWorkerPort &
   LocalIngestionBridgeApi & { close(): Promise<void> };
 
 interface QueuedExecution {
+  admissionTimer?: NodeJS.Timeout;
   readonly reject: (error: unknown) => void;
   readonly request: WorkerExecutionRequest;
   readonly resolve: (value: unknown) => void;
@@ -162,8 +163,33 @@ export class LocalIngestionBridgeBroker implements LocalIngestionBridge {
     if (this.#closed) {
       return Promise.reject(new IngestionError("infrastructure_unavailable"));
     }
+    if (!this.available()) {
+      return Promise.reject(
+        new IngestionError(
+          "infrastructure_unavailable",
+          "local_bridge_heartbeat_unavailable",
+        ),
+      );
+    }
     return new Promise((resolve, reject) => {
-      this.#queue.push({ reject, request, resolve });
+      const queued: QueuedExecution = {
+        reject,
+        request,
+        resolve,
+      };
+      const heartbeatAtMs = this.#heartbeatAtMs!;
+      const remainingHeartbeatMs = Math.max(
+        1,
+        Math.min(
+          this.#heartbeatTtlMs,
+          heartbeatAtMs + this.#heartbeatTtlMs - this.#clock().getTime(),
+        ),
+      );
+      queued.admissionTimer = setTimeout(() => {
+        this.#expireQueued(queued);
+      }, remainingHeartbeatMs);
+      queued.admissionTimer.unref();
+      this.#queue.push(queued);
     });
   }
 
@@ -201,7 +227,19 @@ export class LocalIngestionBridgeBroker implements LocalIngestionBridge {
     if (queued === undefined) {
       return null;
     }
-    const input = await lstat(queued.request.inputPath);
+    clearTimeout(queued.admissionTimer);
+    let input: Awaited<ReturnType<typeof lstat>>;
+    try {
+      input = await lstat(queued.request.inputPath);
+    } catch {
+      queued.reject(
+        new IngestionError(
+          "infrastructure_unavailable",
+          "local_bridge_input_unavailable",
+        ),
+      );
+      throw new LocalIngestionBridgeError("lease_invalid");
+    }
     if (
       !input.isFile() ||
       input.isSymbolicLink() ||
@@ -352,7 +390,10 @@ export class LocalIngestionBridgeBroker implements LocalIngestionBridge {
     if (this.#closed) return;
     this.#closed = true;
     const failure = new IngestionError("infrastructure_unavailable");
-    for (const queued of this.#queue.splice(0)) queued.reject(failure);
+    for (const queued of this.#queue.splice(0)) {
+      clearTimeout(queued.admissionTimer);
+      queued.reject(failure);
+    }
     const active = this.#active;
     this.#active = undefined;
     if (active !== undefined) {
@@ -388,6 +429,19 @@ export class LocalIngestionBridgeBroker implements LocalIngestionBridge {
       new IngestionError(
         "infrastructure_unavailable",
         "local_bridge_lease_expired",
+      ),
+    );
+  }
+
+  #expireQueued(queued: QueuedExecution): void {
+    const index = this.#queue.indexOf(queued);
+    if (index < 0) return;
+    this.#queue.splice(index, 1);
+    clearTimeout(queued.admissionTimer);
+    queued.reject(
+      new IngestionError(
+        "infrastructure_unavailable",
+        "local_bridge_queue_expired",
       ),
     );
   }

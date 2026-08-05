@@ -45,6 +45,8 @@ const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
 const LOCAL_PROCESSOR_MODE = "local-isolated-ingestion-bridge-v1";
 const SERVERLESS_PROCESSOR_MODE = "serverless-isolated-ingestion-v1";
+const LOCAL_OPERATION_LEASE_MS = 3 * 60_000;
+const SERVERLESS_OPERATION_LEASE_MS = 30 * 60_000;
 
 export interface DemoUploadRuntime {
   readonly demoUploads?: ApprovedDemoUploadService;
@@ -163,7 +165,7 @@ export async function createDemoUploadRuntime(
   const operations = new PostgresIngestionOperationStore({
     connectionString: databaseUrl,
     environment: deployment,
-    leaseDurationMs: 60_000,
+    leaseDurationMs: demoUploadOperationLeaseMs(processorMode),
     leaseOwner: "api_demo_upload_v1",
   });
   const content = new PostgresContentRepository(databaseUrl, {
@@ -308,6 +310,22 @@ export async function createDemoUploadRuntime(
   } catch (error) {
     await runtime.close().catch(() => undefined);
     throw error;
+  }
+}
+
+export function demoUploadOperationLeaseMs(processorMode: string): number {
+  switch (processorMode) {
+    case LOCAL_PROCESSOR_MODE:
+      // The local broker grants a worker up to two minutes. Keep a bounded
+      // finalization reserve so a valid result cannot lose its durable lease.
+      return LOCAL_OPERATION_LEASE_MS;
+    case SERVERLESS_PROCESSOR_MODE:
+      // Function Compute owns a bounded 30-minute invocation/session window.
+      // The durable lease must cover that accepted worker boundary so the
+      // first terminal result can be committed through ADR 0012.
+      return SERVERLESS_OPERATION_LEASE_MS;
+    default:
+      throw new Error("demo upload processor mode is not allowlisted");
   }
 }
 

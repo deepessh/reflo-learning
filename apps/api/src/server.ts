@@ -129,6 +129,7 @@ export interface ApiDependencies {
         readonly approvalId: string;
         readonly bytes: Uint8Array;
         readonly mediaType: DemoUploadMediaType;
+        readonly replacesUploadId?: string;
       },
     ): Promise<DemoUploadView>;
     get(
@@ -394,7 +395,7 @@ export function createApiRequestListener(
         writeCors(response, origin!);
         response.writeHead(204, {
           "access-control-allow-headers":
-            "content-type, idempotency-key, x-reflo-csrf, x-reflo-demo-source-approval",
+            "content-type, idempotency-key, x-reflo-csrf, x-reflo-demo-source-approval, x-reflo-demo-upload-retry-of",
           "access-control-allow-methods": "GET, POST, OPTIONS",
         });
         response.end();
@@ -984,6 +985,9 @@ export function createApiRequestListener(
               const approvalId = demoSourceApproval(
                 singleHeader(request.headers["x-reflo-demo-source-approval"]),
               );
+              const replacesUploadId = optionalDemoUploadId(
+                singleHeader(request.headers["x-reflo-demo-upload-retry-of"]),
+              );
               if (
                 request.headers["content-encoding"] !== undefined &&
                 request.headers["content-encoding"] !== "identity"
@@ -996,7 +1000,7 @@ export function createApiRequestListener(
               );
               const upload = await demoUploads.create(
                 deliveryAuthorization(account),
-                { approvalId, bytes, mediaType },
+                { approvalId, bytes, mediaType, replacesUploadId },
               );
               writeCors(response, origin!);
               sendJson(response, 202, { upload });
@@ -2028,6 +2032,20 @@ function demoUploadMediaType(value: string | undefined): DemoUploadMediaType {
 
 function demoSourceApproval(value: string | undefined): string {
   if (value === undefined || !/^[a-z0-9][a-z0-9._-]{2,127}$/.test(value)) {
+    throw new JsonBodyError();
+  }
+  return value;
+}
+
+function optionalDemoUploadId(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  ) {
     throw new JsonBodyError();
   }
   return value;

@@ -495,6 +495,15 @@ describe("auth, library, and session-history API", () => {
       approvals: [approval],
     });
 
+    const uploadPreflight = await fetch(`${baseUrl}/v1/demo/uploads`, {
+      headers: { origin: "https://app.reflo.example" },
+      method: "OPTIONS",
+    });
+    expect(uploadPreflight.status).toBe(204);
+    expect(
+      uploadPreflight.headers.get("access-control-allow-headers"),
+    ).toContain("x-reflo-demo-upload-retry-of");
+
     expect(
       (
         await fetch(`${baseUrl}/v1/demo/uploads`, {
@@ -535,7 +544,28 @@ describe("auth, library, and session-history API", () => {
       approvalId: approval.approvalId,
       mediaType: "application/pdf",
     });
+    expect(createInput.replacesUploadId).toBeUndefined();
     expect([...createInput.bytes]).toEqual([...payload]);
+
+    const retryResponse = await fetch(`${baseUrl}/v1/demo/uploads`, {
+      body: payload,
+      headers: {
+        "content-type": "application/pdf",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+        "x-reflo-demo-source-approval": approval.approvalId,
+        "x-reflo-demo-upload-retry-of": uploadId,
+      },
+      method: "POST",
+    });
+    expect(retryResponse.status).toBe(202);
+    expect(demoUploads.create).toHaveBeenCalledTimes(2);
+    expect(demoUploads.create.mock.calls[1]?.[1]).toMatchObject({
+      approvalId: approval.approvalId,
+      mediaType: "application/pdf",
+      replacesUploadId: uploadId,
+    });
 
     const statusResponse = await fetch(
       `${baseUrl}/v1/demo/uploads/${uploadId}`,

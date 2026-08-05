@@ -25,7 +25,15 @@ const ids = {
   otherMember: "55000000-0000-4000-8000-000000000004",
   otherScope: "55000000-0000-4000-8000-000000000005",
   otherUser: "55000000-0000-4000-8000-000000000006",
+  replacementCourse: "55000000-0000-4000-8000-00000000000b",
+  replacementGenerationOperation: "55000000-0000-4000-8000-00000000000c",
+  replacementOperation: "55000000-0000-4000-8000-00000000000d",
+  replacementSource: "55000000-0000-4000-8000-00000000000e",
   scope: "55000000-0000-4000-8000-000000000007",
+  separateCourse: "55000000-0000-4000-8000-00000000000f",
+  separateGenerationOperation: "55000000-0000-4000-8000-000000000010",
+  separateOperation: "55000000-0000-4000-8000-000000000011",
+  separateSource: "55000000-0000-4000-8000-000000000012",
   source: "55000000-0000-4000-8000-000000000008",
   user: "55000000-0000-4000-8000-000000000009",
 };
@@ -106,6 +114,22 @@ test(
         operationId: ids.operation,
         sourceDocumentId: ids.source,
       });
+      await assert.rejects(
+        repository.create({
+          authorization,
+          byteSize: 478_301,
+          checksum: "a".repeat(64),
+          courseId: ids.replacementCourse,
+          generationOperationId: ids.replacementGenerationOperation,
+          mediaType: "application/pdf",
+          objectKey: `owners/${ids.scope}/sources/${ids.replacementSource}/versions/v1/original.pdf`,
+          operationId: ids.replacementOperation,
+          replacesSourceDocumentId: ids.source,
+          sourceDocumentId: ids.replacementSource,
+          title: "Approved Agents Course",
+        }),
+        /demo_upload_retry_rejected/,
+      );
       await client.query(
         `UPDATE source_document
          SET parse_status = 'parsed', page_count = 12,
@@ -157,6 +181,142 @@ test(
       assert.equal(
         generationFailed.failureClass,
         "curriculum_generation_failed",
+      );
+
+      await client.query(
+        `UPDATE source_document
+         SET parse_status = 'failed', updated_at = clock_timestamp()
+         WHERE owner_scope_id = $1 AND id = $2`,
+        [ids.scope, ids.source],
+      );
+      await client.query(
+        `UPDATE course
+         SET status = 'generating', updated_at = clock_timestamp()
+         WHERE owner_scope_id = $1 AND id = $2`,
+        [ids.scope, ids.course],
+      );
+      await client.query(
+        `UPDATE async_operation
+         SET state = 'failed_permanent',
+             sanitized_failure = '{"class":"infrastructure_unavailable"}'::jsonb,
+             updated_at = clock_timestamp(),
+             completed_at = clock_timestamp()
+         WHERE owner_scope_id = $1 AND id = $2`,
+        [ids.scope, ids.operation],
+      );
+      const retryableFailure = await repository.get(authorization, ids.source);
+      assert.equal(retryableFailure.courseStatus, "generating");
+      assert.equal(retryableFailure.failureClass, "infrastructure_unavailable");
+      assert.equal(retryableFailure.operationState, "failed_permanent");
+      assert.equal(retryableFailure.parseStatus, "failed");
+
+      await assert.rejects(
+        repository.create({
+          authorization,
+          byteSize: 478_301,
+          checksum: "b".repeat(64),
+          courseId: ids.replacementCourse,
+          generationOperationId: ids.replacementGenerationOperation,
+          mediaType: "application/pdf",
+          objectKey: `owners/${ids.scope}/sources/${ids.replacementSource}/versions/v1/original.pdf`,
+          operationId: ids.replacementOperation,
+          replacesSourceDocumentId: ids.source,
+          sourceDocumentId: ids.replacementSource,
+          title: "Approved Agents Course",
+        }),
+        /demo_upload_retry_rejected/,
+      );
+
+      await assert.rejects(
+        repository.create({
+          authorization,
+          byteSize: 478_301,
+          checksum: "a".repeat(64),
+          courseId: ids.course,
+          generationOperationId: ids.replacementGenerationOperation,
+          mediaType: "application/pdf",
+          objectKey: `owners/${ids.scope}/sources/${ids.replacementSource}/versions/v1/original.pdf`,
+          operationId: ids.replacementOperation,
+          replacesSourceDocumentId: ids.source,
+          sourceDocumentId: ids.replacementSource,
+          title: "Approved Agents Course",
+        }),
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT status FROM course WHERE owner_scope_id = $1 AND id = $2",
+            [ids.scope, ids.course],
+          )
+        ).rows[0]?.status,
+        "generating",
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT count(*)::integer AS count FROM source_document WHERE owner_scope_id = $1 AND id = $2",
+            [ids.scope, ids.replacementSource],
+          )
+        ).rows[0]?.count,
+        0,
+      );
+
+      await repository.create({
+        authorization,
+        byteSize: 478_301,
+        checksum: "a".repeat(64),
+        courseId: ids.replacementCourse,
+        generationOperationId: ids.replacementGenerationOperation,
+        mediaType: "application/pdf",
+        objectKey: `owners/${ids.scope}/sources/${ids.replacementSource}/versions/v1/original.pdf`,
+        operationId: ids.replacementOperation,
+        replacesSourceDocumentId: ids.source,
+        sourceDocumentId: ids.replacementSource,
+        title: "Approved Agents Course",
+      });
+      assert.deepEqual(
+        (
+          await client.query(
+            `SELECT id::text, status
+             FROM course
+             WHERE owner_scope_id = $1
+             ORDER BY id`,
+            [ids.scope],
+          )
+        ).rows,
+        [
+          { id: ids.course, status: "archived" },
+          { id: ids.replacementCourse, status: "generating" },
+        ],
+      );
+
+      await repository.create({
+        authorization,
+        byteSize: 478_301,
+        checksum: "a".repeat(64),
+        courseId: ids.separateCourse,
+        generationOperationId: ids.separateGenerationOperation,
+        mediaType: "application/pdf",
+        objectKey: `owners/${ids.scope}/sources/${ids.separateSource}/versions/v1/original.pdf`,
+        operationId: ids.separateOperation,
+        sourceDocumentId: ids.separateSource,
+        title: "Approved Agents Course",
+      });
+      assert.deepEqual(
+        (
+          await client.query(
+            `SELECT id::text, status
+             FROM course
+             WHERE owner_scope_id = $1
+             ORDER BY id`,
+            [ids.scope],
+          )
+        ).rows,
+        [
+          { id: ids.course, status: "archived" },
+          { id: ids.replacementCourse, status: "generating" },
+          { id: ids.separateCourse, status: "generating" },
+        ],
       );
       assert.equal(
         await repository.get(

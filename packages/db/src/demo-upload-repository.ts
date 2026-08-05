@@ -18,6 +18,7 @@ export interface DemoUploadCreate {
   readonly mediaType: string;
   readonly objectKey: string;
   readonly operationId: string;
+  readonly replacesSourceDocumentId?: string;
   readonly sourceDocumentId: string;
   readonly title: string;
 }
@@ -120,6 +121,45 @@ export class PostgresDemoUploadRepository {
       );
       if (authorized.rows[0]?.allowed !== true) {
         throw new Error("demo_upload_authorization_denied");
+      }
+      if (input.replacesSourceDocumentId !== undefined) {
+        const replaced = await client.query<{ course_id: string }>(
+          `UPDATE course AS replaced_course
+           SET status = 'archived', updated_at = clock_timestamp()
+           FROM source_document AS replaced_source,
+                ingestion_operation AS replaced_ingestion,
+                async_operation AS replaced_operation
+           WHERE replaced_course.owner_scope_id = $1
+             AND replaced_course.source_document_id = $2
+             AND replaced_course.status <> 'archived'
+             AND replaced_source.owner_scope_id = replaced_course.owner_scope_id
+             AND replaced_source.id = replaced_course.source_document_id
+             AND replaced_source.retention_status = 'active'
+             AND replaced_source.checksum = $3
+             AND replaced_source.media_type = $4
+             AND replaced_source.byte_size = $5
+             AND replaced_ingestion.owner_scope_id = replaced_source.owner_scope_id
+             AND replaced_ingestion.source_document_id = replaced_source.id
+             AND replaced_operation.owner_scope_id = replaced_ingestion.owner_scope_id
+             AND replaced_operation.id = replaced_ingestion.operation_id
+             AND (
+               replaced_course.status = 'failed'
+               OR replaced_source.parse_status = 'failed'
+               OR replaced_operation.state IN
+                    ('cancelled', 'expired', 'failed_permanent')
+             )
+           RETURNING replaced_course.id AS course_id`,
+          [
+            input.authorization.ownerScopeId,
+            input.replacesSourceDocumentId,
+            input.checksum,
+            input.mediaType,
+            input.byteSize,
+          ],
+        );
+        if (replaced.rows.length !== 1) {
+          throw new Error("demo_upload_retry_rejected");
+        }
       }
       await client.query(
         `INSERT INTO source_document
@@ -816,6 +856,9 @@ function validateCreate(input: DemoUploadCreate): void {
     !isUuid(input.courseId) ||
     !isUuid(input.generationOperationId) ||
     !isUuid(input.operationId) ||
+    (input.replacesSourceDocumentId !== undefined &&
+      (!isUuid(input.replacesSourceDocumentId) ||
+        input.replacesSourceDocumentId === input.sourceDocumentId)) ||
     !isUuid(input.sourceDocumentId) ||
     input.byteSize < 1 ||
     !Number.isSafeInteger(input.byteSize) ||

@@ -19,6 +19,7 @@ const ids = {
   course: "55000000-0000-4000-8000-000000000002",
   generationOperation: "55000000-0000-4000-8000-000000000007",
   operation: "55000000-0000-4000-8000-000000000003",
+  replacedUpload: "55000000-0000-4000-8000-000000000008",
   scope: "55000000-0000-4000-8000-000000000004",
   session: "55000000-0000-4000-8000-000000000005",
   upload: "55000000-0000-4000-8000-000000000001",
@@ -116,6 +117,7 @@ describe("approved staff demo upload service", () => {
         courseId: ids.course,
         generationOperationId: ids.generationOperation,
         operationId: ids.operation,
+        replacesSourceDocumentId: undefined,
         sourceDocumentId: ids.upload,
       }),
     );
@@ -127,6 +129,128 @@ describe("approved staff demo upload service", () => {
       operationId: ids.operation,
       sourceDocumentId: ids.upload,
     });
+  });
+
+  it("links an explicit retry to one failed upload without changing a plain new upload", async () => {
+    const retryFixture = createFixture();
+    vi.spyOn(retryFixture.repository, "get")
+      .mockResolvedValueOnce({
+        ...snapshot(),
+        failureClass: "infrastructure_unavailable",
+        operationState: "failed_permanent",
+        parseStatus: "failed",
+        sourceDocumentId: ids.replacedUpload,
+      })
+      .mockResolvedValueOnce(snapshot());
+
+    await expect(
+      retryFixture.service.create(authorization, {
+        approvalId: approval.approvalId,
+        bytes,
+        mediaType: approval.mediaType,
+        replacesUploadId: ids.replacedUpload,
+      }),
+    ).resolves.toMatchObject({
+      courseId: ids.course,
+      uploadId: ids.upload,
+    });
+    expect(retryFixture.repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replacesSourceDocumentId: ids.replacedUpload,
+        sourceDocumentId: ids.upload,
+      }),
+    );
+
+    const newUploadFixture = createFixture();
+    newUploadFixture.repository.snapshot = snapshot();
+    await newUploadFixture.service.create(authorization, {
+      approvalId: approval.approvalId,
+      bytes,
+      mediaType: approval.mediaType,
+    });
+    expect(newUploadFixture.repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replacesSourceDocumentId: undefined,
+        sourceDocumentId: ids.upload,
+      }),
+    );
+  });
+
+  it("rejects retry lineage that is inaccessible, ready, active, non-retryable, or for different approved bytes", async () => {
+    const ineligibleSnapshots: readonly DemoUploadSnapshot[] = [
+      {
+        ...snapshot(),
+        activeCurriculumGenerationId: ids.generationOperation,
+        courseStatus: "ready",
+        operationState: "succeeded",
+        parseStatus: "parsed",
+        sourceDocumentId: ids.replacedUpload,
+      },
+      {
+        ...snapshot(),
+        sourceDocumentId: ids.replacedUpload,
+      },
+      {
+        ...snapshot(),
+        courseStatus: "failed",
+        failureClass: "curriculum_generation_failed",
+        operationState: "succeeded",
+        parseStatus: "parsed",
+        sourceDocumentId: ids.replacedUpload,
+      },
+      ...[
+        "parse_timeout",
+        "parser_crash",
+        "scan_db_stale",
+        "unknown_failure",
+        null,
+      ].map((failureClass) => ({
+        ...snapshot(),
+        courseStatus: "failed" as const,
+        failureClass,
+        operationState: "failed_permanent" as const,
+        parseStatus: "failed" as const,
+        sourceDocumentId: ids.replacedUpload,
+      })),
+      {
+        ...snapshot(),
+        checksum: "b".repeat(64),
+        courseStatus: "failed",
+        operationState: "failed_permanent",
+        parseStatus: "failed",
+        sourceDocumentId: ids.replacedUpload,
+      },
+    ];
+
+    for (const replaced of ineligibleSnapshots) {
+      const fixture = createFixture();
+      fixture.repository.snapshot = replaced;
+
+      await expect(
+        fixture.service.create(authorization, {
+          approvalId: approval.approvalId,
+          bytes,
+          mediaType: approval.mediaType,
+          replacesUploadId: ids.replacedUpload,
+        }),
+      ).rejects.toEqual(new DemoUploadAccessError("not_found"));
+      expect(fixture.objects.putIfAbsent).not.toHaveBeenCalled();
+      expect(fixture.repository.create).not.toHaveBeenCalled();
+      expect(fixture.processing.schedule).not.toHaveBeenCalled();
+    }
+
+    const hiddenFixture = createFixture();
+    await expect(
+      hiddenFixture.service.create(authorization, {
+        approvalId: approval.approvalId,
+        bytes,
+        mediaType: approval.mediaType,
+        replacesUploadId: ids.replacedUpload,
+      }),
+    ).rejects.toEqual(new DemoUploadAccessError("not_found"));
+    expect(hiddenFixture.objects.putIfAbsent).not.toHaveBeenCalled();
+    expect(hiddenFixture.repository.create).not.toHaveBeenCalled();
+    expect(hiddenFixture.processing.schedule).not.toHaveBeenCalled();
   });
 
   it("rejects dormant EPUB and DOCX formats before storage or processing", async () => {
@@ -193,6 +317,20 @@ describe("approved staff demo upload service", () => {
 
     fixture.repository.snapshot = {
       ...snapshot(),
+      courseStatus: "failed",
+      failureClass: "generation_dependency_unavailable",
+      operationState: "succeeded",
+      parseStatus: "parsed",
+    };
+    await expect(
+      fixture.service.get(authorization, ids.upload),
+    ).resolves.toMatchObject({
+      failure: { code: "dependency_unavailable", retryable: true },
+      state: "failed",
+    });
+
+    fixture.repository.snapshot = {
+      ...snapshot(),
       failureClass: "scan_db_stale",
       operationState: "failed_permanent",
       parseStatus: "failed",
@@ -200,7 +338,7 @@ describe("approved staff demo upload service", () => {
     await expect(
       fixture.service.get(authorization, ids.upload),
     ).resolves.toMatchObject({
-      failure: { code: "dependency_unavailable", retryable: true },
+      failure: { code: "dependency_unavailable", retryable: false },
       state: "failed",
     });
 

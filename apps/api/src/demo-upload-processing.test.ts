@@ -82,6 +82,10 @@ describe("demo upload processing queue", () => {
     expect(fixture.repository.completeCourseGeneration).toHaveBeenCalledWith(
       work,
     );
+    expect(fixture.activation.schedule).toHaveBeenCalledWith({
+      authorization: work.authorization,
+      courseId: work.courseId,
+    });
   });
 
   it("waits for a live ingestion lease so restart recovery can take over", async () => {
@@ -111,6 +115,39 @@ describe("demo upload processing queue", () => {
     expect(fixture.repository.completeCourseGeneration).toHaveBeenCalledWith(
       work,
     );
+  });
+
+  it("idempotently launches activation when recovered curriculum is already complete", async () => {
+    const fixture = createFixture([parsed]);
+    fixture.repository.claimCourseGeneration.mockResolvedValueOnce({
+      kind: "completed",
+    });
+
+    fixture.service.schedule(work);
+    await fixture.service.close();
+
+    expect(fixture.curriculum.buildCurriculum).not.toHaveBeenCalled();
+    expect(fixture.activation.schedule).toHaveBeenCalledWith({
+      authorization: work.authorization,
+      courseId: work.courseId,
+    });
+  });
+
+  it("does not rewrite completed curriculum when activation enqueueing is unavailable", async () => {
+    const fixture = createFixture([parsed]);
+    fixture.activation.schedule.mockImplementationOnce(() => {
+      throw new Error("activation queue is closing");
+    });
+
+    fixture.service.schedule(work);
+    await fixture.service.close();
+
+    expect(fixture.repository.completeCourseGeneration).toHaveBeenCalledWith(
+      work,
+    );
+    expect(
+      fixture.repository.failCourseGenerationAttempt,
+    ).not.toHaveBeenCalled();
   });
 
   it("leaves an honest OCR terminal state without generating an outline", async () => {
@@ -209,6 +246,7 @@ describe("demo upload processing queue", () => {
     );
     expect(fixture.repository.claimCourseGeneration).toHaveBeenCalledTimes(1);
     expect(fixture.repository.completeCourseGeneration).not.toHaveBeenCalled();
+    expect(fixture.activation.schedule).not.toHaveBeenCalled();
   });
 });
 
@@ -221,6 +259,7 @@ function createFixture(
   const artifacts = {
     readNormalizedDocument: vi.fn(async () => document),
   };
+  const activation = { schedule: vi.fn() };
   const curriculum = {
     buildCurriculum: vi.fn(async () => ({})),
   };
@@ -249,6 +288,7 @@ function createFixture(
   const service = new DemoUploadProcessingService({
     activePollDelayMs: 7,
     activePollLimit: 2,
+    activation,
     artifacts,
     curriculum,
     delay,
@@ -258,6 +298,7 @@ function createFixture(
     retryDelaysMs: [1, 2, 3, 4],
   });
   return {
+    activation,
     artifacts,
     curriculum,
     delay,

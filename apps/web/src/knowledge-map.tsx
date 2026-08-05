@@ -6,6 +6,7 @@ import {
   masteryDeltaLabel,
   readinessPresentation,
 } from "./account-view";
+import { chapterProgressPresentation } from "./knowledge-map-view";
 
 export function KnowledgeMap({
   onRefresh,
@@ -23,12 +24,9 @@ export function KnowledgeMap({
     >
       <div className="knowledge-heading">
         <div>
-          <p className="eyebrow">Live knowledge map</p>
+          <p className="eyebrow">Knowledge Map</p>
           <h2 id="knowledge-title">{progress.title}</h2>
-          <p>
-            Mastery changes only when eligible assessment evidence is persisted.
-            Lesson views and abstentions do not move this map.
-          </p>
+          <p>See what is strong, what needs review, and where to focus next.</p>
         </div>
         <div className="knowledge-refresh">
           <time dateTime={new Date(progress.generatedAt).toISOString()}>
@@ -39,7 +37,7 @@ export function KnowledgeMap({
             onClick={onRefresh}
             type="button"
           >
-            Refresh evidence
+            Refresh
           </button>
         </div>
       </div>
@@ -55,18 +53,21 @@ export function KnowledgeMap({
             {progress.mastery.totalConceptCount} concepts assessed
           </small>
         </article>
-        <article className="summary-card readiness-summary">
-          <span>{readiness.label}</span>
-          <strong>{readiness.value}</strong>
-          <p>{readiness.copy}</p>
-          <p>{readiness.calibration}</p>
-          <small>
-            {progress.readiness.mappedConceptCount} mapped ·{" "}
-            {progress.readiness.invalidatedConceptCount} invalidated ·{" "}
-            {progress.readiness.unmappedConceptCount} unmapped ·{" "}
-            {fixedPercent(progress.readiness.evidenceCoverage)}% evidence
-          </small>
-        </article>
+        {progress.readiness.status === "eligible" ? (
+          <article className="summary-card readiness-summary">
+            <span>{readiness.label}</span>
+            <strong>{readiness.value}</strong>
+            <p>{readiness.copy}</p>
+            <details className="readiness-details">
+              <summary>How this score is measured</summary>
+              <p>{readiness.calibration}</p>
+              <small>
+                {progress.readiness.mappedConceptCount} mapped ·{" "}
+                {fixedPercent(progress.readiness.evidenceCoverage)}% evidence
+              </small>
+            </details>
+          </article>
+        ) : null}
       </div>
 
       {progress.chapters.length === 0 ? (
@@ -78,81 +79,110 @@ export function KnowledgeMap({
         </div>
       ) : (
         <div className="chapter-map">
-          {progress.chapters.map((chapter) => (
-            <section className="chapter-row" key={chapter.chapterId}>
-              <div className="chapter-label">
-                <span>Chapter {chapter.order}</span>
-                <h3>{chapter.title}</h3>
-                <small>{chapter.concepts.length} concepts</small>
-              </div>
-              <div className="concept-grid">
-                {chapter.concepts.map((concept) => {
-                  const presentation = conceptProgressPresentation(concept);
-                  return (
-                    <article
-                      className={`concept-tile tone-${presentation.tone}`}
-                      key={concept.conceptId}
+          {progress.chapters.map((chapter, chapterIndex) => {
+            const chapterPresentation = chapterProgressPresentation(chapter);
+            return (
+              <details
+                className="chapter-row"
+                key={chapter.chapterId}
+                open={chapterIndex === 0}
+              >
+                <summary className="chapter-label">
+                  <span className="chapter-title-group">
+                    <span>Chapter {chapter.order}</span>
+                    <strong>{chapter.title}</strong>
+                  </span>
+                  <span className="chapter-overview">
+                    <span className="chapter-concept-count">
+                      <strong>{chapter.concepts.length}</strong>
+                      <span>
+                        {chapter.concepts.length === 1 ? "concept" : "concepts"}
+                      </span>
+                    </span>
+                    <span
+                      className={`chapter-status tone-${chapterPresentation.tone}`}
                     >
-                      <div className="concept-heading">
-                        <span>{presentation.label}</span>
-                        <span className="mapping-badge">
-                          {concept.mappingStatus}
-                        </span>
-                      </div>
-                      <h4>{concept.name}</h4>
-                      <div className="concept-measure">
-                        <strong>
-                          {presentation.masteryPercent === null
-                            ? "—"
-                            : `${presentation.masteryPercent}%`}
-                        </strong>
-                        <span>mastery estimate</span>
-                      </div>
-                      <div
-                        aria-label={
-                          presentation.masteryPercent === null
-                            ? "No eligible mastery evidence"
-                            : `${presentation.masteryPercent}% mastery estimate`
-                        }
-                        aria-valuemax={100}
-                        aria-valuemin={0}
-                        aria-valuenow={
-                          presentation.masteryPercent === null
-                            ? undefined
-                            : presentation.masteryPercent
-                        }
-                        className="mastery-meter"
-                        role="meter"
+                      {chapterPresentation.label}
+                    </span>
+                    <span className="chapter-toggle" aria-hidden="true">
+                      <span className="chapter-toggle-show">Show concepts</span>
+                      <span className="chapter-toggle-hide">Hide concepts</span>
+                      <span className="chapter-toggle-icon">↓</span>
+                    </span>
+                  </span>
+                </summary>
+                <div className="concept-grid">
+                  {chapter.concepts.map((concept) => {
+                    const presentation = conceptProgressPresentation(concept);
+                    return (
+                      <article
+                        className={`concept-tile tone-${presentation.tone}`}
+                        key={concept.conceptId}
                       >
-                        <span
-                          style={{
-                            width: `${presentation.masteryPercent ?? 0}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="concept-meta">
-                        <span>
-                          Evidence strength {presentation.confidencePercent}%
-                        </span>
-                        <span>{reviewLabel(concept.review.state)}</span>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+                        <div className="concept-heading">
+                          <span>{presentation.label}</span>
+                          <span>{reviewLabel(concept.review.state)}</span>
+                        </div>
+                        <h4>{concept.name}</h4>
+                        <div className="concept-measure">
+                          <strong>
+                            {presentation.masteryPercent === null
+                              ? "—"
+                              : `${presentation.masteryPercent}%`}
+                          </strong>
+                          <span>mastery estimate</span>
+                        </div>
+                        <div
+                          aria-label={
+                            presentation.masteryPercent === null
+                              ? "No eligible mastery evidence"
+                              : `${presentation.masteryPercent}% mastery estimate`
+                          }
+                          aria-valuemax={100}
+                          aria-valuemin={0}
+                          aria-valuenow={
+                            presentation.masteryPercent === null
+                              ? undefined
+                              : presentation.masteryPercent
+                          }
+                          className="mastery-meter"
+                          role="meter"
+                        >
+                          <span
+                            style={{
+                              width: `${presentation.masteryPercent ?? 0}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="concept-meta">
+                          <span>{concept.evidenceCount} assessed answers</span>
+                          {concept.lastReviewedAt === null ? null : (
+                            <span>
+                              Reviewed{" "}
+                              {new Date(
+                                concept.lastReviewedAt,
+                              ).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </details>
+            );
+          })}
         </div>
       )}
 
       <section className="delta-section" aria-labelledby="delta-title">
         <div>
-          <p className="eyebrow">Session evidence</p>
-          <h3 id="delta-title">Recent mastery deltas</h3>
+          <p className="eyebrow">Recent sessions</p>
+          <h3 id="delta-title">Progress changes</h3>
         </div>
         {progress.recentSessionDeltas.length === 0 ? (
           <p className="delta-empty">
-            No completed re-teach loop has produced an eligible delta yet.
+            Complete a study session to see how your mastery changes.
           </p>
         ) : (
           <ol className="delta-list">
@@ -162,8 +192,8 @@ export function KnowledgeMap({
                   <strong>{delta.conceptName}</strong>
                   <small>
                     {delta.outcome === "retest_succeeded"
-                      ? "Correct re-test evidence"
-                      : "Gap scheduled for later review"}
+                      ? "Improved after a follow-up question"
+                      : "Scheduled for another review"}
                   </small>
                 </div>
                 <span>{masteryDeltaLabel(delta.masteryDelta)}</span>

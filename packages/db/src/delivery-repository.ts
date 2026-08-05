@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   DeliveryAnswerFinalization,
   DeliveryAnswerInput,
+  DeliveryPreferenceSettings,
   DemoDeliveryDestination,
   DemoDeliveryRepository,
   EmailQuizPreview,
@@ -62,6 +63,12 @@ interface StreakRow extends Record<string, unknown> {
   longest_streak: number;
 }
 
+interface PreferenceRow extends Record<string, unknown> {
+  chosen_local_time: string;
+  provider: DeliveryPreferenceSettings["provider"];
+  time_zone: string;
+}
+
 export class PostgresDemoDeliveryRepository implements DemoDeliveryRepository {
   readonly #pool: InstanceType<typeof Pool>;
 
@@ -74,6 +81,49 @@ export class PostgresDemoDeliveryRepository implements DemoDeliveryRepository {
 
   close(): Promise<void> {
     return this.#pool.end();
+  }
+
+  async loadPreference(
+    authorization: KnowledgeAuthorizationContext,
+  ): Promise<DeliveryPreferenceSettings | null> {
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      const result = await client.query<PreferenceRow>(
+        `SELECT provider, chosen_local_time::text, time_zone
+         FROM delivery_preference
+         WHERE owner_scope_id = $1 AND user_id = $2`,
+        [authorization.ownerScopeId, authorization.actorId],
+      );
+      return materializePreference(result.rows[0]);
+    });
+  }
+
+  async savePreference(
+    authorization: KnowledgeAuthorizationContext,
+    preference: DeliveryPreferenceSettings,
+  ): Promise<DeliveryPreferenceSettings> {
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      const result = await client.query<PreferenceRow>(
+        `INSERT INTO delivery_preference
+           (owner_scope_id, user_id, provider, chosen_local_time, time_zone)
+         VALUES ($1, $2, $3, $4::time, $5)
+         ON CONFLICT (owner_scope_id, user_id) DO UPDATE
+         SET provider = EXCLUDED.provider,
+             chosen_local_time = EXCLUDED.chosen_local_time,
+             time_zone = EXCLUDED.time_zone,
+             updated_at = now()
+         RETURNING provider, chosen_local_time::text, time_zone`,
+        [
+          authorization.ownerScopeId,
+          authorization.actorId,
+          preference.provider,
+          preference.chosenLocalTime,
+          preference.timeZone,
+        ],
+      );
+      return required(materializePreference(result.rows[0]));
+    });
   }
 
   async reserveDueBatch(
@@ -404,7 +454,6 @@ export class PostgresDemoDeliveryRepository implements DemoDeliveryRepository {
       );
       return {
         deliveryId,
-        demoOnly: true,
         expiresAt: materialized.expiresAt,
         questions: materialized.items.map((item) => ({
           conceptId: item.conceptId,
@@ -648,6 +697,18 @@ export class PostgresDemoDeliveryRepository implements DemoDeliveryRepository {
       client.release();
     }
   }
+}
+
+function materializePreference(
+  row: PreferenceRow | undefined,
+): DeliveryPreferenceSettings | null {
+  return row === undefined
+    ? null
+    : {
+        chosenLocalTime: row.chosen_local_time.slice(0, 5),
+        provider: row.provider,
+        timeZone: row.time_zone,
+      };
 }
 
 const DELIVERY_SELECT = `SELECT delivery.id, delivery.provider,

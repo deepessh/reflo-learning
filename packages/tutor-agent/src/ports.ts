@@ -27,6 +27,11 @@ export interface TutorModelRouterPort {
 }
 
 export interface TutorAgentRepositoryPort {
+  completeSession(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<void>;
+
   loadSession(
     authorization: ScopeAuthorizationContext,
     sessionId: string,

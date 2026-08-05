@@ -17,25 +17,25 @@ import type {
   SessionHistoryItem,
 } from "@reflo/accounts";
 
-import { courseProgress, sessionDuration } from "./account-view";
+import {
+  courseProgress,
+  sessionDuration,
+  sessionSummaryPresentation,
+} from "./account-view";
 import { DemoUploadPanel } from "./demo-upload-panel";
+import { DeliveryPreferences } from "./delivery-preferences";
 import { FlowBStudy } from "./flow-b-study";
 import { KnowledgeMap } from "./knowledge-map";
 
 interface AccountShellProps {
   readonly apiOrigin: string;
   readonly appName: string;
-  readonly environment: string;
 }
 
 type Screen = "loading" | "signed-out" | "email-sent" | "dashboard" | "error";
 type ProgressScreen = "idle" | "loading" | "ready" | "error";
 
-export function AccountShell({
-  apiOrigin,
-  appName,
-  environment,
-}: AccountShellProps) {
+export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
   const [screen, setScreen] = useState<Screen>("loading");
   const [email, setEmail] = useState("");
   const [courses, setCourses] = useState<readonly LibraryCourse[]>([]);
@@ -81,41 +81,47 @@ export function AccountShell({
     [apiOrigin],
   );
 
-  const loadAccount = useCallback(async () => {
-    try {
-      const [libraryResponse, historyResponse] = await Promise.all([
-        fetch(`${apiOrigin}/v1/library`, { credentials: "include" }),
-        fetch(`${apiOrigin}/v1/session-history`, { credentials: "include" }),
-      ]);
-      if (libraryResponse.status === 401 || historyResponse.status === 401) {
-        setScreen("signed-out");
-        return;
+  const loadAccount = useCallback(
+    async (preferredCourseId?: string) => {
+      try {
+        const [libraryResponse, historyResponse] = await Promise.all([
+          fetch(`${apiOrigin}/v1/library`, { credentials: "include" }),
+          fetch(`${apiOrigin}/v1/session-history`, { credentials: "include" }),
+        ]);
+        if (libraryResponse.status === 401 || historyResponse.status === 401) {
+          setScreen("signed-out");
+          return;
+        }
+        if (!libraryResponse.ok || !historyResponse.ok) {
+          throw new Error("account_surface_unavailable");
+        }
+        const library = (await libraryResponse.json()) as {
+          courses: readonly LibraryCourse[];
+        };
+        const history = (await historyResponse.json()) as {
+          sessions: readonly SessionHistoryItem[];
+        };
+        setCourses(library.courses);
+        setSessions(history.sessions);
+        const initialCourse =
+          library.courses.find(
+            (course) => course.courseId === preferredCourseId,
+          ) ?? library.courses[0];
+        setSelectedCourseId(initialCourse?.courseId ?? null);
+        if (initialCourse === undefined) {
+          progressRequestId.current += 1;
+          setProgress(null);
+          setProgressScreen("idle");
+        } else {
+          void loadProgress(initialCourse.courseId);
+        }
+        setScreen("dashboard");
+      } catch {
+        setScreen("error");
       }
-      if (!libraryResponse.ok || !historyResponse.ok) {
-        throw new Error("account_surface_unavailable");
-      }
-      const library = (await libraryResponse.json()) as {
-        courses: readonly LibraryCourse[];
-      };
-      const history = (await historyResponse.json()) as {
-        sessions: readonly SessionHistoryItem[];
-      };
-      setCourses(library.courses);
-      setSessions(history.sessions);
-      const initialCourse = library.courses[0];
-      setSelectedCourseId(initialCourse?.courseId ?? null);
-      if (initialCourse === undefined) {
-        progressRequestId.current += 1;
-        setProgress(null);
-        setProgressScreen("idle");
-      } else {
-        void loadProgress(initialCourse.courseId);
-      }
-      setScreen("dashboard");
-    } catch {
-      setScreen("error");
-    }
-  }, [apiOrigin, loadProgress]);
+    },
+    [apiOrigin, loadProgress],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadAccount(), 0);
@@ -135,45 +141,49 @@ export function AccountShell({
 
   return (
     <section className="app-shell">
-      <header className="topbar">
+      <a className="skip-link" href="#main-content">
+        Skip to learning dashboard
+      </a>
+      <nav className="topbar" aria-label="Primary">
         <Link className="brand" href="/" aria-label={`${appName} home`}>
           <Image alt="" height={28} src="/reflo-mark.svg" width={28} />
           <span>{appName}</span>
         </Link>
-        <span className="environment">{environment}</span>
-      </header>
+        <span className="topbar-purpose">Learn · review · retain</span>
+      </nav>
 
-      {screen === "loading" ? <LoadingState /> : null}
-      {screen === "signed-out" ? (
-        <SignIn email={email} onEmail={setEmail} onSubmit={requestLink} />
-      ) : null}
-      {screen === "email-sent" ? <EmailSent email={email} /> : null}
-      {screen === "error" ? (
-        <ErrorState onRetry={() => void loadAccount()} />
-      ) : null}
-      {screen === "dashboard" ? (
-        <Dashboard
-          apiOrigin={apiOrigin}
-          courses={courses}
-          onRetryProgress={() => {
-            if (selectedCourseId !== null) {
-              void loadProgress(selectedCourseId);
-            }
-          }}
-          onSelectCourse={(courseId) => {
-            setSelectedCourseId(courseId);
-            void loadProgress(courseId);
-          }}
-          onUploadedCourse={(courseId) => {
-            setSelectedCourseId(courseId);
-            void loadProgress(courseId);
-          }}
-          progress={progress}
-          progressScreen={progressScreen}
-          selectedCourseId={selectedCourseId}
-          sessions={sessions}
-        />
-      ) : null}
+      <div id="main-content" tabIndex={-1}>
+        {screen === "loading" ? <LoadingState /> : null}
+        {screen === "signed-out" ? (
+          <SignIn email={email} onEmail={setEmail} onSubmit={requestLink} />
+        ) : null}
+        {screen === "email-sent" ? <EmailSent email={email} /> : null}
+        {screen === "error" ? (
+          <ErrorState onRetry={() => void loadAccount()} />
+        ) : null}
+        {screen === "dashboard" ? (
+          <Dashboard
+            apiOrigin={apiOrigin}
+            courses={courses}
+            onRetryProgress={() => {
+              if (selectedCourseId !== null) {
+                void loadProgress(selectedCourseId);
+              }
+            }}
+            onSelectCourse={(courseId) => {
+              setSelectedCourseId(courseId);
+              void loadProgress(courseId);
+            }}
+            onUploadedCourse={(courseId) => {
+              void loadAccount(courseId);
+            }}
+            progress={progress}
+            progressScreen={progressScreen}
+            selectedCourseId={selectedCourseId}
+            sessions={sessions}
+          />
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -259,6 +269,34 @@ function Dashboard({
   readonly selectedCourseId: string | null;
   readonly sessions: readonly SessionHistoryItem[];
 }) {
+  const [selectedHistorySessionId, setSelectedHistorySessionId] = useState<
+    string | null
+  >(null);
+  const selectedHistorySession =
+    sessions.find(
+      (session) => session.sessionId === selectedHistorySessionId,
+    ) ?? null;
+
+  function scrollToStudy() {
+    window.setTimeout(() => {
+      document
+        .getElementById("study-session")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+
+  function openHistorySession(session: SessionHistoryItem) {
+    onSelectCourse(session.courseId);
+    if (session.status === "active") {
+      setSelectedHistorySessionId(null);
+      scrollToStudy();
+      return;
+    }
+    setSelectedHistorySessionId((selected) =>
+      selected === session.sessionId ? null : session.sessionId,
+    );
+  }
+
   return (
     <div className="dashboard">
       <div className="dashboard-heading">
@@ -266,14 +304,9 @@ function Dashboard({
           <p className="eyebrow">Personal library</p>
           <h1>Good to have you back.</h1>
         </div>
-        <span className="demo-boundary">Staff-controlled demo library</span>
       </div>
 
       <div className="dashboard-grid">
-        <DemoUploadPanel
-          apiOrigin={apiOrigin}
-          onCourseReady={onUploadedCourse}
-        />
         <section className="panel course-panel">
           <div className="panel-heading">
             <h2>Your courses</h2>
@@ -306,13 +339,34 @@ function Dashboard({
                       <h3>{course.title}</h3>
                       <div className="progress-copy">
                         <span>{progress.label}</span>
-                        <span>{progress.percent}%</span>
+                        <span>
+                          {progress.percent === null
+                            ? "In progress"
+                            : `${progress.percent}%`}
+                        </span>
                       </div>
                       <div
                         className="progress-track"
-                        aria-label={`${progress.percent}% ready`}
+                        aria-label={
+                          progress.percent === null
+                            ? `${progress.label}; completion is still being calculated`
+                            : `${progress.percent}% ready`
+                        }
+                        aria-valuemax={100}
+                        aria-valuemin={0}
+                        aria-valuenow={progress.percent ?? undefined}
+                        role="progressbar"
                       >
-                        <span style={{ width: `${progress.percent}%` }} />
+                        <span
+                          className={
+                            progress.percent === null ? "is-indeterminate" : ""
+                          }
+                          style={
+                            progress.percent === null
+                              ? undefined
+                              : { width: `${progress.percent}%` }
+                          }
+                        />
                       </div>
                     </div>
                   </button>
@@ -337,17 +391,49 @@ function Dashboard({
               {sessions.slice(0, 6).map((session) => (
                 <li key={session.sessionId}>
                   <span className={`history-dot status-${session.status}`} />
-                  <div>
-                    <strong>{session.courseTitle}</strong>
+                  <button
+                    aria-controls={
+                      session.status === "active"
+                        ? "study-session"
+                        : `history-summary-${session.sessionId}`
+                    }
+                    aria-expanded={
+                      session.status === "active"
+                        ? undefined
+                        : selectedHistorySessionId === session.sessionId
+                    }
+                    className="history-action"
+                    onClick={() => openHistorySession(session)}
+                    type="button"
+                  >
+                    <span>
+                      <strong>{session.courseTitle}</strong>
+                      <small>
+                        {new Date(session.startedAt).toLocaleDateString()}
+                      </small>
+                    </span>
                     <small>
-                      {new Date(session.startedAt).toLocaleDateString()}
+                      {session.status === "active"
+                        ? "Continue"
+                        : selectedHistorySessionId === session.sessionId
+                          ? "Hide summary"
+                          : "View summary"}
                     </small>
-                  </div>
+                  </button>
                   <span>{sessionDuration(session)}</span>
                 </li>
               ))}
             </ol>
           )}
+          {selectedHistorySession !== null ? (
+            <SessionHistorySummary
+              onReturnToCourse={() => {
+                onSelectCourse(selectedHistorySession.courseId);
+                scrollToStudy();
+              }}
+              session={selectedHistorySession}
+            />
+          ) : null}
         </section>
       </div>
 
@@ -355,6 +441,13 @@ function Dashboard({
         <FlowBStudy
           apiOrigin={apiOrigin}
           courseId={selectedCourseId}
+          key={`${selectedCourseId}:${
+            sessions.find(
+              (session) =>
+                session.courseId === selectedCourseId &&
+                session.status === "active",
+            )?.sessionId ?? "new"
+          }`}
           onProgressRefresh={onRetryProgress}
           resumeSessionId={
             sessions.find(
@@ -370,8 +463,8 @@ function Dashboard({
         <section className="panel progress-state">
           <span className="loading-ring" />
           <div>
-            <strong>Replaying your concept progress…</strong>
-            <p>Loading persisted mastery and review state.</p>
+            <strong>Loading your progress…</strong>
+            <p>Bringing your latest mastery and review schedule into view.</p>
           </div>
         </section>
       ) : null}
@@ -389,6 +482,25 @@ function Dashboard({
       {progressScreen === "ready" && progress !== null ? (
         <KnowledgeMap onRefresh={onRetryProgress} progress={progress} />
       ) : null}
+
+      <div className="dashboard-settings">
+        <details className="preference-disclosure">
+          <summary>Review reminders</summary>
+          <p>Choose when and where Reflo sends your next review.</p>
+          <DeliveryPreferences apiOrigin={apiOrigin} />
+        </details>
+        <details className="import-disclosure">
+          <summary>Add course material</summary>
+          <p>
+            Course setup accepts approved PDF sources and builds a source-backed
+            outline before lessons become available.
+          </p>
+          <DemoUploadPanel
+            apiOrigin={apiOrigin}
+            onCourseReady={onUploadedCourse}
+          />
+        </details>
+      </div>
     </div>
   );
 }
@@ -405,6 +517,48 @@ function EmptyState({
       <strong>{title}</strong>
       <p>{copy}</p>
     </div>
+  );
+}
+
+function SessionHistorySummary({
+  onReturnToCourse,
+  session,
+}: {
+  readonly onReturnToCourse: () => void;
+  readonly session: SessionHistoryItem;
+}) {
+  const summary = sessionSummaryPresentation(session);
+  return (
+    <aside
+      className="history-summary"
+      id={`history-summary-${session.sessionId}`}
+      aria-label={`${session.courseTitle} session summary`}
+    >
+      <div className="history-summary-heading">
+        <div>
+          <span>{summary.statusLabel}</span>
+          <strong>{session.courseTitle}</strong>
+        </div>
+        <span>{sessionDuration(session)}</span>
+      </div>
+      <p>{summary.detail}</p>
+      <small>
+        Started {new Date(session.startedAt).toLocaleString()}
+        {session.endedAt === null
+          ? ""
+          : ` · Finished ${new Date(session.endedAt).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })}`}
+      </small>
+      <button
+        className="secondary-button"
+        onClick={onReturnToCourse}
+        type="button"
+      >
+        Study this course again
+      </button>
+    </aside>
   );
 }
 

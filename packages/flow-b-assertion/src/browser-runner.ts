@@ -415,6 +415,7 @@ function buildRunRecord(input: {
     },
     runId: input.config.runId,
     startedAt: input.startedAt,
+    targetProfile: input.config.targetProfile,
     targetOriginDigest: valueDigest(
       [
         input.config.appBaseUrl.origin,

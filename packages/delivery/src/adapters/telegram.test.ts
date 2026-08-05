@@ -15,7 +15,6 @@ describe("Telegram demo adapter", () => {
     });
     const result = await adapter.send({
       deliveryId: "30000000-0000-4000-8000-000000000043",
-      demoOnlyLabel: "Staff-controlled demo only",
       emailLink: null,
       expiresAt: "2026-07-25T00:00:00.000Z",
       provider: "telegram",
@@ -33,7 +32,8 @@ describe("Telegram demo adapter", () => {
 
     expect(result.providerMessageId).toBe("telegram/43");
     const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.text).toContain("Staff-controlled Reflo demo only");
+    expect(body.text).toContain("A quick Reflo review");
+    expect(body.text.toLowerCase()).not.toContain("demo");
     expect(body.reply_markup.inline_keyboard[1][0].callback_data).toBe(
       "reflo:30000000-0000-4000-8000-000000000043:40000000-0000-4000-8000-000000000043:1",
     );

@@ -5,6 +5,7 @@ import { SingleSendMailRequest } from "@alicloud/dm20151123";
 
 import type { DeliveryMessage } from "../contracts.js";
 import { DeliveryError } from "../errors.js";
+import { REVIEW_MESSAGE_COPY } from "../experience.js";
 import type { DemoMessagePort } from "../ports.js";
 
 const ENDPOINTS = {
@@ -56,10 +57,10 @@ export class DirectMailDemoMessageAdapter implements DemoMessagePort {
       addressType: 1,
       clickTrace: "0",
       fromAlias: this.config.fromAlias,
-      htmlBody: htmlBody(message.emailLink, message.expiresAt),
+      htmlBody: htmlBody(message.emailLink),
       replyToAddress: false,
-      subject: "Staff-controlled Reflo demo review",
-      textBody: textBody(message.emailLink, message.expiresAt),
+      subject: REVIEW_MESSAGE_COPY.emailSubject,
+      textBody: textBody(message.emailLink),
       toAddress: message.recipient,
       unSubscribeFilterLevel: "disabled",
       unSubscribeLinkType: "disabled",
@@ -130,23 +131,23 @@ function assertConfiguration(
   }
 }
 
-function textBody(link: string, expiresAt: string): string {
+function textBody(link: string): string {
   return [
-    "Staff-controlled Reflo demo only",
+    REVIEW_MESSAGE_COPY.emailHeading,
     "",
-    "Open the authenticated mobile-web quiz:",
+    "A short review is waiting for you:",
     link,
     "",
-    `The single-use link expires at ${expiresAt}. Email replies are not read or graded.`,
+    "Open it soon; the secure link expires automatically. Email replies are not read or graded.",
   ].join("\n");
 }
 
-function htmlBody(link: string, expiresAt: string): string {
+function htmlBody(link: string): string {
   return [
-    "<h1>Staff-controlled Reflo demo only</h1>",
-    "<p>Open the authenticated mobile-web quiz:</p>",
-    `<p><a href="${escapeHtml(link)}">Open review quiz</a></p>`,
-    `<p>The single-use link expires at ${escapeHtml(expiresAt)}. Email replies are not read or graded.</p>`,
+    `<h1>${REVIEW_MESSAGE_COPY.emailHeading}</h1>`,
+    "<p>A short review is waiting for you.</p>",
+    `<p><a href="${escapeHtml(link)}">${REVIEW_MESSAGE_COPY.action}</a></p>`,
+    "<p>Open it soon; the secure link expires automatically. Email replies are not read or graded.</p>",
   ].join("");
 }
 

@@ -75,11 +75,12 @@ describe("TutorAgentService", () => {
     [
       {
         change: { eligibleAttemptCount: 1 },
+        expected: { conceptId: ids.concept, kind: "review" },
         label: "two eligible attempts",
       },
       {
         change: { latestLessonExposureAt: null },
-        expected: { conceptId: ids.concept, kind: "advance" },
+        expected: { conceptId: ids.concept, kind: "review" },
         label: "lesson exposure",
       },
       {
@@ -115,6 +116,9 @@ describe("TutorAgentService", () => {
       }),
     ).resolves.toEqual(expected);
     expect(fixture.artifacts.objects.size).toBe(1);
+    if (expected.kind === "session_complete") {
+      expect(fixture.repository.completedSessions).toEqual([ids.session]);
+    }
   });
 
   it("requires strategy change and similarity strictly below 0.85", async () => {

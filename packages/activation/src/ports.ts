@@ -9,7 +9,11 @@ import type {
   GenerationFailure,
   GenerationOperationView,
   GenerationWork,
+  ActivationRegenerationRegistration,
+  LessonRegenerationRegistration,
   PlannedGenerationOperation,
+  RegenerateArtifactCommand,
+  RegenerateLessonCommand,
   TextArtifactWriteResult,
 } from "./contracts.js";
 
@@ -33,6 +37,14 @@ export interface ActivationRepositoryPort {
     course: AuthorizedActivationCourse,
     operations: readonly PlannedGenerationOperation[],
   ): Promise<readonly GenerationOperationView[]>;
+
+  registerLessonRegeneration(
+    command: RegenerateLessonCommand,
+  ): Promise<LessonRegenerationRegistration>;
+
+  registerArtifactRegeneration(
+    command: RegenerateArtifactCommand,
+  ): Promise<ActivationRegenerationRegistration>;
 
   claimOperation(
     authorization: ScopeAuthorizationContext,

@@ -92,6 +92,27 @@ test(
       deliveryRepository = new PostgresDemoDeliveryRepository(
         databaseUrl.toString(),
       );
+      assert.equal(
+        await deliveryRepository.loadPreference(authorization),
+        null,
+      );
+      assert.deepEqual(
+        await deliveryRepository.savePreference(authorization, {
+          chosenLocalTime: "18:45",
+          provider: "email",
+          timeZone: "America/Los_Angeles",
+        }),
+        {
+          chosenLocalTime: "18:45",
+          provider: "email",
+          timeZone: "America/Los_Angeles",
+        },
+      );
+      assert.deepEqual(await deliveryRepository.loadPreference(authorization), {
+        chosenLocalTime: "18:45",
+        provider: "email",
+        timeZone: "America/Los_Angeles",
+      });
 
       const reserveRequest = {
         expiresAt: "2026-08-02T09:00:00.000Z",
@@ -145,7 +166,7 @@ test(
         tokenDigest,
         "2026-08-01T09:01:00.000Z",
       );
-      assert.equal(preview.demoOnly, true);
+      assert.equal("demoOnly" in preview, false);
       assert.equal(preview.questions[0].prompt, "Choose B");
       assert.equal("keyedAnswer" in preview.questions[0], false);
 

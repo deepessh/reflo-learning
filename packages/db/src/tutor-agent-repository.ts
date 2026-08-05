@@ -124,6 +124,44 @@ export class PostgresTutorAgentRepository
     return this.#pool.end();
   }
 
+  async completeSession(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<void> {
+    validateAuthorization(authorization);
+    validateUuid(sessionId);
+    await this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      const session = await loadAuthorizedSession(
+        client,
+        authorization,
+        sessionId,
+        true,
+      );
+      if (session === null) {
+        throw new TutorAgentError("authorization_denied");
+      }
+      const result = await client.query(
+        `UPDATE study_session
+         SET status = 'completed', ended_at = clock_timestamp(),
+             summary = coalesce(summary, '{}'::jsonb) ||
+               jsonb_build_object(
+                 'completion', jsonb_build_object(
+                   'completedAt', clock_timestamp(),
+                   'reason', 'plan_exhausted',
+                   'version', 'study-session-completion-v1'
+                 )
+               )
+         WHERE owner_scope_id = $1 AND id = $2 AND user_id = $3
+           AND status = 'active'`,
+        [authorization.ownerScopeId, sessionId, authorization.actorId],
+      );
+      if (result.rowCount !== 1) {
+        throw new TutorAgentError("invalid_session");
+      }
+    });
+  }
+
   async loadSession(
     authorization: ScopeAuthorizationContext,
     sessionId: string,

@@ -181,6 +181,15 @@ describe("activation generation", () => {
       expect(bank.items.every((item) => item.sourceSpanIds.length > 0)).toBe(
         true,
       );
+      expect(bank.fallbackItems).toHaveLength(
+        bank.items.filter((item) => item.itemType === "short_answer").length,
+      );
+      for (const fallback of bank.fallbackItems) {
+        expect(fallback.itemType).toBe("multiple_choice");
+        expect(fallback.conceptIds).toHaveLength(1);
+        expect(fallback.responseOptions).toContain(fallback.keyedAnswer);
+        expect(fallback.sourceSpanIds.length).toBeGreaterThan(0);
+      }
       for (const item of bank.items.filter(
         (candidate) => candidate.itemType === "short_answer",
       )) {
@@ -247,7 +256,86 @@ describe("activation generation", () => {
     expect(repository.lessons).toHaveLength(1);
   });
 
-  it("fails duplicate normalized questions permanently", async () => {
+  it("creates one new versioned lesson operation for an idempotent regeneration request", async () => {
+    const { repository, service } = fixtureService({});
+    const plan = await service.plan({
+      authorization,
+      courseId: ids.course,
+      environment: "dev",
+    });
+    const original = required(plan[0]);
+    repository.operations.set(original.id, {
+      ...original,
+      attemptCount: 5,
+      failureClass: "deadline_exceeded",
+      regenerationOrdinal: 0,
+      retryable: false,
+      status: "failed_permanent",
+    });
+    const command = {
+      authorization,
+      courseId: ids.course,
+      environment: "dev" as const,
+      requestIdempotencyKey: "20000000-0000-4000-8000-000000000001",
+      sessionId: "20000000-0000-4000-8000-000000000002",
+    };
+
+    const created = await service.regenerateLesson(command);
+    const replay = await service.regenerateLesson(command);
+
+    expect(created.replayed).toBe(false);
+    expect(created.operation).toMatchObject({
+      artifactKind: "first_text_lesson",
+      attemptCount: 0,
+      regenerationOrdinal: 1,
+      status: "queued",
+    });
+    expect(replay).toEqual({ ...created, replayed: true });
+    expect(repository.operations.get(original.id)?.status).toBe(
+      "failed_permanent",
+    );
+    expect(repository.operations).toHaveLength(4);
+  });
+
+  it("creates an independent immutable chapter-quiz regeneration", async () => {
+    const { repository, service } = fixtureService({});
+    const plan = await service.plan({
+      authorization,
+      courseId: ids.course,
+      environment: "dev",
+    });
+    const original = required(plan[2]);
+    repository.operations.set(original.id, {
+      ...original,
+      attemptCount: 5,
+      failureClass: "invalid_result",
+      retryable: false,
+      status: "failed_permanent",
+    });
+    const command = {
+      artifactKind: "chapter_quiz" as const,
+      authorization,
+      courseId: ids.course,
+      environment: "dev" as const,
+      requestIdempotencyKey: "20000000-0000-4000-8000-000000000011",
+      sessionId: "20000000-0000-4000-8000-000000000012",
+    };
+
+    const created = await service.regenerateArtifact(command);
+    const replay = await service.regenerateArtifact(command);
+
+    expect(created.operation).toMatchObject({
+      artifactKind: "chapter_quiz",
+      regenerationOrdinal: 1,
+      status: "queued",
+    });
+    expect(replay).toEqual({ ...created, replayed: true });
+    expect(repository.operations.get(original.id)?.status).toBe(
+      "failed_permanent",
+    );
+  });
+
+  it("schedules a bounded retry for duplicate normalized questions", async () => {
     const duplicate = quizItems(10, "duplicate").map((item) => ({
       ...item,
       prompt: "What is a VPC?",
@@ -270,8 +358,8 @@ describe("activation generation", () => {
       }),
     ).resolves.toMatchObject({
       failureClass: "invalid_result",
-      retryable: false,
-      status: "failed_permanent",
+      retryable: true,
+      status: "retry_scheduled",
     });
   });
 
@@ -299,7 +387,7 @@ describe("activation generation", () => {
       }),
     ).resolves.toMatchObject({
       failureClass: "invalid_result",
-      status: "failed_permanent",
+      status: "retry_scheduled",
     });
   });
 });

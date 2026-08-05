@@ -33,6 +33,14 @@ export { PostgresConnectedDemoRepository } from "./connected-demo-repository.js"
 export { PostgresDemoUploadRepository } from "./demo-upload-repository.js";
 export type { ConnectedDemoSessionSummary } from "./connected-demo-repository.js";
 export type { ConnectedDemoSeedResult } from "./connected-demo-repository.js";
+export {
+  ACTIVATION_PROGRESS_CONTRACT_VERSION,
+  type ConnectedActivationProgress,
+} from "./connected-demo-repository.js";
+export type { ConnectedStudyLessonCompletion } from "./connected-demo-repository.js";
+export type { ConnectedStudyLessonAssets } from "./connected-demo-repository.js";
+export type { ConnectedPrivateAsset } from "./connected-demo-repository.js";
+export type { ConnectedStudySessionStartResult } from "./connected-demo-repository.js";
 export type {
   DemoUploadCreate,
   DemoUploadGenerationClaim,

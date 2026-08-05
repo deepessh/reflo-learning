@@ -12,6 +12,8 @@ import {
   EMAIL_LINK_CONTRACT_VERSION,
   type DeliveryAnswerInput,
   type DeliveryDispatchResult,
+  type DeliveryPreferenceSettings,
+  type DeliveryPreferenceView,
   type DeliveryQuestion,
   type DemoDeliveryDestination,
   type DemoDeliveryProvider,
@@ -20,6 +22,7 @@ import {
   type TelegramCallback,
 } from "./contracts.js";
 import { DeliveryError } from "./errors.js";
+import { REVIEW_QUIZ_PATH } from "./experience.js";
 import type {
   DeliveryKnowledgePort,
   DemoDeliveryRepository,
@@ -37,6 +40,8 @@ export class DemoDeliveryService {
   constructor(
     private readonly dependencies: {
       readonly destinations: readonly DemoDeliveryDestination[];
+      readonly defaultPreference: DeliveryPreferenceSettings;
+      readonly allowLocalHttpEmailOrigin?: boolean;
       readonly emailLinkOrigin?: string;
       readonly emailLinkSigningKey?: Uint8Array;
       readonly knowledge: DeliveryKnowledgePort;
@@ -45,6 +50,7 @@ export class DemoDeliveryService {
     },
   ) {
     this.#destinations = validateDestinations(dependencies.destinations);
+    validatePreference(dependencies.defaultPreference);
     this.#ports = new Map(
       dependencies.messagePorts.map((port) => [port.provider, port]),
     );
@@ -54,7 +60,10 @@ export class DemoDeliveryService {
     if (
       (hasEmail &&
         (dependencies.emailLinkSigningKey?.byteLength !== 32 ||
-          !validHttpsOrigin(dependencies.emailLinkOrigin ?? ""))) ||
+          !validEmailLinkOrigin(
+            dependencies.emailLinkOrigin ?? "",
+            dependencies.allowLocalHttpEmailOrigin === true,
+          ))) ||
       new Set(dependencies.messagePorts.map((port) => port.provider)).size !==
         dependencies.messagePorts.length
     ) {
@@ -66,15 +75,15 @@ export class DemoDeliveryService {
     readonly authorization: DemoDeliveryDestination["authorization"];
     readonly idempotencyKey: string;
     readonly now: string;
-    readonly provider: DemoDeliveryProvider;
   }): Promise<DeliveryDispatchResult | null> {
     validateIdentity(command.idempotencyKey);
     const now = parseTimestamp(command.now);
+    const preference = await this.#preference(command.authorization);
     const destination = this.#destinationForAuthorization(
       command.authorization,
-      command.provider,
+      preference.provider,
     );
-    const port = this.#ports.get(command.provider);
+    const port = this.#ports.get(preference.provider);
     if (port === undefined) {
       throw new DeliveryError("invalid_configuration");
     }
@@ -105,7 +114,7 @@ export class DemoDeliveryService {
     let emailLink: string | null = null;
     if (delivery.provider === "email") {
       const token = this.#emailToken(delivery, destination);
-      emailLink = `${this.#emailLinkOrigin()}/demo/review?token=${encodeURIComponent(token)}`;
+      emailLink = `${this.#emailLinkOrigin()}${REVIEW_QUIZ_PATH}?token=${encodeURIComponent(token)}`;
       await this.dependencies.repository.bindEmailToken(
         command.authorization,
         delivery.deliveryId,
@@ -131,7 +140,6 @@ export class DemoDeliveryService {
     try {
       const submitted = await port.send({
         deliveryId: delivery.deliveryId,
-        demoOnlyLabel: "Staff-controlled demo only",
         emailLink,
         expiresAt: delivery.expiresAt,
         provider: delivery.provider,
@@ -163,6 +171,32 @@ export class DemoDeliveryService {
         ambiguous ? "dispatch_ambiguous" : "dispatch_failed",
       );
     }
+  }
+
+  async getPreference(
+    authorization: DemoDeliveryDestination["authorization"],
+  ): Promise<DeliveryPreferenceView> {
+    const preference = await this.#preference(authorization);
+    return {
+      ...preference,
+      availableProviders: this.#availableProviders(authorization),
+    };
+  }
+
+  async updatePreference(
+    authorization: DemoDeliveryDestination["authorization"],
+    preference: DeliveryPreferenceSettings,
+  ): Promise<DeliveryPreferenceView> {
+    validatePreference(preference);
+    this.#destinationForAuthorization(authorization, preference.provider);
+    const saved = await this.dependencies.repository.savePreference(
+      authorization,
+      preference,
+    );
+    return {
+      ...saved,
+      availableProviders: this.#availableProviders(authorization),
+    };
   }
 
   async handleTelegramWebhook(
@@ -320,6 +354,29 @@ export class DemoDeliveryService {
     return destination;
   }
 
+  async #preference(
+    authorization: DemoDeliveryDestination["authorization"],
+  ): Promise<DeliveryPreferenceSettings> {
+    const persisted =
+      await this.dependencies.repository.loadPreference(authorization);
+    const preference = persisted ?? this.dependencies.defaultPreference;
+    validatePreference(preference);
+    this.#destinationForAuthorization(authorization, preference.provider);
+    return preference;
+  }
+
+  #availableProviders(
+    authorization: DemoDeliveryDestination["authorization"],
+  ): readonly DemoDeliveryProvider[] {
+    return this.#destinations
+      .filter(
+        (destination) =>
+          destination.authorization.actorId === authorization.actorId &&
+          destination.authorization.ownerScopeId === authorization.ownerScopeId,
+      )
+      .map((destination) => destination.provider);
+  }
+
   #emailToken(
     delivery: ReservedDelivery,
     destination: DemoDeliveryDestination,
@@ -419,6 +476,17 @@ function validateDestinations(
   return destinations;
 }
 
+function validatePreference(preference: DeliveryPreferenceSettings): void {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(preference.chosenLocalTime)) {
+    throw new DeliveryError("invalid_input");
+  }
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: preference.timeZone });
+  } catch {
+    throw new DeliveryError("invalid_input");
+  }
+}
+
 function publicQuestion(
   item: ReservedDelivery["items"][number],
 ): DeliveryQuestion {
@@ -474,11 +542,14 @@ function validateIdentity(value: string): void {
   }
 }
 
-function validHttpsOrigin(value: string): boolean {
+function validEmailLinkOrigin(value: string, allowLocalHttp: boolean): boolean {
   try {
     const url = new URL(value);
     return (
-      url.protocol === "https:" &&
+      (url.protocol === "https:" ||
+        (allowLocalHttp &&
+          url.protocol === "http:" &&
+          (url.hostname === "127.0.0.1" || url.hostname === "localhost"))) &&
       url.username === "" &&
       url.password === "" &&
       url.pathname === "/" &&

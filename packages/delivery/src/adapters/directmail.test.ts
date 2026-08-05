@@ -16,8 +16,7 @@ describe("DirectMail demo adapter", () => {
     );
     const result = await adapter.send({
       deliveryId: "30000000-0000-4000-8000-000000000043",
-      demoOnlyLabel: "Staff-controlled demo only",
-      emailLink: "https://app.reflo.example/demo/review?token=signed",
+      emailLink: "https://app.reflo.example/review?token=signed",
       expiresAt: "2026-07-25T00:00:00.000Z",
       provider: "email",
       questions: [],
@@ -28,6 +27,10 @@ describe("DirectMail demo adapter", () => {
     const request = singleSendMail.mock.calls[0][0];
     expect(request.toAddress).toBe("staff@example.test");
     expect(request.replyToAddress).toBe(false);
+    expect(request.subject).toBe("Your Reflo review is ready");
+    expect(request.textBody.toLowerCase()).not.toContain("demo");
+    expect(request.htmlBody.toLowerCase()).not.toContain("demo");
+    expect(request.textBody).not.toContain("2026-07-25T00:00:00.000Z");
     expect(request.textBody).toContain("Email replies are not read or graded");
   });
 });

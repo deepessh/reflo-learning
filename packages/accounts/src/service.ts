@@ -27,6 +27,7 @@ const RECENT_AUTH_MS = 15 * 60 * 1_000;
 
 export interface AccountServiceOptions {
   readonly abuseLimiter: AuthAbuseLimiter;
+  readonly allowInsecureLoopbackOrigins?: boolean;
   readonly callbackOrigins: readonly string[];
   readonly clock: AccountClock;
   readonly emailEncryptionKey: Uint8Array;
@@ -55,7 +56,9 @@ export class AccountService {
       throw new Error("magicLinkDailyLimit cannot exceed magicLinkTotalLimit");
     }
     this.#allowedOrigins = new Set(
-      options.callbackOrigins.map((origin) => normalizeOrigin(origin)),
+      options.callbackOrigins.map((origin) =>
+        normalizeOrigin(origin, options.allowInsecureLoopbackOrigins === true),
+      ),
     );
     if (this.#allowedOrigins.size === 0) {
       throw new Error("At least one exact callback origin is required");
@@ -68,14 +71,22 @@ export class AccountService {
       return false;
     }
     try {
-      return this.#allowedOrigins.has(normalizeOrigin(origin));
+      return this.#allowedOrigins.has(
+        normalizeOrigin(
+          origin,
+          this.#options.allowInsecureLoopbackOrigins === true,
+        ),
+      );
     } catch {
       return false;
     }
   }
 
   async requestMagicLink(emailInput: string, origin: string): Promise<void> {
-    const normalizedOrigin = normalizeOrigin(origin);
+    const normalizedOrigin = normalizeOrigin(
+      origin,
+      this.#options.allowInsecureLoopbackOrigins === true,
+    );
     if (!this.#allowedOrigins.has(normalizedOrigin)) {
       throw new AccountInputError("callback_origin_not_allowed");
     }
@@ -296,9 +307,18 @@ function assertDeliveryLimit(name: string, value: number): void {
   }
 }
 
-function normalizeOrigin(value: string): string {
+function normalizeOrigin(
+  value: string,
+  allowInsecureLoopbackOrigins: boolean,
+): string {
   const url = new URL(value);
-  if (url.protocol !== "https:") {
+  const insecureLoopbackAllowed =
+    allowInsecureLoopbackOrigins &&
+    url.protocol === "http:" &&
+    (url.hostname === "127.0.0.1" ||
+      url.hostname === "localhost" ||
+      url.hostname === "[::1]");
+  if (url.protocol !== "https:" && !insecureLoopbackAllowed) {
     throw new AccountInputError("callback_origin_must_use_https");
   }
   if (

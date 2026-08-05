@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   ACTIVATION_GENERATION_VERSION,
   ActivationGenerationError,
@@ -11,7 +13,11 @@ import {
   type GenerationFailure,
   type GenerationOperationView,
   type GenerationWork,
+  type ActivationRegenerationRegistration,
+  type LessonRegenerationRegistration,
   type PlannedGenerationOperation,
+  type RegenerateArtifactCommand,
+  type RegenerateLessonCommand,
 } from "@reflo/activation";
 import type { ScopeAuthorizationContext } from "@reflo/retrieval";
 import pg, { type PoolClient } from "pg";
@@ -47,10 +53,20 @@ interface OperationRow extends Record<string, unknown> {
   id: string;
   idempotency_key: string;
   priority: number;
+  regeneration_ordinal: number;
   retryable: boolean;
   status: GenerationOperationView["status"];
   updated_at: Date;
 }
+
+const ACTIVATION_REGENERATION_COOLDOWN_MS = 60_000;
+const REGENERABLE_FAILURES = new Set([
+  "content_out_of_bounds",
+  "deadline_exceeded",
+  "infrastructure_unavailable",
+  "invalid_result",
+  "provider_failure",
+]);
 
 export class PostgresActivationRepository implements ActivationRepositoryPort {
   readonly #pool: InstanceType<typeof Pool>;
@@ -163,6 +179,195 @@ export class PostgresActivationRepository implements ActivationRepositoryPort {
         return persisted.sort((left, right) => left.priority - right.priority);
       },
     );
+  }
+
+  async registerLessonRegeneration(
+    command: RegenerateLessonCommand,
+  ): Promise<LessonRegenerationRegistration> {
+    return this.registerArtifactRegeneration({
+      ...command,
+      artifactKind: "first_text_lesson",
+    });
+  }
+
+  async registerArtifactRegeneration(
+    command: RegenerateArtifactCommand,
+  ): Promise<ActivationRegenerationRegistration> {
+    validateUuid(command.sessionId);
+    validateUuid(command.requestIdempotencyKey);
+    if (
+      !["first_text_lesson", "chapter_quiz", "placement_quiz"].includes(
+        command.artifactKind,
+      )
+    ) {
+      throw new ActivationGenerationError("invalid_configuration");
+    }
+    const requestKey = `${command.environment}/content.activation.regenerate/v1/${command.requestIdempotencyKey}`;
+    const operationId = randomUUID();
+    return this.#transaction(async (client) => {
+      await setScopeContext(
+        client,
+        command.authorization.actorId,
+        command.authorization.ownerScopeId,
+      );
+      await client.query("SELECT pg_advisory_xact_lock(214765003, 165)");
+      const course = await loadAuthorizedCourse(
+        client,
+        command.authorization,
+        command.courseId,
+      );
+      if (course === null) {
+        throw new ActivationGenerationError("authorization_denied");
+      }
+      const session = await client.query<{ present: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM study_session
+           WHERE owner_scope_id = $1 AND id = $2 AND user_id = $3
+             AND course_id = $4 AND status = 'active'
+         ) AS present`,
+        [
+          course.ownerScopeId,
+          command.sessionId,
+          command.authorization.actorId,
+          course.courseId,
+        ],
+      );
+      if (session.rows[0]?.present !== true) {
+        throw new ActivationGenerationError("authorization_denied");
+      }
+
+      const replay = await client.query<OperationRow>(
+        `SELECT id, artifact_kind, chapter_id, concept_id, generation_version,
+                idempotency_key, priority, status, attempt_count, retryable,
+                failure_class, artifact_id, regeneration_ordinal, updated_at
+         FROM activation_generation_operation
+         WHERE owner_scope_id = $1 AND request_idempotency_key = $2`,
+        [course.ownerScopeId, requestKey],
+      );
+      if (replay.rows[0] !== undefined) {
+        const row = replay.rows[0];
+        if (row.artifact_kind !== command.artifactKind) {
+          throw new ActivationGenerationError("operation_unavailable");
+        }
+        return { operation: operationView(row), replayed: true };
+      }
+
+      const firstChapter = course.chapters[0];
+      if (firstChapter === undefined) {
+        throw new ActivationGenerationError("regeneration_not_allowed");
+      }
+      const targetChapterId =
+        command.artifactKind === "placement_quiz" ? null : firstChapter.id;
+      const ready =
+        command.artifactKind === "first_text_lesson"
+          ? await client.query<{ present: boolean }>(
+              `SELECT EXISTS (
+                 SELECT 1 FROM asset
+                 WHERE owner_scope_id = $1 AND course_id = $2
+                   AND asset_type = 'text' AND status = 'ready'
+                   AND reteach_session_id IS NULL
+               ) AS present`,
+              [course.ownerScopeId, course.courseId],
+            )
+          : await client.query<{ present: boolean }>(
+              `SELECT EXISTS (
+                 SELECT 1 FROM quiz_bank
+                 WHERE owner_scope_id = $1 AND course_id = $2
+                   AND bank_kind = $3
+                   AND chapter_id IS NOT DISTINCT FROM $4
+               ) AS present`,
+              [
+                course.ownerScopeId,
+                course.courseId,
+                command.artifactKind === "placement_quiz"
+                  ? "placement"
+                  : "chapter",
+                targetChapterId,
+              ],
+            );
+      if (ready.rows[0]?.present === true) {
+        throw new ActivationGenerationError("regeneration_not_allowed");
+      }
+
+      const latest = await client.query<
+        OperationRow & { completed_at: Date | null }
+      >(
+        `SELECT id, artifact_kind, chapter_id, concept_id, generation_version,
+                idempotency_key, priority, status, attempt_count, retryable,
+                failure_class, artifact_id, regeneration_ordinal, updated_at,
+                completed_at
+         FROM activation_generation_operation
+         WHERE owner_scope_id = $1 AND course_id = $2
+           AND curriculum_generation_id = $3
+           AND artifact_kind = $4
+           AND chapter_id IS NOT DISTINCT FROM $5
+         ORDER BY regeneration_ordinal DESC, created_at DESC, id DESC
+         LIMIT 1 FOR UPDATE`,
+        [
+          course.ownerScopeId,
+          course.courseId,
+          course.curriculumGenerationId,
+          command.artifactKind,
+          targetChapterId,
+        ],
+      );
+      const previous = latest.rows[0];
+      if (
+        previous === undefined ||
+        previous.status !== "failed_permanent" ||
+        previous.failure_class === null ||
+        !REGENERABLE_FAILURES.has(previous.failure_class) ||
+        previous.completed_at === null
+      ) {
+        throw new ActivationGenerationError("regeneration_not_allowed");
+      }
+      const retryAt = new Date(
+        previous.completed_at.getTime() + ACTIVATION_REGENERATION_COOLDOWN_MS,
+      );
+      if (retryAt.getTime() > Date.now()) {
+        throw new ActivationGenerationError(
+          "regeneration_cooldown",
+          undefined,
+          { retryAt },
+        );
+      }
+
+      const inserted = await client.query<OperationRow>(
+        `INSERT INTO activation_generation_operation
+           (id, owner_scope_id, course_id, curriculum_generation_id,
+            artifact_kind, chapter_id, concept_id, generation_version,
+            idempotency_key, priority, regeneration_ordinal,
+            parent_operation_id, request_idempotency_key,
+            requested_session_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                 $9, $10, $11, $12, $13, $14)
+         RETURNING id, artifact_kind, chapter_id, concept_id,
+                   generation_version, idempotency_key, priority, status,
+                   attempt_count, retryable, failure_class, artifact_id,
+                   regeneration_ordinal, updated_at`,
+        [
+          operationId,
+          course.ownerScopeId,
+          course.courseId,
+          course.curriculumGenerationId,
+          command.artifactKind,
+          previous.chapter_id,
+          previous.concept_id,
+          ACTIVATION_GENERATION_VERSION,
+          `${command.environment}/content.activation.generate/v1/${operationId}`,
+          previous.priority,
+          previous.regeneration_ordinal + 1,
+          previous.id,
+          requestKey,
+          command.sessionId,
+        ],
+      );
+      const row = inserted.rows[0];
+      if (row === undefined) {
+        throw new ActivationGenerationError("operation_unavailable");
+      }
+      return { operation: operationView(row), replayed: false };
+    });
   }
 
   async claimOperation(
@@ -366,6 +571,39 @@ export class PostgresActivationRepository implements ActivationRepositoryPort {
           }
           await insertQuizLinks(client, course, item);
         }
+        for (const item of quizBank.fallbackItems) {
+          const fallback = await client.query<{ id: string }>(
+            `INSERT INTO quiz_item
+               (id, owner_scope_id, course_id, item_type, difficulty, prompt,
+                keyed_answer, rubric, version, quiz_bank_id, item_order,
+                normalized_prompt_hash, response_options)
+             VALUES ($1, $2, $3, 'multiple_choice', $4, $5, $6::jsonb, NULL,
+                     $7, NULL, NULL, $8, $9::jsonb)
+             ON CONFLICT (owner_scope_id, id) DO UPDATE SET id = EXCLUDED.id
+             WHERE quiz_item.course_id = EXCLUDED.course_id
+               AND quiz_item.item_type = EXCLUDED.item_type
+               AND quiz_item.prompt = EXCLUDED.prompt
+               AND quiz_item.keyed_answer = EXCLUDED.keyed_answer
+               AND quiz_item.normalized_prompt_hash = EXCLUDED.normalized_prompt_hash
+               AND quiz_item.response_options = EXCLUDED.response_options
+             RETURNING id`,
+            [
+              item.id,
+              course.ownerScopeId,
+              course.courseId,
+              item.difficulty,
+              item.prompt,
+              JSON.stringify(item.keyedAnswer),
+              ACTIVATION_GENERATION_VERSION,
+              item.normalizedPromptHash,
+              JSON.stringify(item.responseOptions),
+            ],
+          );
+          if (fallback.rows[0]?.id !== item.id) {
+            throw new ActivationGenerationError("invalid_result");
+          }
+          await insertQuizLinks(client, course, item);
+        }
         const finalized = await finalizeSuccess(client, work, quizBank.bankId);
         if (quizBank.bankKind === "chapter") {
           await updateChapterReadiness(
@@ -436,7 +674,7 @@ export class PostgresActivationRepository implements ActivationRepositoryPort {
            FROM activation_generation_operation
            WHERE owner_scope_id = $1 AND course_id = $2
              AND curriculum_generation_id = $3
-           ORDER BY priority, id`,
+           ORDER BY priority, regeneration_ordinal DESC, id`,
           [course.ownerScopeId, course.courseId, course.curriculumGenerationId],
         );
         return result.rows.map(operationView);
@@ -872,6 +1110,7 @@ function operationView(row: OperationRow): GenerationOperationView {
     id: row.id,
     idempotencyKey: row.idempotency_key,
     priority: row.priority as 1 | 2 | 3,
+    regenerationOrdinal: row.regeneration_ordinal ?? 0,
     retryable: row.retryable,
     status: row.status,
     updatedAt: row.updated_at,

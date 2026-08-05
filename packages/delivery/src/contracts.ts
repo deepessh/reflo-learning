@@ -9,6 +9,14 @@ export const EMAIL_LINK_CONTRACT_VERSION = "demo-email-link-v1" as const;
 
 export type DemoDeliveryProvider = "email" | "telegram";
 
+export interface DeliveryPreferenceSettings extends DeliveryPreference {
+  readonly provider: DemoDeliveryProvider;
+}
+
+export interface DeliveryPreferenceView extends DeliveryPreferenceSettings {
+  readonly availableProviders: readonly DemoDeliveryProvider[];
+}
+
 export interface DemoDeliveryDestination {
   readonly authorization: KnowledgeAuthorizationContext;
   readonly channelIdentityId: string;
@@ -51,7 +59,6 @@ export interface ReservedDelivery {
 
 export interface DeliveryMessage {
   readonly deliveryId: string;
-  readonly demoOnlyLabel: "Staff-controlled demo only";
   readonly emailLink: string | null;
   readonly expiresAt: string;
   readonly provider: DemoDeliveryProvider;
@@ -86,7 +93,6 @@ export interface DeliveryAnswerFinalization {
 
 export interface EmailQuizPreview {
   readonly deliveryId: string;
-  readonly demoOnly: true;
   readonly expiresAt: string;
   readonly questions: readonly DeliveryQuestion[];
 }

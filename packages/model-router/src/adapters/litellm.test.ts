@@ -49,6 +49,15 @@ describe("LiteLLM development adapters", () => {
     }
   });
 
+  it("allows the Docker Desktop host gateway for the development-only operator runtime", () => {
+    expect(() =>
+      createLiteLlmDevAdapters({
+        ...environment,
+        REFLO_LITELLM_BASE_URL: "http://host.docker.internal:4000",
+      }),
+    ).not.toThrow();
+  });
+
   it.each(textFixtures())(
     "translates the $capability port without exposing a generic completion API",
     async ({ input, task, value }) => {

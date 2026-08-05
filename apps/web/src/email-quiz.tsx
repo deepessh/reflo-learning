@@ -10,7 +10,6 @@ import type { EmailQuizPreview } from "@reflo/delivery";
 interface EmailQuizProps {
   readonly apiOrigin: string;
   readonly appName: string;
-  readonly environment: string;
 }
 
 type QuizScreen =
@@ -32,7 +31,7 @@ interface SubmissionResult {
   };
 }
 
-export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
+export function EmailQuiz({ apiOrigin, appName }: EmailQuizProps) {
   const token = useRef<string | null>(null);
   const [screen, setScreen] = useState<QuizScreen>("loading");
   const [quiz, setQuiz] = useState<EmailQuizPreview | null>(null);
@@ -46,10 +45,10 @@ export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
       const timer = window.setTimeout(() => setScreen("invalid"), 0);
       return () => window.clearTimeout(timer);
     }
-    window.history.replaceState(null, "", "/demo/review");
+    window.history.replaceState(null, "", "/review");
     const controller = new AbortController();
     void fetch(
-      `${apiOrigin}/v1/demo/email-quiz?token=${encodeURIComponent(linkToken)}`,
+      `${apiOrigin}/v1/email-quiz?token=${encodeURIComponent(linkToken)}`,
       {
         credentials: "include",
         signal: controller.signal,
@@ -69,11 +68,7 @@ export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
           return;
         }
         const body = (await response.json()) as { quiz: EmailQuizPreview };
-        if (
-          !body.quiz.demoOnly ||
-          body.quiz.questions.length < 1 ||
-          body.quiz.questions.length > 3
-        ) {
+        if (body.quiz.questions.length < 1 || body.quiz.questions.length > 3) {
           setScreen("error");
           return;
         }
@@ -115,7 +110,7 @@ export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
       const { csrfToken } = (await csrfResponse.json()) as {
         readonly csrfToken: string;
       };
-      const response = await fetch(`${apiOrigin}/v1/demo/email-quiz/submit`, {
+      const response = await fetch(`${apiOrigin}/v1/email-quiz/submit`, {
         body: JSON.stringify({
           answers: quiz.questions.map((question) => ({
             answer: answers[question.deliveryItemId],
@@ -156,21 +151,21 @@ export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
 
   return (
     <section className="app-shell quiz-shell">
-      <header className="topbar">
+      <nav className="topbar" aria-label="Primary">
         <Link className="brand" href="/" aria-label={`${appName} home`}>
           <Image alt="" height={28} src="/reflo-mark.svg" width={28} />
           <span>{appName}</span>
         </Link>
-        <span className="environment">{environment}</span>
-      </header>
+        <span className="topbar-purpose">Daily review</span>
+      </nav>
 
       <div className="quiz-layout">
         <div className="quiz-heading">
-          <p className="eyebrow">Staff-controlled demo only</p>
+          <p className="eyebrow">Keep it fresh</p>
           <h1>Your daily review.</h1>
           <p>
-            Answer each question once. Confidently graded evidence updates the
-            demo knowledge model and retention schedule.
+            Answer each question once. Your results update what Reflo brings
+            back for review next.
           </p>
         </div>
 
@@ -180,11 +175,10 @@ export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
         {screen === "authentication-required" ? (
           <QuizStatus
             action="/"
-            actionLabel="Sign in to the intended demo account"
+            actionLabel="Sign in to continue"
             title="Authentication required"
           >
-            This signed link is also bound to the staff test identity it was
-            sent to.
+            This private review link is tied to the account it was sent to.
           </QuizStatus>
         ) : null}
         {screen === "invalid" ? (
@@ -194,12 +188,12 @@ export function EmailQuiz({ apiOrigin, appName, environment }: EmailQuizProps) {
             title="This review link is unavailable"
           >
             It may have expired, already been redeemed, or belong to a different
-            demo identity.
+            account.
           </QuizStatus>
         ) : null}
         {screen === "error" ? (
           <QuizStatus
-            action="/demo/review"
+            action="/review"
             actionLabel="Try again"
             title="The review could not be loaded"
           >
@@ -301,7 +295,7 @@ function SubmissionSummary({
       </h2>
       <p>
         {streak === undefined
-          ? "Your demo knowledge state is up to date."
+          ? "Your knowledge state is up to date."
           : `${streak.current}-day current streak · ${streak.longest}-day best`}
       </p>
       <Link className="button-link" href="/">

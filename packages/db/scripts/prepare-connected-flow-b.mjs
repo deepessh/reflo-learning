@@ -9,20 +9,38 @@ import { createLiteLlmDevAdapters } from "@reflo/model-router/litellm";
 import { stableUuid } from "@reflo/retrieval";
 import pg from "pg";
 
+const operatorProfile = operatorFixtureProfile();
+const fixtureId = (kind, fallback) =>
+  operatorProfile === null
+    ? fallback
+    : stableUuid({
+        kind,
+        ownerScopeId: operatorProfile.scope,
+        profile: "operator-hosted-connected-flow-b-v1",
+      });
 const IDS = Object.freeze({
-  actor: "16400000-0000-4000-8000-000000000001",
-  asset: "16400000-0000-4000-8000-000000000002",
-  chapter: "16400000-0000-4000-8000-000000000003",
-  concept: "16400000-0000-4000-8000-000000000004",
-  course: "16400000-0000-4000-8000-000000000005",
-  curriculum: "16400000-0000-4000-8000-000000000006",
-  document: "16400000-0000-4000-8000-000000000007",
-  emailChannel: "16400000-0000-4000-8000-000000000020",
-  lessonOperation: "16400000-0000-4000-8000-000000000008",
-  membership: "16400000-0000-4000-8000-000000000009",
-  scope: "16400000-0000-4000-8000-00000000000a",
-  span: "16400000-0000-4000-8000-00000000000b",
-  telegramChannel: "16400000-0000-4000-8000-000000000021",
+  actor: operatorProfile?.actor ?? "16400000-0000-4000-8000-000000000001",
+  asset: fixtureId("asset", "16400000-0000-4000-8000-000000000002"),
+  chapter: fixtureId("chapter", "16400000-0000-4000-8000-000000000003"),
+  concept: fixtureId("concept", "16400000-0000-4000-8000-000000000004"),
+  course: operatorProfile?.course ?? "16400000-0000-4000-8000-000000000005",
+  curriculum: fixtureId("curriculum", "16400000-0000-4000-8000-000000000006"),
+  document: fixtureId("document", "16400000-0000-4000-8000-000000000007"),
+  emailChannel: fixtureId(
+    "email-channel",
+    "16400000-0000-4000-8000-000000000020",
+  ),
+  lessonOperation: fixtureId(
+    "lesson-operation",
+    "16400000-0000-4000-8000-000000000008",
+  ),
+  membership: fixtureId("membership", "16400000-0000-4000-8000-000000000009"),
+  scope: operatorProfile?.scope ?? "16400000-0000-4000-8000-00000000000a",
+  span: fixtureId("span", "16400000-0000-4000-8000-00000000000b"),
+  telegramChannel: fixtureId(
+    "telegram-channel",
+    "16400000-0000-4000-8000-000000000021",
+  ),
 });
 const LESSON_CONTENT = [
   "# Evidence and retention",
@@ -200,9 +218,10 @@ async function seedIdentityAndSource(client) {
   );
   await client.query(
     `INSERT INTO course
-       (id, owner_scope_id, source_document_id, title, status)
-     VALUES ($1, $2, $3, 'Synthetic Connected Flow B', 'ready')
-     ON CONFLICT (owner_scope_id, id) DO NOTHING`,
+     (id, owner_scope_id, source_document_id, title, status)
+     VALUES ($1, $2, $3, 'Adaptive Learning Foundations', 'ready')
+     ON CONFLICT (owner_scope_id, id) DO UPDATE
+       SET title = EXCLUDED.title`,
     [IDS.course, IDS.scope, IDS.document],
   );
 }
@@ -333,15 +352,38 @@ async function seedCurriculumAndLesson(client, embeddingGenerationId) {
 
 async function ensureFlowBQuestions(client) {
   const questions = [
-    ["16400000-0000-4000-8000-000000000010", "multiple_choice"],
-    ["16400000-0000-4000-8000-000000000011", "multiple_choice"],
-    ["16400000-0000-4000-8000-000000000012", "multiple_choice"],
-    ["16400000-0000-4000-8000-000000000013", "multiple_choice"],
-    ["16400000-0000-4000-8000-000000000014", "short_answer"],
-    ["16400000-0000-4000-8000-000000000015", "short_answer"],
+    [
+      fixtureId("question-1", "16400000-0000-4000-8000-000000000010"),
+      "multiple_choice",
+      "Which activity provides eligible evidence for a mastery update?",
+    ],
+    [
+      fixtureId("question-2", "16400000-0000-4000-8000-000000000011"),
+      "multiple_choice",
+      "When should Reflo update a learner's mastery estimate?",
+    ],
+    [
+      fixtureId("question-3", "16400000-0000-4000-8000-000000000012"),
+      "multiple_choice",
+      "What should carry more weight in the Knowledge Map?",
+    ],
+    [
+      fixtureId("question-4", "16400000-0000-4000-8000-000000000013"),
+      "multiple_choice",
+      "Which event is evidence of retrieval rather than exposure?",
+    ],
+    [
+      fixtureId("question-5", "16400000-0000-4000-8000-000000000014"),
+      "short_answer",
+      "Why doesn't viewing a lesson immediately raise mastery?",
+    ],
+    [
+      fixtureId("question-6", "16400000-0000-4000-8000-000000000015"),
+      "short_answer",
+      "What kind of evidence should update mastery after a new explanation?",
+    ],
   ];
-  for (const [index, [id, itemType]] of questions.entries()) {
-    const prompt = `Synthetic connected Flow B evidence check ${index + 1}`;
+  for (const [index, [id, itemType, prompt]] of questions.entries()) {
     const rubric =
       itemType === "short_answer"
         ? [
@@ -370,7 +412,9 @@ async function ensureFlowBQuestions(client) {
                  THEN '["Eligible assessment evidence","Lesson exposure"]'::jsonb
                  ELSE NULL
                END)
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (id) DO UPDATE
+         SET prompt = EXCLUDED.prompt,
+             normalized_prompt_hash = EXCLUDED.normalized_prompt_hash`,
       [
         id,
         IDS.scope,
@@ -459,7 +503,6 @@ async function ensureEmbeddingGeneration(client, vector) {
   const embedding = payload?.data?.[0]?.embedding;
   if (
     !response.ok ||
-    typeof payload?.id !== "string" ||
     !Array.isArray(embedding) ||
     embedding.length !== 1_024 ||
     embedding.some(
@@ -468,7 +511,11 @@ async function ensureEmbeddingGeneration(client, vector) {
   ) {
     throw new Error("deterministic embedding fixture returned invalid vectors");
   }
-  const providerRequestIds = [payload.id];
+  const providerRequestId =
+    response.headers.get("x-request-id") ??
+    (typeof payload?.id === "string" ? payload.id : undefined);
+  const providerRequestIds =
+    providerRequestId === undefined ? [] : [providerRequestId];
   const generationId = stableUuid({
     adapterVersion: "litellm-openai-compatible-dev-v1",
     effectiveModel: embeddingModel,
@@ -585,6 +632,30 @@ function required(name) {
   const value = process.env[name]?.trim();
   if (value === undefined || value === "") {
     throw new Error(`${name} is required`);
+  }
+  return value;
+}
+
+function operatorFixtureProfile() {
+  const profile = process.env.REFLO_FLOW_B_FIXTURE_PROFILE?.trim();
+  if (profile === undefined || profile === "") return null;
+  if (profile !== "operator-hosted-connected-demo-v1") {
+    throw new Error("REFLO_FLOW_B_FIXTURE_PROFILE is not allowlisted");
+  }
+  const actor = requiredUuid("REFLO_DEMO_OPERATOR_USER_ID");
+  const scope = requiredUuid("REFLO_DEMO_OPERATOR_OWNER_SCOPE_ID");
+  const course = requiredUuid("REFLO_DEMO_SEED_COURSE_ID");
+  return { actor, course, scope };
+}
+
+function requiredUuid(name) {
+  const value = required(name);
+  if (
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+      value,
+    )
+  ) {
+    throw new Error(`${name} must be a UUID`);
   }
   return value;
 }

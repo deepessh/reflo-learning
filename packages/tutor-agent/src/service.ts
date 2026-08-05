@@ -150,13 +150,28 @@ export class TutorAgentService {
     if (review !== undefined) {
       return { conceptId: review.conceptId, kind: "review" };
     }
+    const weak = session.concepts.find(
+      (concept) =>
+        concept.loopResult === null &&
+        concept.latestEligibleAttempt !== null &&
+        concept.latestEligibleAttempt.rubricBand !== "correct" &&
+        compareFixed(concept.mastery, RETEACH_MASTERY_THRESHOLD) < 0,
+    );
+    if (weak !== undefined) {
+      return { conceptId: weak.conceptId, kind: "review" };
+    }
     const advance = session.concepts.find(
       (concept) =>
         concept.loopResult === null && concept.latestLessonExposureAt === null,
     );
-    return advance === undefined
-      ? { kind: "session_complete" }
-      : { conceptId: advance.conceptId, kind: "advance" };
+    if (advance !== undefined) {
+      return { conceptId: advance.conceptId, kind: "advance" };
+    }
+    await this.dependencies.repository.completeSession(
+      command.authorization,
+      session.sessionId,
+    );
+    return { kind: "session_complete" };
   }
 
   async ask(command: AskTutorCommand): Promise<TutorAnswer> {

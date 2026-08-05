@@ -30,6 +30,7 @@ const ids = {
   fallbackB: "00000000-0000-4000-8000-000000000703",
   itemA: "10000000-0000-4000-8000-000000000003",
   itemB: "10000000-0000-4000-8000-000000000004",
+  legacyShortAnswer: "00000000-0000-4000-8000-000000000704",
   member: "00000000-0000-4000-8000-000000000201",
   replacementAttempt: "10000000-0000-4000-8000-000000000005",
   scope: "00000000-0000-4000-8000-000000000101",
@@ -137,6 +138,12 @@ test(
       assert.equal(replay.status, "replayed");
       assert.equal(replay.attemptId, first.attemptId);
       assert.equal(replay.replacementForAttemptId, null);
+      const pendingFallback = await repository.loadPendingFallback(
+        authorization,
+        ids.session,
+      );
+      assert.equal(pendingFallback.attemptId, first.attemptId);
+      assert.equal(pendingFallback.fallback.items.length, 2);
       await assert.rejects(
         repository.claimShortAnswer(authorization, {
           ...claimRequest,
@@ -240,6 +247,10 @@ test(
       assert.equal(replacementReplay.status, "replayed");
       assert.equal(replacementFirst.replacementForAttemptId, ids.attempt);
       assert.equal(replacementReplay.replacementForAttemptId, ids.attempt);
+      assert.equal(
+        await repository.loadPendingFallback(authorization, ids.session),
+        null,
+      );
       assert.equal(replacementFirst.evidence.length, 1);
       assert.deepEqual(
         {
@@ -279,6 +290,51 @@ test(
           evidence_replacement_for_attempt_id: ids.attempt,
           fsrs_rating: 3,
           grader_confidence: null,
+        },
+      ]);
+
+      const legacyClaim = await repository.claimShortAnswer(authorization, {
+        idempotencyKey: "assessment-db/legacy-fallback/v1",
+        leaseMs: 5_000,
+        policy: policy(),
+        questionId: ids.legacyShortAnswer,
+        requestDigest: "8".repeat(64),
+        sessionId: ids.session,
+      });
+      assert.equal(legacyClaim.kind, "claimed");
+      assert.equal(legacyClaim.snapshot.fallbackCandidates.length, 1);
+      assert.equal(
+        legacyClaim.snapshot.fallbackCandidates[0].conceptIds[0],
+        ids.conceptA,
+      );
+      assert.equal(
+        legacyClaim.snapshot.fallbackCandidates[0].responseOptions.includes(
+          "VPC isolation is provided by the network boundary",
+        ),
+        true,
+      );
+      const materializedFallback = await client.query(
+        `SELECT item.item_type, item.version,
+                count(DISTINCT concept.concept_id)::integer AS concept_count,
+                count(DISTINCT span.source_span_id)::integer AS span_count
+         FROM quiz_item AS item
+         JOIN quiz_item_concept AS concept
+           ON concept.owner_scope_id = item.owner_scope_id
+          AND concept.quiz_item_id = item.id
+         JOIN quiz_item_source_span AS span
+           ON span.owner_scope_id = item.owner_scope_id
+          AND span.quiz_item_id = item.id
+         WHERE item.owner_scope_id = $1
+           AND item.version = 'short-answer-fallback-v1'
+         GROUP BY item.id`,
+        [ids.scope],
+      );
+      assert.deepEqual(materializedFallback.rows, [
+        {
+          concept_count: 1,
+          item_type: "multiple_choice",
+          span_count: 1,
+          version: "short-answer-fallback-v1",
         },
       ]);
 
@@ -501,7 +557,10 @@ async function seedAssessmentFixture(client) {
         '["VPC isolation","Not isolated"]'::jsonb),
        ($7, $2, $3, 'multiple_choice', 2, 'Fallback B',
         to_jsonb('Partitions an address space'::text), NULL, 'fixture-v1', $8,
-        '["Partitions an address space","Creates an account"]'::jsonb)`,
+        '["Partitions an address space","Creates an account"]'::jsonb),
+       ($10, $2, $3, 'short_answer', 2, 'What provides VPC isolation?',
+        to_jsonb('VPC isolation is provided by the network boundary'::text),
+        $11::jsonb, 'fixture-v1', $12, NULL)`,
     [
       ids.shortAnswer,
       ids.scope,
@@ -529,12 +588,25 @@ async function seedAssessmentFixture(client) {
           sourceSpanIds: [ids.spanB],
         },
       ]),
+      ids.legacyShortAnswer,
+      JSON.stringify([
+        {
+          conceptId: ids.conceptA,
+          materialContradictions: [],
+          requiredCriteria: ["Identifies the network boundary."],
+          rubricId: "rubric-legacy-a",
+          rubricVersion: "1",
+          sourceSpanIds: [ids.spanA],
+        },
+      ]),
+      "e".repeat(64),
     ],
   );
   await client.query(
     `INSERT INTO quiz_item_concept
        (owner_scope_id, quiz_item_id, concept_id)
-     VALUES ($1, $2, $3), ($1, $2, $4), ($1, $5, $3), ($1, $6, $4)`,
+     VALUES ($1, $2, $3), ($1, $2, $4), ($1, $5, $3), ($1, $6, $4),
+            ($1, $7, $3)`,
     [
       ids.scope,
       ids.shortAnswer,
@@ -542,12 +614,14 @@ async function seedAssessmentFixture(client) {
       ids.conceptB,
       ids.fallbackA,
       ids.fallbackB,
+      ids.legacyShortAnswer,
     ],
   );
   await client.query(
     `INSERT INTO quiz_item_source_span
        (owner_scope_id, quiz_item_id, source_span_id)
-     VALUES ($1, $2, $3), ($1, $2, $4), ($1, $5, $3), ($1, $6, $4)`,
+     VALUES ($1, $2, $3), ($1, $2, $4), ($1, $5, $3), ($1, $6, $4),
+            ($1, $7, $3)`,
     [
       ids.scope,
       ids.shortAnswer,
@@ -555,6 +629,7 @@ async function seedAssessmentFixture(client) {
       ids.spanB,
       ids.fallbackA,
       ids.fallbackB,
+      ids.legacyShortAnswer,
     ],
   );
   await client.query(

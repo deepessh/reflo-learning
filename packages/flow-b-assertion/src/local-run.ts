@@ -107,6 +107,7 @@ const runtime = {
     "Retention is strengthened by correct evidence from a distinct isolated check; lesson exposure alone is not evidence.",
   REFLO_FLOW_B_RUN_ID: runId,
   REFLO_FLOW_B_STAFF_EMAIL: staffEmail,
+  REFLO_FLOW_B_TARGET_PROFILE: "development-fixture-v1",
   REFLO_FLOW_B_TELEGRAM_DESTINATION: "100164000",
   REFLO_FLOW_B_TELEGRAM_WEBHOOK_SECRET: "flow-b-local-webhook-secret-164-test",
   REFLO_FLOW_B_TIMEOUT_MS: "15000",

@@ -1510,6 +1510,10 @@ CREATE TABLE public.activation_generation_operation (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
+    regeneration_ordinal smallint DEFAULT 0 NOT NULL,
+    parent_operation_id uuid,
+    request_idempotency_key text,
+    requested_session_id uuid,
     CONSTRAINT activation_generation_operation_artifact_kind_check CHECK ((artifact_kind = ANY (ARRAY['first_text_lesson'::text, 'placement_quiz'::text, 'chapter_quiz'::text]))),
     CONSTRAINT activation_generation_operation_attempt_count_check CHECK (((attempt_count >= 0) AND (attempt_count <= 5))),
     CONSTRAINT activation_generation_operation_check CHECK ((((artifact_kind = 'first_text_lesson'::text) AND (chapter_id IS NOT NULL) AND (concept_id IS NOT NULL)) OR ((artifact_kind = 'placement_quiz'::text) AND (chapter_id IS NULL) AND (concept_id IS NULL)) OR ((artifact_kind = 'chapter_quiz'::text) AND (chapter_id IS NOT NULL) AND (concept_id IS NULL)))),
@@ -1518,9 +1522,12 @@ CREATE TABLE public.activation_generation_operation (
     CONSTRAINT activation_generation_operation_check3 CHECK (((artifact_id IS NOT NULL) = (status = 'succeeded'::text))),
     CONSTRAINT activation_generation_operation_check4 CHECK (((completed_at IS NOT NULL) = (status = ANY (ARRAY['succeeded'::text, 'failed_permanent'::text, 'cancelled'::text, 'expired'::text])))),
     CONSTRAINT activation_generation_operation_check5 CHECK (((status <> 'queued'::text) OR (attempt_count = 0))),
-    CONSTRAINT activation_generation_operation_generation_version_check CHECK ((generation_version = 'activation-generation-v1'::text)),
+    CONSTRAINT activation_generation_operation_generation_version_check CHECK ((generation_version = ANY (ARRAY['activation-generation-v1'::text, 'activation-generation-v2'::text]))),
     CONSTRAINT activation_generation_operation_idempotency_key_check CHECK ((idempotency_key ~ '^(dev|staging|pilot)/content[.]activation[.]generate/v1/[a-f0-9-]{36}$'::text)),
     CONSTRAINT activation_generation_operation_priority_check CHECK (((priority >= 1) AND (priority <= 3))),
+    CONSTRAINT activation_generation_operation_regeneration_ordinal_check CHECK ((regeneration_ordinal >= 0)),
+    CONSTRAINT activation_generation_operation_regeneration_shape_check CHECK ((((regeneration_ordinal = 0) AND (parent_operation_id IS NULL) AND (request_idempotency_key IS NULL) AND (requested_session_id IS NULL)) OR ((regeneration_ordinal > 0) AND (artifact_kind = ANY (ARRAY['first_text_lesson'::text, 'placement_quiz'::text, 'chapter_quiz'::text])) AND (parent_operation_id IS NOT NULL) AND (request_idempotency_key IS NOT NULL) AND (requested_session_id IS NOT NULL)))),
+    CONSTRAINT activation_generation_operation_request_key_check CHECK (((request_idempotency_key IS NULL) OR (request_idempotency_key ~ '^(dev|staging|pilot)/content[.]activation[.]regenerate/v1/[a-f0-9-]{36}$'::text))),
     CONSTRAINT activation_generation_operation_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'processing'::text, 'retry_scheduled'::text, 'succeeded'::text, 'failed_permanent'::text, 'cancelled'::text, 'expired'::text])))
 );
 
@@ -2268,6 +2275,25 @@ ALTER TABLE ONLY public.delivery_override_cancellation FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: delivery_preference; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.delivery_preference (
+    owner_scope_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    provider text NOT NULL,
+    chosen_local_time time(0) without time zone NOT NULL,
+    time_zone text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT delivery_preference_provider_check CHECK ((provider = ANY (ARRAY['telegram'::text, 'email'::text]))),
+    CONSTRAINT delivery_preference_time_zone_check CHECK (((length(time_zone) >= 1) AND (length(time_zone) <= 100)))
+);
+
+ALTER TABLE ONLY public.delivery_preference FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: delivery_streak; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2860,7 +2886,7 @@ CREATE TABLE public.quiz_bank (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT quiz_bank_bank_kind_check CHECK ((bank_kind = ANY (ARRAY['placement'::text, 'chapter'::text]))),
     CONSTRAINT quiz_bank_check CHECK ((((bank_kind = 'placement'::text) AND (chapter_id IS NULL) AND (item_count = 10)) OR ((bank_kind = 'chapter'::text) AND (chapter_id IS NOT NULL) AND (item_count = 5)))),
-    CONSTRAINT quiz_bank_generation_version_check CHECK ((generation_version = 'activation-generation-v1'::text)),
+    CONSTRAINT quiz_bank_generation_version_check CHECK ((generation_version = ANY (ARRAY['activation-generation-v1'::text, 'activation-generation-v2'::text]))),
     CONSTRAINT quiz_bank_item_count_check CHECK ((item_count = ANY (ARRAY[5, 10]))),
     CONSTRAINT quiz_bank_result_hash_check CHECK ((result_hash ~ '^[a-f0-9]{64}$'::text))
 );
@@ -3872,6 +3898,14 @@ ALTER TABLE ONLY public.delivery_override
 
 
 --
+-- Name: delivery_preference delivery_preference_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_preference
+    ADD CONSTRAINT delivery_preference_pkey PRIMARY KEY (owner_scope_id, user_id);
+
+
+--
 -- Name: delivery_streak_day delivery_streak_day_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4559,10 +4593,24 @@ CREATE INDEX activation_generation_operation_pending_idx ON public.activation_ge
 
 
 --
+-- Name: activation_generation_operation_regeneration_ordinal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX activation_generation_operation_regeneration_ordinal ON public.activation_generation_operation USING btree (owner_scope_id, course_id, curriculum_generation_id, artifact_kind, chapter_id, concept_id, regeneration_ordinal) NULLS NOT DISTINCT WHERE (generation_version = 'activation-generation-v2'::text);
+
+
+--
+-- Name: activation_generation_operation_regeneration_request_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX activation_generation_operation_regeneration_request_key ON public.activation_generation_operation USING btree (owner_scope_id, request_idempotency_key) WHERE (request_idempotency_key IS NOT NULL);
+
+
+--
 -- Name: activation_generation_operation_target_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX activation_generation_operation_target_idx ON public.activation_generation_operation USING btree (owner_scope_id, course_id, curriculum_generation_id, artifact_kind, chapter_id, concept_id, generation_version) NULLS NOT DISTINCT;
+CREATE UNIQUE INDEX activation_generation_operation_target_idx ON public.activation_generation_operation USING btree (owner_scope_id, course_id, curriculum_generation_id, artifact_kind, chapter_id, concept_id, generation_version, regeneration_ordinal) NULLS NOT DISTINCT;
 
 
 --
@@ -5056,6 +5104,14 @@ ALTER TABLE ONLY public.activation_generation_operation
 
 ALTER TABLE ONLY public.activation_generation_operation
     ADD CONSTRAINT activation_generation_operati_owner_scope_id_course_id_cur_fkey FOREIGN KEY (owner_scope_id, course_id, curriculum_generation_id) REFERENCES public.curriculum_generation(owner_scope_id, course_id, id);
+
+
+--
+-- Name: activation_generation_operation activation_generation_operation_parent_operation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activation_generation_operation
+    ADD CONSTRAINT activation_generation_operation_parent_operation_id_fkey FOREIGN KEY (parent_operation_id) REFERENCES public.activation_generation_operation(id);
 
 
 --
@@ -5608,6 +5664,14 @@ ALTER TABLE ONLY public.delivery_override
 
 ALTER TABLE ONLY public.delivery_override
     ADD CONSTRAINT delivery_override_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
+
+
+--
+-- Name: delivery_preference delivery_preference_owner_scope_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.delivery_preference
+    ADD CONSTRAINT delivery_preference_owner_scope_id_user_id_fkey FOREIGN KEY (owner_scope_id, user_id) REFERENCES public.scope_membership(owner_scope_id, user_id) ON DELETE CASCADE;
 
 
 --
@@ -6622,6 +6686,12 @@ ALTER TABLE public.delivery_override ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delivery_override_cancellation ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: delivery_preference; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.delivery_preference ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: delivery_streak; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7007,6 +7077,13 @@ CREATE POLICY scoped_active_membership ON public.delivery_override_cancellation 
 
 
 --
+-- Name: delivery_preference scoped_active_membership; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY scoped_active_membership ON public.delivery_preference USING (public.reflo_has_active_membership(owner_scope_id)) WITH CHECK (public.reflo_has_active_membership(owner_scope_id));
+
+
+--
 -- Name: delivery_streak scoped_active_membership; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -7232,4 +7309,9 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260727000200'),
     ('20260727000300'),
     ('20260728000100'),
-    ('20260730000100');
+    ('20260730000100'),
+    ('20260731000100'),
+    ('20260801000100'),
+    ('20260801000200'),
+    ('20260801000300'),
+    ('20260803000100');

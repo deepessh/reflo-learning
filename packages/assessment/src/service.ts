@@ -93,16 +93,21 @@ export class AssessmentService {
         { deadlineMs: Math.max(1, deadlineAt - Date.now()) },
       );
     } catch (error) {
-      if (
-        !(error instanceof ModelRouterError) ||
-        error.code !== "invalid_result"
-      ) {
+      if (!(error instanceof ModelRouterError)) {
         await this.dependencies.repository.releaseShortAnswerClaim(
           command.authorization,
           command.idempotencyKey,
           claim.claimToken,
         );
         throw error;
+      }
+      if (error.code !== "invalid_result") {
+        await this.dependencies.repository.releaseShortAnswerClaim(
+          command.authorization,
+          command.idempotencyKey,
+          claim.claimToken,
+        );
+        throw new AssessmentError("grading_unavailable");
       }
       return this.dependencies.repository.finalizeShortAnswer(
         command.authorization,

@@ -2,10 +2,15 @@ import { access, mkdir, constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  AssessmentError,
   AssessmentService,
   type AssessmentFinalizationView,
   type FrozenGradingPolicy,
 } from "@reflo/assessment";
+import {
+  ActivationGenerationService,
+  type GenerationOperationView,
+} from "@reflo/activation";
 import type { Deployment } from "@reflo/config";
 import {
   CONNECTED_DEMO_BOUNDARY_VERSION,
@@ -14,13 +19,19 @@ import {
   type ConnectedDemoPreflightView,
 } from "@reflo/contracts";
 import {
+  KnowledgePersistenceError,
   PostgresAnalyticDbPool,
+  PostgresActivationRepository,
   PostgresAssessmentRepository,
   PostgresConnectedDemoRepository,
   PostgresContentRepository,
+  PostgresDemoDeliveryRepository,
   PostgresKnowledgeRepository,
   PostgresTutorAgentRepository,
+  type ConnectedActivationProgress,
   type ConnectedDemoSessionSummary,
+  type ConnectedStudyLessonCompletion,
+  type ConnectedStudySessionStartResult,
 } from "@reflo/db";
 import { LocalSmokeObjectStore } from "@reflo/dev-smoke";
 import { DEMO_DELIVERY_CONTRACT_VERSION } from "@reflo/delivery";
@@ -55,9 +66,15 @@ import {
 
 import { ConnectedStudyService } from "./connected-study.js";
 import {
+  ActivationPackageProcessingQueue,
+  activationGenerationDeadlines,
+  type ActivationPackageScheduler,
+} from "./activation-package-processing.js";
+import {
   createAliOssConnectedObjectStore,
   type ConnectedObjectStore,
 } from "./ali-oss-object-store.js";
+import { LocalPrivateAssetDelivery } from "./local-private-assets.js";
 
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
@@ -67,6 +84,10 @@ const LOCAL_STORAGE_CONTRACT_VERSION = "local-smoke-object-store-v1";
 const ALIBABA_STORAGE_CONTRACT_VERSION = "alibaba-private-oss-v1";
 
 export interface ConnectedAssessmentRuntime {
+  loadPendingFallback(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<AssessmentFinalizationView | null>;
   gradeReplacement(input: {
     readonly answer: string;
     readonly authorization: ScopeAuthorizationContext;
@@ -86,12 +107,19 @@ export interface ConnectedAssessmentRuntime {
 }
 
 export interface ConnectedDemoPreflight {
-  check(deliveryAvailable: boolean): Promise<ConnectedDemoPreflightView>;
+  check(
+    deliveryAvailable: boolean,
+    capability?: PreflightCapability,
+  ): Promise<ConnectedDemoPreflightView>;
 }
 
+export type PreflightCapability = "all" | "delivery" | "library" | "study";
+
 export interface ConnectedDemoRuntime {
+  readonly activation?: ActivationPackageScheduler;
   readonly assessment?: ConnectedAssessmentRuntime;
   readonly preflight?: ConnectedDemoPreflight;
+  readonly privateAssets?: LocalPrivateAssetDelivery;
   readonly seed?: {
     reset(authorization: ScopeAuthorizationContext): Promise<{
       readonly conceptId: string;
@@ -101,12 +129,44 @@ export interface ConnectedDemoRuntime {
     }>;
   };
   readonly sessions?: {
+    completeLesson(
+      authorization: ScopeAuthorizationContext,
+      sessionId: string,
+      completion: ConnectedStudyLessonCompletion,
+    ): Promise<boolean>;
     loadSummary(
       authorization: ScopeAuthorizationContext,
       sessionId: string,
     ): Promise<ConnectedDemoSessionSummary | null>;
+    loadActivationProgress(
+      authorization: ScopeAuthorizationContext,
+      sessionId: string,
+    ): Promise<ConnectedActivationProgress | null>;
+    regenerateLesson(
+      authorization: ScopeAuthorizationContext,
+      sessionId: string,
+      courseId: string,
+      requestIdempotencyKey: string,
+    ): Promise<{
+      readonly operation: GenerationOperationView;
+      readonly replayed: boolean;
+    }>;
+    regenerateAssessment(
+      authorization: ScopeAuthorizationContext,
+      sessionId: string,
+      courseId: string,
+      artifactKind: "chapter_quiz" | "placement_quiz",
+      requestIdempotencyKey: string,
+    ): Promise<{
+      readonly operation: GenerationOperationView;
+      readonly replayed: boolean;
+    }>;
+    startOrResume(
+      authorization: ScopeAuthorizationContext,
+      courseId: string,
+    ): Promise<ConnectedStudySessionStartResult | null>;
   };
-  readonly study?: Pick<ConnectedStudyService, "load">;
+  readonly study?: Pick<ConnectedStudyService, "load" | "loadLesson">;
   readonly tutorAgent?: TutorAgentService;
   close(): Promise<void>;
 }
@@ -174,6 +234,10 @@ export async function createConnectedDemoRuntime(
     ),
   });
   const assessmentRepository = new PostgresAssessmentRepository(databaseUrl);
+  const activationRepository = new PostgresActivationRepository(databaseUrl);
+  const deliveryPreferenceRepository = new PostgresDemoDeliveryRepository(
+    databaseUrl,
+  );
   const knowledgeRepository = new PostgresKnowledgeRepository(databaseUrl);
   const tutorRepository = new PostgresTutorAgentRepository(databaseUrl, {
     retestItemTypes: ["short_answer"],
@@ -191,6 +255,15 @@ export async function createConnectedDemoRuntime(
             roleName: required(input, "REFLO_OSS_RUNTIME_ROLE_NAME"),
           })
         : failObjectStoreMode();
+  const activationGeneration = new ActivationGenerationService({
+    models: router,
+    repository: activationRepository,
+    textArtifacts: objects,
+  });
+  const activation = new ActivationPackageProcessingQueue({
+    deadlinesMs: activationGenerationDeadlines(input),
+    generation: activationGeneration,
+  });
   const tutorArtifacts = new AuthorizedLocalTutorArtifacts(objects);
   const tutorAgent = new TutorAgentService({
     artifacts: tutorArtifacts,
@@ -207,10 +280,21 @@ export async function createConnectedDemoRuntime(
     }),
     knowledgeRepository,
     gradingPolicy(input, liteLlm.adapters.grading["qwen.grading"]!.descriptor),
+    deliveryPreferenceRepository,
     preference,
+    undefined,
+    assessmentRepository,
   );
+  const privateAssets =
+    artifactRoot === undefined
+      ? undefined
+      : new LocalPrivateAssetDelivery({
+          objects,
+          repository: connectedRepository,
+        });
 
   return {
+    activation,
     assessment,
     preflight: new RuntimePreflight({
       boundary: {
@@ -244,23 +328,82 @@ export async function createConnectedDemoRuntime(
       },
       vector: vectorPool,
     }),
+    privateAssets,
     sessions: {
+      completeLesson: (authorization, sessionId, completion) =>
+        connectedRepository.completeStudyLesson(
+          authorization,
+          sessionId,
+          completion,
+        ),
       loadSummary: (authorization, sessionId) =>
         connectedRepository.loadSessionSummary(authorization, sessionId),
+      loadActivationProgress: (authorization, sessionId) =>
+        connectedRepository.loadActivationProgress(authorization, sessionId),
+      regenerateLesson: async (
+        authorization,
+        sessionId,
+        courseId,
+        requestIdempotencyKey,
+      ) => {
+        const result = await activationGeneration.regenerateLesson({
+          authorization,
+          courseId,
+          environment: "dev",
+          requestIdempotencyKey,
+          sessionId,
+        });
+        activation.scheduleRegeneration(
+          { authorization, courseId },
+          result.operation,
+        );
+        return result;
+      },
+      regenerateAssessment: async (
+        authorization,
+        sessionId,
+        courseId,
+        artifactKind,
+        requestIdempotencyKey,
+      ) => {
+        const result = await activationGeneration.regenerateArtifact({
+          artifactKind,
+          authorization,
+          courseId,
+          environment: "dev",
+          requestIdempotencyKey,
+          sessionId,
+        });
+        activation.scheduleRegeneration(
+          { authorization, courseId },
+          result.operation,
+        );
+        return result;
+      },
+      startOrResume: (authorization, courseId) =>
+        connectedRepository.startOrResumeStudySession(authorization, courseId),
     },
     seed: new ConnectedDemoSeedService(
       connectedRepository,
       knowledgeRepository,
       requiredUuid(input, "REFLO_DEMO_SEED_COURSE_ID"),
+      deliveryPreferenceRepository,
       preference,
     ),
-    study: new ConnectedStudyService(tutorRepository, tutorArtifacts),
+    study: new ConnectedStudyService(
+      tutorRepository,
+      tutorArtifacts,
+      connectedRepository,
+    ),
     tutorAgent,
     close: async () => {
+      await activation.close();
       const results = await Promise.allSettled([
+        activationRepository.close(),
         assessmentRepository.close(),
         connectedRepository.close(),
         contentRepository.close(),
+        deliveryPreferenceRepository.close(),
         knowledgeRepository.close(),
         tutorRepository.close(),
         vectorPool.close(),
@@ -272,13 +415,38 @@ export async function createConnectedDemoRuntime(
   };
 }
 
-class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime {
+export class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime {
   constructor(
-    private readonly assessment: AssessmentService,
-    private readonly knowledge: PostgresKnowledgeRepository,
+    private readonly assessment: Pick<
+      AssessmentService,
+      "gradeReplacement" | "gradeShortAnswer"
+    >,
+    private readonly knowledge: Pick<
+      PostgresKnowledgeRepository,
+      "recordEvidenceAndReplay"
+    >,
     private readonly policy: FrozenGradingPolicy,
-    private readonly preference: DeliveryPreference,
+    private readonly preferences: Pick<
+      PostgresDemoDeliveryRepository,
+      "loadPreference"
+    >,
+    private readonly defaultPreference: DeliveryPreference,
+    private readonly projectionRetryDelaysMs: readonly number[] = [100, 300],
+    private readonly finalizations?: Pick<
+      PostgresAssessmentRepository,
+      "loadPendingFallback"
+    >,
   ) {}
+
+  loadPendingFallback(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<AssessmentFinalizationView | null> {
+    return (
+      this.finalizations?.loadPendingFallback(authorization, sessionId) ??
+      Promise.resolve(null)
+    );
+  }
 
   async gradeShortAnswer(
     input: Parameters<ConnectedAssessmentRuntime["gradeShortAnswer"]>[0],
@@ -306,14 +474,37 @@ class KnowledgeProjectingAssessment implements ConnectedAssessmentRuntime {
     authorization: ScopeAuthorizationContext,
     result: AssessmentFinalizationView,
   ): Promise<void> {
+    const preference =
+      (await this.preferences.loadPreference(authorization)) ??
+      this.defaultPreference;
     for (const evidence of result.evidence) {
-      await this.knowledge.recordEvidenceAndReplay(
-        authorization,
-        assessmentEvidence(result, evidence),
-        this.preference,
-      );
+      for (
+        let projectionAttempt = 0;
+        projectionAttempt <= this.projectionRetryDelaysMs.length;
+        projectionAttempt += 1
+      ) {
+        try {
+          await this.knowledge.recordEvidenceAndReplay(
+            authorization,
+            assessmentEvidence(result, evidence),
+            preference,
+          );
+          break;
+        } catch (error) {
+          const retryable = !(error instanceof KnowledgePersistenceError);
+          const retryDelay = this.projectionRetryDelaysMs[projectionAttempt];
+          if (!retryable || retryDelay === undefined) {
+            throw new AssessmentError("projection_unavailable");
+          }
+          await delay(retryDelay);
+        }
+      }
     }
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 class ConnectedDemoSeedService {
@@ -324,7 +515,11 @@ class ConnectedDemoSeedService {
     >,
     private readonly knowledge: PostgresKnowledgeRepository,
     private readonly courseId: string,
-    private readonly preference: DeliveryPreference,
+    private readonly preferences: Pick<
+      PostgresDemoDeliveryRepository,
+      "loadPreference"
+    >,
+    private readonly defaultPreference: DeliveryPreference,
   ) {}
 
   async reset(authorization: ScopeAuthorizationContext) {
@@ -332,11 +527,14 @@ class ConnectedDemoSeedService {
       authorization,
       this.courseId,
     );
+    const preference =
+      (await this.preferences.loadPreference(authorization)) ??
+      this.defaultPreference;
     for (const evidence of seed.evidence) {
       await this.knowledge.recordEvidenceAndReplay(
         authorization,
         evidence,
-        this.preference,
+        preference,
       );
     }
     return {
@@ -390,7 +588,10 @@ class RuntimePreflight implements ConnectedDemoPreflight {
     },
   ) {}
 
-  async check(deliveryAvailable: boolean) {
+  async check(
+    deliveryAvailable: boolean,
+    capability: PreflightCapability = "all",
+  ) {
     const [postgres, model, storage, vector] = await Promise.all([
       availableWhen(() => this.dependencies.database.ping()),
       availableWhen(() => this.#model()),
@@ -432,9 +633,11 @@ class RuntimePreflight implements ConnectedDemoPreflight {
       checkedAt: new Date().toISOString(),
       contractVersion: CONNECTED_DEMO_PREFLIGHT_VERSION,
       dependencies,
-      status: dependencies.every(
-        (dependency) => dependency.code === "available",
-      )
+      status: dependencies
+        .filter((dependency) =>
+          requiredPreflightDependencies(capability).has(dependency.name),
+        )
+        .every((dependency) => dependency.code === "available")
         ? ("ready" as const)
         : ("unavailable" as const),
     };
@@ -471,6 +674,21 @@ class RuntimePreflight implements ConnectedDemoPreflight {
     } finally {
       session.release();
     }
+  }
+}
+
+function requiredPreflightDependencies(
+  capability: PreflightCapability,
+): ReadonlySet<ConnectedDemoPreflightDependency["name"]> {
+  switch (capability) {
+    case "study":
+      return new Set(["model", "postgres", "storage", "vector"]);
+    case "library":
+      return new Set(["postgres", "storage"]);
+    case "delivery":
+      return new Set(["delivery", "postgres"]);
+    case "all":
+      return new Set(["delivery", "model", "postgres", "storage", "vector"]);
   }
 }
 

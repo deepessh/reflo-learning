@@ -52,7 +52,14 @@ export function createAccountRuntime(
     );
     const localInbox = createLocalAuthInbox(input);
     return {
-      accounts: createAccountService(input, repository, localInbox, 50, 200),
+      accounts: createAccountService(
+        input,
+        repository,
+        localInbox,
+        50,
+        200,
+        true,
+      ),
       localInbox,
       close: () => repository.close(),
     };
@@ -93,6 +100,7 @@ export function createAccountRuntime(
       emailPort,
       dailyLimit,
       totalLimit,
+      false,
     ),
     close: () => repository.close(),
   };
@@ -104,6 +112,7 @@ function createAccountService(
   emailPort: ConstructorParameters<typeof AccountService>[0]["emailPort"],
   dailyLimit: number,
   totalLimit: number,
+  allowInsecureLoopbackOrigins: boolean,
 ): AccountService {
   const callbackOrigins = required(input, "REFLO_AUTH_CALLBACK_ORIGINS")
     .split(",")
@@ -127,6 +136,7 @@ function createAccountService(
   }
   return new AccountService({
     abuseLimiter: new FixedWindowAuthAbuseLimiter(),
+    allowInsecureLoopbackOrigins,
     callbackOrigins,
     clock: { now: () => new Date() },
     emailEncryptionKey: keys[0],

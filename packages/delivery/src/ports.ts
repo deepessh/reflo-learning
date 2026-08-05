@@ -5,6 +5,7 @@ import type {
   DeliveryAnswerInput,
   DeliveryKnowledgeUpdate,
   DeliveryMessage,
+  DeliveryPreferenceSettings,
   DemoDeliveryDestination,
   DemoDeliveryProvider,
   EmailQuizPreview,
@@ -12,6 +13,15 @@ import type {
 } from "./contracts.js";
 
 export interface DemoDeliveryRepository {
+  loadPreference(
+    authorization: KnowledgeAuthorizationContext,
+  ): Promise<DeliveryPreferenceSettings | null>;
+
+  savePreference(
+    authorization: KnowledgeAuthorizationContext,
+    preference: DeliveryPreferenceSettings,
+  ): Promise<DeliveryPreferenceSettings>;
+
   bindEmailToken(
     authorization: KnowledgeAuthorizationContext,
     deliveryId: string,

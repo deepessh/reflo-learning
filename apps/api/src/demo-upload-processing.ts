@@ -10,6 +10,7 @@ import type {
   DemoUploadProcessingQueue,
   DemoUploadProcessingWork,
 } from "./demo-upload.js";
+import type { ActivationPackageScheduler } from "./activation-package-processing.js";
 
 const MAX_INGESTION_DELIVERIES = 5;
 const DEFAULT_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000] as const;
@@ -50,6 +51,7 @@ type GenerationRepository = Pick<
 export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
   readonly #activePollDelayMs: number;
   readonly #activePollLimit: number;
+  readonly #activation?: ActivationPackageScheduler;
   readonly #artifacts: DemoUploadNormalizedArtifactReader;
   readonly #curriculum: DemoUploadCurriculumBuilder;
   readonly #delay: (milliseconds: number) => Promise<void>;
@@ -64,6 +66,7 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
   constructor(options: {
     readonly activePollDelayMs?: number;
     readonly activePollLimit?: number;
+    readonly activation?: ActivationPackageScheduler;
     readonly artifacts: DemoUploadNormalizedArtifactReader;
     readonly curriculum: DemoUploadCurriculumBuilder;
     readonly delay?: (milliseconds: number) => Promise<void>;
@@ -76,6 +79,7 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
       options.activePollDelayMs ?? DEFAULT_ACTIVE_POLL_DELAY_MS;
     this.#activePollLimit =
       options.activePollLimit ?? DEFAULT_ACTIVE_POLL_LIMIT;
+    this.#activation = options.activation;
     this.#artifacts = options.artifacts;
     this.#curriculum = options.curriculum;
     this.#delay = options.delay ?? boundedDelay;
@@ -138,6 +142,7 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
     for (;;) {
       const claim = await this.#repository.claimCourseGeneration(work);
       if (claim.kind === "completed") {
+        this.#scheduleActivation(work);
         return;
       }
       if (claim.kind === "active") {
@@ -163,6 +168,7 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
           sourceDocumentId: work.sourceDocumentId,
         });
         await this.#repository.completeCourseGeneration(work);
+        this.#scheduleActivation(work);
         return;
       } catch (error) {
         const outcome = await this.#repository.failCourseGenerationAttempt(
@@ -177,6 +183,19 @@ export class DemoUploadProcessingService implements DemoUploadProcessingQueue {
         localGenerationRetries += 1;
         await this.#delay(delay);
       }
+    }
+  }
+
+  #scheduleActivation(work: DemoUploadProcessingWork): void {
+    try {
+      this.#activation?.schedule({
+        authorization: work.authorization,
+        courseId: work.courseId,
+      });
+    } catch {
+      // Curriculum is already durable and must not be rewritten as failed.
+      // Startup recovery or the idempotent study-session launch can enqueue
+      // the same activation plan again.
     }
   }
 

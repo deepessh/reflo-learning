@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createDemoUploadRuntime } from "./demo-upload-composition.js";
+import {
+  createDemoUploadRuntime,
+  demoUploadOperationLeaseMs,
+} from "./demo-upload-composition.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -16,6 +19,18 @@ afterEach(async () => {
 });
 
 describe("serverless demo upload composition", () => {
+  it("keeps durable ingestion leases beyond each accepted worker bound", () => {
+    expect(
+      demoUploadOperationLeaseMs("local-isolated-ingestion-bridge-v1"),
+    ).toBe(180_000);
+    expect(demoUploadOperationLeaseMs("serverless-isolated-ingestion-v1")).toBe(
+      1_800_000,
+    );
+    expect(() => demoUploadOperationLeaseMs("disabled")).toThrow(
+      "processor mode is not allowlisted",
+    );
+  });
+
   it("rejects the FC parser outside the owner-approved Singapore region before cloud access", async () => {
     const artifactRoot = await mkdtemp(
       path.join(tmpdir(), "reflo-serverless-composition-"),

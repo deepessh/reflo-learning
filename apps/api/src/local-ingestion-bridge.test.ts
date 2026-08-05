@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { IngestionError } from "@reflo/ingestion";
 
@@ -21,6 +21,7 @@ const scannerSnapshotId = `cvd-${"1".repeat(32)}`;
 const workerImageDigest = `sha256:${"a".repeat(64)}`;
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -166,10 +167,8 @@ describe("LocalIngestionBridgeBroker", () => {
       leaseDurationMs: 1_000,
       newLeaseId: () => leaseId,
     });
-    const execution = broker.execute(fixture.request);
-
-    await expect(broker.lease()).rejects.toThrow("heartbeat_stale");
     broker.heartbeat(heartbeat());
+    const execution = broker.execute(fixture.request);
     now += 1_001;
     await expect(broker.lease()).rejects.toThrow("heartbeat_stale");
 
@@ -177,6 +176,54 @@ describe("LocalIngestionBridgeBroker", () => {
     await expect(execution).rejects.toMatchObject<Partial<IngestionError>>({
       code: "infrastructure_unavailable",
     });
+  });
+
+  it("rejects execution immediately when no current heartbeat is available", async () => {
+    const fixture = await workerFixture();
+    const broker = createBroker();
+
+    await expect(broker.execute(fixture.request)).rejects.toMatchObject<
+      Partial<IngestionError>
+    >({
+      code: "infrastructure_unavailable",
+      sanitizedDetail: "local_bridge_heartbeat_unavailable",
+    });
+
+    broker.heartbeat(heartbeat());
+    await expect(broker.lease()).resolves.toBeNull();
+    await broker.close();
+  });
+
+  it("expires unleased work when the current heartbeat disappears", async () => {
+    vi.useFakeTimers();
+    const fixture = await workerFixture();
+    let now = Date.parse("2026-07-31T12:00:00.000Z");
+    const broker = new LocalIngestionBridgeBroker({
+      bearerToken: token,
+      clock: () => new Date(now),
+      expectedProfile: LOCAL_INGESTION_BRIDGE_PROFILE,
+      expectedScannerSnapshotId: scannerSnapshotId,
+      expectedWorkerImageDigest: workerImageDigest,
+      heartbeatTtlMs: 1_000,
+      leaseDurationMs: 1_000,
+      newLeaseId: () => leaseId,
+    });
+    broker.heartbeat(heartbeat());
+    const execution = broker.execute(fixture.request);
+    const rejected = expect(execution).rejects.toMatchObject<
+      Partial<IngestionError>
+    >({
+      code: "infrastructure_unavailable",
+      sanitizedDetail: "local_bridge_queue_expired",
+    });
+
+    now += 1_001;
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejected;
+
+    broker.heartbeat(heartbeat());
+    await expect(broker.lease()).resolves.toBeNull();
+    await broker.close();
   });
 });
 

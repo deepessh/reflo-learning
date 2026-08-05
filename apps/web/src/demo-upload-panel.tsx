@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import type {
   DemoCourseOutline,
@@ -16,6 +22,10 @@ import { demoUploadPresentation } from "./demo-upload-view";
 
 type ApprovalScreen = "error" | "hidden" | "loading" | "ready";
 type SubmissionScreen = "idle" | "submitting" | "tracking";
+
+const STATUS_UNAVAILABLE_COPY =
+  "Upload status is temporarily unavailable. Reflo will keep checking; no successful outcome was assumed.";
+const STATUS_POLL_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 10_000] as const;
 
 export function DemoUploadPanel({
   apiOrigin,
@@ -34,6 +44,8 @@ export function DemoUploadPanel({
   const [upload, setUpload] = useState<DemoUploadView | null>(null);
   const [outline, setOutline] = useState<DemoCourseOutline | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const submitGuard = useRef(false);
 
   const loadApprovals = useCallback(async () => {
     setApprovalScreen("loading");
@@ -72,21 +84,74 @@ export function DemoUploadPanel({
     if (!presentation.poll) {
       return;
     }
-    const timer = window.setTimeout(async () => {
-      const response = await fetch(
-        `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(upload.uploadId)}`,
-        { credentials: "include" },
-      ).catch(() => null);
-      if (response?.ok) {
-        const body = (await response.json()) as { upload: DemoUploadView };
-        setUpload(body.upload);
-      } else {
-        setLocalError(
-          "Upload status is unavailable. No successful outcome was assumed.",
+    let consecutiveFailures = 0;
+    let controller: AbortController | null = null;
+    let stopped = false;
+    let timer: number | null = null;
+
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(() => void poll(), delay);
+    };
+    const poll = async () => {
+      controller = new AbortController();
+      let response: Response | null = null;
+      try {
+        response = await fetch(
+          `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(upload.uploadId)}`,
+          { credentials: "include", signal: controller.signal },
         );
+      } catch {
+        response = null;
       }
-    }, 1_000);
-    return () => window.clearTimeout(timer);
+      if (stopped) {
+        return;
+      }
+      if (response?.ok) {
+        try {
+          const body = (await response.json()) as { upload: DemoUploadView };
+          if (stopped) {
+            return;
+          }
+          consecutiveFailures = 0;
+          setUpload(body.upload);
+          setLastCheckedAt(new Date().toISOString());
+          submitGuard.current = demoUploadPresentation(
+            body.upload.state,
+            body.upload.failure?.code ?? null,
+          ).formLocked;
+          setLocalError((current) =>
+            current === STATUS_UNAVAILABLE_COPY ? null : current,
+          );
+          if (
+            demoUploadPresentation(
+              body.upload.state,
+              body.upload.failure?.code ?? null,
+            ).poll
+          ) {
+            schedule(STATUS_POLL_DELAYS_MS[0]);
+          }
+          return;
+        } catch {
+          response = null;
+        }
+      }
+      setLocalError(STATUS_UNAVAILABLE_COPY);
+      consecutiveFailures += 1;
+      schedule(
+        STATUS_POLL_DELAYS_MS[
+          Math.min(consecutiveFailures, STATUS_POLL_DELAYS_MS.length) - 1
+        ]!,
+      );
+    };
+
+    schedule(STATUS_POLL_DELAYS_MS[0]);
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [apiOrigin, upload]);
 
   useEffect(() => {
@@ -120,26 +185,43 @@ export function DemoUploadPanel({
   const approval = approvals.find(
     (candidate) => candidate.approvalId === selectedApprovalId,
   );
+  const presentation =
+    upload === null
+      ? null
+      : demoUploadPresentation(upload.state, upload.failure?.code ?? null);
+  const isBusy =
+    submissionScreen === "submitting" || presentation?.poll === true;
+  const formLocked =
+    submissionScreen === "submitting" || presentation?.formLocked === true;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitGuard.current || formLocked) {
+      return;
+    }
+    submitGuard.current = true;
     setLocalError(null);
     setOutline(null);
     if (approval === undefined || file === null) {
+      submitGuard.current = false;
       setLocalError("Choose an approved source and the matching PDF file.");
       return;
     }
     if (!isDemoPdfSelection(file)) {
+      submitGuard.current = false;
       setLocalError(
         "Choose the matching approved PDF within the 50 MB limit. Other file types are not supported yet.",
       );
       return;
     }
+    setUpload(null);
+    setLastCheckedAt(null);
     setSubmissionScreen("submitting");
     const csrfResponse = await fetch(`${apiOrigin}/v1/csrf-token`, {
       credentials: "include",
     }).catch(() => null);
     if (csrfResponse === null || !csrfResponse.ok) {
+      submitGuard.current = false;
       setSubmissionScreen("idle");
       setLocalError("Upload authorization is unavailable. Sign in and retry.");
       return;
@@ -156,6 +238,7 @@ export function DemoUploadPanel({
       method: "POST",
     }).catch(() => null);
     if (response === null || !response.ok) {
+      submitGuard.current = false;
       setSubmissionScreen("idle");
       setLocalError(
         response?.status === 413
@@ -168,17 +251,18 @@ export function DemoUploadPanel({
     }
     const body = (await response.json()) as { upload: DemoUploadView };
     setUpload(body.upload);
+    setLastCheckedAt(new Date().toISOString());
     setSubmissionScreen("tracking");
+    submitGuard.current = demoUploadPresentation(
+      body.upload.state,
+      body.upload.failure?.code ?? null,
+    ).formLocked;
   }
-
-  const presentation =
-    upload === null
-      ? null
-      : demoUploadPresentation(upload.state, upload.failure?.code ?? null);
 
   return (
     <section
       className="panel demo-upload-panel"
+      aria-busy={isBusy}
       aria-labelledby="demo-upload-title"
     >
       <div className="panel-heading demo-upload-heading">
@@ -225,9 +309,14 @@ export function DemoUploadPanel({
       ) : null}
       {approvalScreen === "ready" && approvals.length > 0 ? (
         <>
-          <form className="demo-upload-form" onSubmit={submit}>
+          <form
+            className="demo-upload-form"
+            aria-busy={isBusy}
+            onSubmit={submit}
+          >
             <label htmlFor="demo-source-approval">Approved PDF</label>
             <select
+              disabled={formLocked}
               id="demo-source-approval"
               onChange={(event) => {
                 setSelectedApprovalId(event.target.value);
@@ -235,6 +324,9 @@ export function DemoUploadPanel({
                 setUpload(null);
                 setOutline(null);
                 setLocalError(null);
+                setLastCheckedAt(null);
+                setSubmissionScreen("idle");
+                submitGuard.current = false;
               }}
               value={selectedApprovalId}
             >
@@ -253,6 +345,7 @@ export function DemoUploadPanel({
             <label htmlFor="demo-source-file">Matching PDF file</label>
             <input
               accept={DEMO_UPLOAD_FILE_ACCEPT}
+              disabled={formLocked}
               id="demo-source-file"
               key={selectedApprovalId}
               onChange={(event) =>
@@ -261,10 +354,18 @@ export function DemoUploadPanel({
               required
               type="file"
             />
-            <button disabled={submissionScreen === "submitting"} type="submit">
+            <button disabled={formLocked} type="submit">
               {submissionScreen === "submitting"
                 ? "Uploading…"
-                : "Validate and build outline"}
+                : presentation?.poll
+                  ? "Processing…"
+                  : upload?.state === "outline_ready"
+                    ? "Outline ready"
+                    : upload?.state === "ocr_required"
+                      ? "Validate another PDF"
+                      : upload?.state === "failed"
+                        ? "Try again"
+                        : "Validate and build outline"}
             </button>
           </form>
 
@@ -274,14 +375,21 @@ export function DemoUploadPanel({
             </p>
           )}
           {presentation === null ? null : (
-            <div
-              className={`upload-state tone-${presentation.tone}`}
-              aria-live="polite"
-            >
-              <strong>{presentation.label}</strong>
-              <p>{presentation.detail}</p>
+            <div className={`upload-state tone-${presentation.tone}`}>
+              <div
+                aria-atomic="true"
+                role={upload?.state === "failed" ? "alert" : "status"}
+              >
+                <strong>{presentation.label}</strong>
+                <p>{presentation.detail}</p>
+                <p>{presentation.progress}</p>
+              </div>
               <small>
-                Updated {new Date(upload!.statusUpdatedAt).toLocaleTimeString()}
+                Status changed at{" "}
+                {new Date(upload!.statusUpdatedAt).toLocaleTimeString()}.
+                {lastCheckedAt === null
+                  ? ""
+                  : ` Last checked at ${new Date(lastCheckedAt).toLocaleTimeString()}.`}
               </small>
             </div>
           )}

@@ -348,6 +348,19 @@ async function status() {
   printReadiness(readiness);
 }
 
+async function ready() {
+  const { contract, ingestionManifest } = await loadContracts();
+  const readiness = await collectReadiness(contract, ingestionManifest);
+  printReadiness(readiness);
+  if (!readiness.every((item) => item.state === "AVAILABLE")) {
+    throw new LocalWorkerError(
+      "INVALID",
+      "local-workers",
+      "every operator-hosted worker prerequisite must be available",
+    );
+  }
+}
+
 async function smoke() {
   const { contract, ingestionManifest } = await loadContracts();
   const readiness = await collectReadiness(contract, ingestionManifest);
@@ -2433,6 +2446,7 @@ function usage() {
 Commands:
   prepare  Build/load and verify the optional ingestion and Piper profile.
   status   Report AVAILABLE, SKIPPED, STALE, UNSUPPORTED, or INVALID states.
+  ready    Require every operator-hosted worker prerequisite to be AVAILABLE.
   smoke    Run the committed fixture through ingestion and produce a WAV.
   cleanup  Remove only the named Reflo image and generated worker profile.`);
 }
@@ -2445,6 +2459,9 @@ async function main() {
       return;
     case "status":
       await status();
+      return;
+    case "ready":
+      await ready();
       return;
     case "smoke":
       await smoke();

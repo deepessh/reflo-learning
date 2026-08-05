@@ -7,7 +7,7 @@ import type {
 import type { ScopeAuthorizationContext } from "@reflo/retrieval";
 
 export const ACTIVATION_GENERATION_VERSION =
-  "activation-generation-v1" as const;
+  "activation-generation-v2" as const;
 export const PLACEMENT_QUIZ_ITEM_COUNT = 10 as const;
 export const CHAPTER_QUIZ_ITEM_COUNT = 5 as const;
 export const TEXT_READING_WORDS_PER_MINUTE = 200 as const;
@@ -19,6 +19,8 @@ export const REQUIRED_QUIZ_ITEM_TYPES = [
 
 export type ActivationArtifactKind =
   "first_text_lesson" | "placement_quiz" | "chapter_quiz";
+
+export type AssessmentArtifactKind = "placement_quiz" | "chapter_quiz";
 
 export type GenerationOperationStatus =
   | "queued"
@@ -66,10 +68,31 @@ export interface GenerationOperationView extends PlannedGenerationOperation {
   readonly artifactId: string | null;
   readonly attemptCount: number;
   readonly failureClass: string | null;
+  readonly regenerationOrdinal: number;
   readonly retryable: boolean;
   readonly status: GenerationOperationStatus;
   readonly updatedAt: Date;
 }
+
+export interface RegenerateArtifactCommand {
+  readonly artifactKind: ActivationArtifactKind;
+  readonly authorization: ScopeAuthorizationContext;
+  readonly courseId: string;
+  readonly environment: "dev" | "staging" | "pilot";
+  readonly requestIdempotencyKey: string;
+  readonly sessionId: string;
+}
+
+export interface ActivationRegenerationRegistration {
+  readonly operation: GenerationOperationView;
+  readonly replayed: boolean;
+}
+
+export type RegenerateLessonCommand = Omit<
+  RegenerateArtifactCommand,
+  "artifactKind"
+>;
+export type LessonRegenerationRegistration = ActivationRegenerationRegistration;
 
 export interface GenerationWork {
   readonly course: AuthorizedActivationCourse;
@@ -117,6 +140,7 @@ export type GeneratedQuizItem = Omit<
 export interface GeneratedQuizBank {
   readonly bankId: string;
   readonly bankKind: "placement" | "chapter";
+  readonly fallbackItems: readonly GeneratedQuizItem[];
   readonly items: readonly GeneratedQuizItem[];
   readonly modelProvenance: ModelCallProvenance;
   readonly resultHash: string;

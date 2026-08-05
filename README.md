@@ -100,6 +100,10 @@ scripts/local-apps.sh up
 # Inspect the fixed profile or show at most 200 recent log lines per app.
 scripts/local-apps.sh status
 scripts/local-apps.sh logs
+# Last 30 minutes of bounded, privacy-safe lesson/question generation events:
+scripts/local-apps.sh logs activation
+# Only terminal generation failures and queue errors:
+scripts/local-apps.sh logs activation-failures
 
 # Remove only application-profile containers; preserve databases and volumes.
 scripts/local-apps.sh down
@@ -107,6 +111,16 @@ scripts/local-apps.sh down
 # Remove only the complete fixed reflo-local project's resources and volumes.
 scripts/local-apps.sh reset
 ```
+
+Activation lesson, Chapter 1 quiz, and placement-quiz model calls default to a
+180-second per-attempt deadline. Local overrides use
+`REFLO_ACTIVATION_LESSON_DEADLINE_MS`,
+`REFLO_ACTIVATION_CHAPTER_QUIZ_DEADLINE_MS`, and
+`REFLO_ACTIVATION_PLACEMENT_QUIZ_DEADLINE_MS`; each must be 30,000–300,000
+milliseconds. Five durable attempts remain bounded by an independent 15-minute
+wall-clock budget per artifact. Longer deadlines reduce premature timeout
+failures, but do not accept malformed, ungrounded, or otherwise invalid model
+results.
 
 Defaults expose web at `http://127.0.0.1:53000`, API at
 `http://127.0.0.1:53001`, and jobs readiness at

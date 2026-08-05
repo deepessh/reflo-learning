@@ -85,6 +85,37 @@ describe("auth-v1 account service", () => {
     ).rejects.toBeInstanceOf(AccountInputError);
   });
 
+  it("allows exact HTTP loopback origins only when explicitly enabled", async () => {
+    const emailPort = new RecordingEmailPort();
+    const service = new AccountService({
+      abuseLimiter: new FixedWindowAuthAbuseLimiter(),
+      allowInsecureLoopbackOrigins: true,
+      callbackOrigins: ["http://127.0.0.1:53000"],
+      clock: new FixedAccountClock(new Date("2026-07-20T12:00:00.000Z")),
+      emailEncryptionKey: key(1),
+      emailPort,
+      idGenerator: new SequentialAccountIdGenerator(),
+      lookupKey: key(2),
+      magicLinkDailyLimit: 50,
+      magicLinkTotalLimit: 200,
+      repository: new InMemoryAccountRepository(),
+      sessionDigestKey: key(3),
+      tokenDigestKey: key(4),
+    });
+
+    await service.requestMagicLink(
+      "staff@example.test",
+      "http://127.0.0.1:53000",
+    );
+    expect(emailPort.messages).toHaveLength(1);
+    await expect(
+      service.requestMagicLink(
+        "staff@example.test",
+        "http://reflo.example",
+      ),
+    ).rejects.toBeInstanceOf(AccountInputError);
+  });
+
   it("requires matching session-bound CSRF proofs and revokes on deletion start", async () => {
     const { emailPort, repository, service } = createFixture();
     await service.requestMagicLink(

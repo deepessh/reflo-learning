@@ -21,6 +21,8 @@ import {
   type GenerationOperationView,
   type PlanActivationCommand,
   type PlannedGenerationOperation,
+  type RegenerateArtifactCommand,
+  type RegenerateLessonCommand,
   type RunGenerationCommand,
 } from "./contracts.js";
 import { ActivationGenerationError } from "./errors.js";
@@ -100,6 +102,20 @@ export class ActivationGenerationService {
     }
   }
 
+  regenerateLesson(command: RegenerateLessonCommand) {
+    return this.regenerateArtifact({
+      ...command,
+      artifactKind: "first_text_lesson",
+    });
+  }
+
+  regenerateArtifact(command: RegenerateArtifactCommand) {
+    if (!/^[0-9a-f-]{36}$/i.test(command.requestIdempotencyKey)) {
+      throw new ActivationGenerationError("invalid_configuration");
+    }
+    return this.dependencies.repository.registerArtifactRegeneration(command);
+  }
+
   listStatus(
     authorization: RunGenerationCommand["authorization"],
     courseId: string,
@@ -140,6 +156,7 @@ export class ActivationGenerationService {
       artifactKind: operation.artifactKind,
       courseId: course.courseId,
       generationVersion: ACTIVATION_GENERATION_VERSION,
+      operationId: operation.id,
       targetId: concept.id,
     });
     const objectKey = buildAssetObjectKey({
@@ -199,6 +216,7 @@ export class ActivationGenerationService {
       artifactKind: operation.artifactKind,
       courseId: course.courseId,
       generationVersion: ACTIVATION_GENERATION_VERSION,
+      operationId: operation.id,
       targetId: operation.chapterId ?? course.courseId,
     });
     const items = materializeQuizItems(bankId, routed.value);
@@ -215,11 +233,66 @@ export class ActivationGenerationService {
     return {
       bankId,
       bankKind,
+      fallbackItems: materializeShortAnswerFallbacks(bankId, items),
       items,
       modelProvenance: routed.provenance,
       resultHash: sha256(canonicalJson(routed.value)),
     };
   }
+}
+
+function materializeShortAnswerFallbacks(
+  bankId: string,
+  items: readonly GeneratedQuizItem[],
+): readonly GeneratedQuizItem[] {
+  return items
+    .filter((item) => item.itemType === "short_answer")
+    .map((item) => {
+      if (item.conceptIds.length !== 1) {
+        throw new ActivationGenerationError(
+          "invalid_result",
+          "activation short answers require one concept for an independent keyed fallback",
+        );
+      }
+      const conceptId = item.conceptIds[0]!;
+      const prompt = `Choose the course-supported answer: ${item.prompt}`;
+      const responseOptions = fallbackResponseOptions(item, items);
+      const normalizedPrompt = normalizeQuizPrompt(prompt);
+      return {
+        conceptIds: [conceptId],
+        difficulty: item.difficulty,
+        id: stableUuid({
+          bankId,
+          conceptId,
+          originalItemId: item.id,
+          version: "short-answer-fallback-v1",
+        }),
+        itemOrder: item.itemOrder,
+        itemType: "multiple_choice" as const,
+        keyedAnswer: item.keyedAnswer,
+        normalizedPromptHash: sha256(normalizedPrompt),
+        prompt,
+        responseOptions,
+        sourceSpanIds: item.sourceSpanIds,
+      };
+    });
+}
+
+function fallbackResponseOptions(
+  shortAnswer: GeneratedQuizItem,
+  items: readonly GeneratedQuizItem[],
+): readonly string[] {
+  const options = new Set<string>([shortAnswer.keyedAnswer]);
+  for (const item of items) {
+    if (item.id !== shortAnswer.id && item.keyedAnswer.trim().length > 0) {
+      options.add(item.keyedAnswer);
+    }
+    if (options.size === 4) break;
+  }
+  if (options.size === 1) {
+    options.add("The course material does not provide a supported answer.");
+  }
+  return [...options];
 }
 
 export function buildActivationPlan(
@@ -420,7 +493,12 @@ function normalizeFailure(error: unknown): GenerationFailure {
     };
   }
   if (error instanceof ActivationGenerationError) {
-    return { failureClass: error.code, retryable: false };
+    return {
+      failureClass: error.code,
+      retryable:
+        error.code === "content_out_of_bounds" ||
+        error.code === "invalid_result",
+    };
   }
   return { failureClass: "infrastructure_unavailable", retryable: true };
 }

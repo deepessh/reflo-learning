@@ -96,9 +96,11 @@ describe("demo delivery composition", () => {
     const traced = instrumentDemoDelivery(
       {
         dispatch,
+        getPreference: vi.fn(),
         handleTelegramWebhook: vi.fn(),
         previewEmail: vi.fn(),
         submitEmail: vi.fn(),
+        updatePreference: vi.fn(),
       } as never,
       {
         enabled: true,
@@ -117,7 +119,6 @@ describe("demo delivery composition", () => {
       },
       idempotencyKey: "delivery-1",
       now: "2026-07-24T20:00:00.000Z",
-      provider: "telegram",
     });
 
     expect(result).toBeNull();
@@ -146,6 +147,8 @@ function environment(): NodeJS.ProcessEnv {
     REFLO_DEMO_EMAIL_LINK_SIGNING_KEY: key(1),
     REFLO_DEMO_EMAIL_OWNER_SCOPE_ID: "20000000-0000-4000-8000-000000000001",
     REFLO_DEMO_EMAIL_USER_ID: "30000000-0000-4000-8000-000000000001",
+    REFLO_DEMO_REVIEW_LOCAL_TIME: "09:00",
+    REFLO_DEMO_REVIEW_TIME_ZONE: "UTC",
     REFLO_DEMO_TELEGRAM_BOT_TOKEN: `123:${"a".repeat(32)}`,
     REFLO_DEMO_TELEGRAM_CHANNEL_ID: "40000000-0000-4000-8000-000000000001",
     REFLO_DEMO_TELEGRAM_DESTINATION: "100123456",

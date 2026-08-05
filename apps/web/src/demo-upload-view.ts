@@ -54,16 +54,16 @@ export function demoUploadPresentation(
     case "large_document":
       return {
         detail:
-          "This supported PDF is using the asynchronous large-document path; the 16-minute standard-profile target does not apply.",
-        label: "Large-document path",
+          "This larger PDF needs more time. You can leave this page while Reflo continues processing it.",
+        label: "Processing a larger PDF",
         poll: true,
         tone: "attention",
       };
     case "ocr_required":
       return {
         detail:
-          "Scanned pages were detected. OCR is asynchronous and is not part of the standard-profile upload target.",
-        label: "OCR required",
+          "Scanned pages were detected. Text recognition is needed before this source can become a course.",
+        label: "Text recognition needed",
         poll: false,
         tone: "attention",
       };
@@ -88,10 +88,10 @@ export function demoUploadPresentation(
 function failureCopy(code: DemoUploadFailureCode | null): string {
   switch (code) {
     case "source_not_approved":
-      return "This file does not match a human-approved rights-cleared demo source.";
+      return "This file does not match the selected approved source.";
     case "unsupported_type":
     case "mime_mismatch":
-      return "Use the exact approved PDF source. EPUB and DOCX are post–Demo Day, and this file type or signature did not match.";
+      return "Use the matching approved PDF. This file type or signature did not match.";
     case "over_limit":
     case "archive_limit":
       return "The source exceeded a declared compressed, expanded, or page limit.";

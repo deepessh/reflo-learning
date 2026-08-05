@@ -18,7 +18,7 @@ import {
   KNOWLEDGE_ALGORITHM_VERSION,
   KNOWLEDGE_CONFIGURATION_ID,
 } from "@reflo/knowledge-model";
-import { canonicalJson, sha256 } from "@reflo/retrieval";
+import { canonicalJson, sha256, stableUuid } from "@reflo/retrieval";
 import pg, { type PoolClient } from "pg";
 
 const { Pool } = pg;
@@ -76,6 +76,7 @@ interface AuthorizedQuestionRow extends Record<string, unknown> {
   course_id: string;
   difficulty: 1 | 2 | 3 | 4 | 5;
   id: string;
+  keyed_answer: string;
   normalized_prompt_hash: string;
   prompt: string;
   rubric: unknown;
@@ -234,6 +235,47 @@ export class PostgresAssessmentRepository implements AssessmentRepositoryPort {
         idempotencyKey,
         "replayed",
       );
+    });
+  }
+
+  async loadPendingFallback(
+    authorization: Parameters<AssessmentRepositoryPort["loadFinalization"]>[0],
+    sessionId: string,
+  ): Promise<AssessmentFinalizationView | null> {
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      const pending = await client.query<{ idempotency_key: string }>(
+        `SELECT finalization.idempotency_key
+         FROM assessment_finalization AS finalization
+         JOIN attempt AS original
+           ON original.owner_scope_id = finalization.owner_scope_id
+          AND original.id = finalization.attempt_id
+         WHERE finalization.owner_scope_id = $1
+           AND finalization.user_id = $2
+           AND finalization.finalization_kind = 'short_answer'
+           AND finalization.attempt_outcome = 'abstained'
+           AND original.session_id = $3
+           AND NOT EXISTS (
+             SELECT 1
+             FROM attempt AS replacement
+             WHERE replacement.owner_scope_id = original.owner_scope_id
+               AND replacement.user_id = original.user_id
+               AND replacement.replacement_for_attempt_id = original.id
+           )
+         ORDER BY finalization.created_at DESC, finalization.attempt_id DESC
+         LIMIT 1`,
+        [authorization.ownerScopeId, authorization.actorId, sessionId],
+      );
+      const idempotencyKey = pending.rows[0]?.idempotency_key;
+      return idempotencyKey === undefined
+        ? null
+        : loadFinalizationView(
+            client,
+            authorization.ownerScopeId,
+            authorization.actorId,
+            idempotencyKey,
+            "replayed",
+          );
     });
   }
 
@@ -568,6 +610,7 @@ async function loadAuthorizedSnapshot(
   const questionResult = await client.query<AuthorizedQuestionRow>(
     `SELECT question.id, question.course_id, question.difficulty,
             question.prompt, question.normalized_prompt_hash, question.rubric,
+            question.keyed_answer #>> '{}' AS keyed_answer,
             ARRAY(
               SELECT link.concept_id::text
               FROM quiz_item_concept AS link
@@ -667,8 +710,9 @@ async function loadAuthorizedSnapshot(
      ORDER BY replacement.id`,
     [authorization.ownerScopeId, question.courseId],
   );
-  const fallbackCandidates = question.rubrics.map((rubric) => {
-    const candidate = fallbackResult.rows.find(
+  const fallbackCandidates: KeyedMultipleChoiceQuestion[] = [];
+  for (const rubric of question.rubrics) {
+    const existingCandidate = fallbackResult.rows.find(
       (entry) =>
         entry.concept_id === rubric.conceptId &&
         !seen.has(entry.normalized_prompt_hash) &&
@@ -678,11 +722,18 @@ async function loadAuthorizedSnapshot(
         ) &&
         entry.response_options.includes(entry.keyed_answer),
     );
-    if (candidate === undefined) {
-      throw new AssessmentError("fallback_unavailable");
-    }
+    const candidate =
+      existingCandidate ??
+      (await createSourceBackedFallback(
+        client,
+        authorization.ownerScopeId,
+        row,
+        question,
+        rubric,
+        fallbackResult.rows,
+      ));
     seen.add(candidate.normalized_prompt_hash);
-    return {
+    fallbackCandidates.push({
       conceptIds: [rubric.conceptId],
       courseId: candidate.course_id,
       difficulty: candidate.difficulty,
@@ -695,9 +746,130 @@ async function loadAuthorizedSnapshot(
       rubricId: rubric.rubricId,
       rubricVersion: rubric.rubricVersion,
       sourceSpans: candidate.source_spans,
-    } satisfies KeyedMultipleChoiceQuestion;
-  });
+    });
+  }
   return { fallbackCandidates, question };
+}
+
+async function createSourceBackedFallback(
+  client: PoolClient,
+  ownerScopeId: string,
+  row: AuthorizedQuestionRow,
+  question: ShortAnswerQuestion,
+  rubric: ShortAnswerQuestion["rubrics"][number],
+  courseFallbacks: readonly AuthorizedFallbackRow[],
+): Promise<AuthorizedFallbackRow> {
+  if (
+    question.conceptIds.length !== 1 ||
+    row.keyed_answer.trim().length === 0
+  ) {
+    throw new AssessmentError("fallback_unavailable");
+  }
+  const responseOptions = new Set<string>([row.keyed_answer]);
+  for (const fallback of courseFallbacks) {
+    if (fallback.keyed_answer.trim().length > 0) {
+      responseOptions.add(fallback.keyed_answer);
+    }
+    if (responseOptions.size === 4) break;
+  }
+  if (responseOptions.size === 1) {
+    responseOptions.add(
+      "The course material does not provide a supported answer.",
+    );
+  }
+  const prompt = `Choose the course-supported answer: ${question.prompt}`;
+  const normalizedPromptHash = sha256(normalizeQuizPrompt(prompt));
+  const quizItemId = stableUuid({
+    conceptId: rubric.conceptId,
+    originalQuestionId: question.id,
+    version: "short-answer-fallback-v1",
+  });
+  const inserted = await client.query<{ id: string }>(
+    `INSERT INTO quiz_item
+       (id, owner_scope_id, course_id, item_type, difficulty, prompt,
+        keyed_answer, rubric, version, quiz_bank_id, item_order,
+        normalized_prompt_hash, response_options)
+     VALUES ($1, $2, $3, 'multiple_choice', $4, $5, $6::jsonb, NULL,
+             'short-answer-fallback-v1', NULL, NULL, $7, $8::jsonb)
+     ON CONFLICT (owner_scope_id, id) DO UPDATE SET id = EXCLUDED.id
+     WHERE quiz_item.course_id = EXCLUDED.course_id
+       AND quiz_item.item_type = EXCLUDED.item_type
+       AND quiz_item.prompt = EXCLUDED.prompt
+       AND quiz_item.keyed_answer = EXCLUDED.keyed_answer
+       AND quiz_item.normalized_prompt_hash = EXCLUDED.normalized_prompt_hash
+       AND quiz_item.response_options = EXCLUDED.response_options
+     RETURNING id`,
+    [
+      quizItemId,
+      ownerScopeId,
+      question.courseId,
+      question.difficulty,
+      prompt,
+      JSON.stringify(row.keyed_answer),
+      normalizedPromptHash,
+      JSON.stringify([...responseOptions]),
+    ],
+  );
+  if (inserted.rows[0]?.id !== quizItemId) {
+    throw new AssessmentError("fallback_unavailable");
+  }
+  const conceptLink = await client.query<{ concept_id: string }>(
+    `INSERT INTO quiz_item_concept (owner_scope_id, quiz_item_id, concept_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT DO NOTHING
+     RETURNING concept_id`,
+    [ownerScopeId, quizItemId, rubric.conceptId],
+  );
+  if (conceptLink.rows[0]?.concept_id === undefined) {
+    const existing = await client.query<{ present: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM quiz_item_concept
+         WHERE owner_scope_id = $1 AND quiz_item_id = $2 AND concept_id = $3
+       ) AS present`,
+      [ownerScopeId, quizItemId, rubric.conceptId],
+    );
+    if (existing.rows[0]?.present !== true) {
+      throw new AssessmentError("fallback_unavailable");
+    }
+  }
+  for (const sourceSpanId of rubric.sourceSpanIds) {
+    await client.query(
+      `INSERT INTO quiz_item_source_span
+         (owner_scope_id, quiz_item_id, source_span_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [ownerScopeId, quizItemId, sourceSpanId],
+    );
+  }
+  const sourceSpans = question.sourceSpans.filter((span) =>
+    rubric.sourceSpanIds.includes(span.id),
+  );
+  if (sourceSpans.length !== rubric.sourceSpanIds.length) {
+    throw new AssessmentError("fallback_unavailable");
+  }
+  return {
+    concept_id: rubric.conceptId,
+    course_id: question.courseId,
+    difficulty: question.difficulty,
+    id: quizItemId,
+    keyed_answer: row.keyed_answer,
+    normalized_prompt_hash: normalizedPromptHash,
+    prompt,
+    quiz_item_id: quizItemId,
+    response_options: [...responseOptions],
+    rubric_id: rubric.rubricId,
+    rubric_version: rubric.rubricVersion,
+    source_spans: sourceSpans,
+  };
+}
+
+function normalizeQuizPrompt(prompt: string): string {
+  return prompt
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function mapAuthorizedQuestion(

@@ -92,6 +92,40 @@ describe("connected study projection", () => {
       state: "retest",
     });
   });
+
+  it("loads the selected course lesson for advance and review actions", async () => {
+    const repository = new InMemoryTutorRepository();
+    const artifacts = new InMemoryTutorArtifactStore();
+    const session = sessionFixture();
+    const content = "A source-grounded first lesson.";
+    const contentHash = artifacts.seed(
+      "owners/scope/courses/course/assets/initial.md",
+      content,
+    );
+    repository.sessions.set("session", {
+      ...session,
+      concepts: [
+        {
+          ...session.concepts[0]!,
+          dueForReview: true,
+          lesson: { ...session.concepts[0]!.lesson!, contentHash },
+        },
+      ],
+    });
+    const service = new ConnectedStudyService(repository, artifacts);
+
+    await expect(
+      service.loadLesson(authorization, "session"),
+    ).resolves.toMatchObject({
+      concept: { conceptId: "concept", conceptName: "Virtual Private Cloud" },
+      content,
+      courseId: "course",
+      kind: "review",
+      lesson: { assetId: "initial-lesson", sourceSpanCount: 1 },
+      sessionId: "session",
+      sourceDocumentId: "source",
+    });
+  });
 });
 
 function sessionFixture(): TutorSessionSnapshot {

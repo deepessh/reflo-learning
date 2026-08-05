@@ -10,6 +10,7 @@ import type {
   DeliveryAnswerInput,
   DeliveryKnowledgeUpdate,
   DeliveryMessage,
+  DeliveryPreferenceSettings,
   DemoDeliveryDestination,
   DemoDeliveryProvider,
   EmailQuizPreview,
@@ -68,7 +69,22 @@ export class InMemoryDemoDeliveryRepository implements DemoDeliveryRepository {
       readonly results: readonly DeliveryAnswerFinalization[];
     }
   >();
+  readonly preferences = new Map<string, DeliveryPreferenceSettings>();
   nextDelivery: ReservedDelivery | null = null;
+
+  async loadPreference(
+    authorization: KnowledgeAuthorizationContext,
+  ): Promise<DeliveryPreferenceSettings | null> {
+    return this.preferences.get(preferenceKey(authorization)) ?? null;
+  }
+
+  async savePreference(
+    authorization: KnowledgeAuthorizationContext,
+    preference: DeliveryPreferenceSettings,
+  ): Promise<DeliveryPreferenceSettings> {
+    this.preferences.set(preferenceKey(authorization), preference);
+    return preference;
+  }
 
   async reserveDueBatch(
     authorization: KnowledgeAuthorizationContext,
@@ -187,7 +203,6 @@ export class InMemoryDemoDeliveryRepository implements DemoDeliveryRepository {
     }
     return {
       deliveryId,
-      demoOnly: true,
       expiresAt: delivery.expiresAt,
       questions: delivery.items.map((item) => ({
         conceptId: item.conceptId,
@@ -318,4 +333,8 @@ function requiredDelivery(
     throw new DeliveryError("not_found");
   }
   return delivery;
+}
+
+function preferenceKey(authorization: KnowledgeAuthorizationContext): string {
+  return `${authorization.ownerScopeId}/${authorization.actorId}`;
 }

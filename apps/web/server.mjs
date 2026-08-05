@@ -103,6 +103,7 @@ async function sendFile(response, file, method, status) {
   try {
     const metadata = await stat(file);
     response.writeHead(status, {
+      "cache-control": cacheControl(file),
       "content-length": metadata.size,
       "content-type":
         MIME_TYPES.get(path.extname(file)) ?? "application/octet-stream",
@@ -119,6 +120,16 @@ async function sendFile(response, file, method, status) {
     });
     response.end("Not found");
   }
+}
+
+function cacheControl(file) {
+  if (path.extname(file) === ".html") {
+    return "no-store";
+  }
+  if (file.includes(`${path.sep}_next${path.sep}static${path.sep}`)) {
+    return "public, max-age=31536000, immutable";
+  }
+  return "no-cache";
 }
 
 function start() {

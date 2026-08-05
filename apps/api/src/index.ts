@@ -31,16 +31,20 @@ const connectedRuntime = await createConnectedDemoRuntime(
 const demoUploadRuntime = await createDemoUploadRuntime(
   process.env,
   environment.deployment,
+  connectedRuntime.activation,
 );
 const now = demoClock(process.env, environment.deployment);
 const dependencies = {
   accounts: accountRuntime.accounts,
+  activation: connectedRuntime.activation,
   assessment: connectedRuntime.assessment,
   delivery: deliveryRuntime.delivery,
   demoUploads: demoUploadRuntime.demoUploads,
   localAuthInbox: accountRuntime.localInbox,
+  localIngestionBridge: demoUploadRuntime.localIngestionBridge,
   now,
   preflight: connectedRuntime.preflight,
+  privateAssets: connectedRuntime.privateAssets,
   seed: connectedRuntime.seed,
   sessions: connectedRuntime.sessions,
   study: connectedRuntime.study,

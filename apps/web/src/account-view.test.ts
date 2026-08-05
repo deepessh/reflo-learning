@@ -7,6 +7,7 @@ import {
   masteryDeltaLabel,
   readinessPresentation,
   sessionDuration,
+  sessionSummaryPresentation,
 } from "./account-view";
 
 describe("account shell presentation", () => {
@@ -40,6 +41,67 @@ describe("account shell presentation", () => {
         summary: null,
       }),
     ).toBe("In progress");
+  });
+
+  it("summarizes completed session evidence without exposing raw summary data", () => {
+    expect(
+      sessionSummaryPresentation({
+        courseId: "course-a",
+        courseTitle: "Networks",
+        endedAt: new Date("2026-07-31T12:12:00.000Z"),
+        sessionId: "session-a",
+        startedAt: new Date("2026-07-31T12:00:00.000Z"),
+        status: "completed",
+        summary: {
+          flowB: {
+            "concept-a": {
+              masteryDelta: "0.20000",
+              outcome: "retest_succeeded",
+            },
+            "concept-b": {
+              masteryDelta: "0.00000",
+              outcome: "stopped_after_two_replacements",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      detail: "2 concepts reviewed · 1 strengthened after a follow-up check.",
+      reviewedConceptCount: 2,
+      statusLabel: "Completed",
+      successfulReviewCount: 1,
+    });
+  });
+
+  it("keeps sparse and unfinished history summaries useful", () => {
+    expect(
+      sessionSummaryPresentation({
+        courseId: "course-a",
+        courseTitle: "Networks",
+        endedAt: null,
+        sessionId: "session-a",
+        startedAt: new Date("2026-07-31T12:00:00.000Z"),
+        status: "active",
+        summary: null,
+      }),
+    ).toMatchObject({
+      detail: "Your completed activities and answers are saved.",
+      statusLabel: "In progress",
+    });
+    expect(
+      sessionSummaryPresentation({
+        courseId: "course-a",
+        courseTitle: "Networks",
+        endedAt: new Date("2026-07-31T12:04:00.000Z"),
+        sessionId: "session-b",
+        startedAt: new Date("2026-07-31T12:00:00.000Z"),
+        status: "abandoned",
+        summary: { conceptsReviewed: 3 },
+      }),
+    ).toMatchObject({
+      detail: "3 concepts reviewed. Your next session will build on this work.",
+      statusLabel: "Ended early",
+    });
   });
 
   it("keeps the Bayesian prior hidden until eligible evidence exists", () => {

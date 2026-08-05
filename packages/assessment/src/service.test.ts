@@ -8,6 +8,7 @@ import {
 import {
   createScriptedAdapterRegistry,
   InMemoryTraceSink,
+  type ScriptedAdapterAction,
 } from "@reflo/model-router/testing";
 
 import type {
@@ -193,6 +194,45 @@ describe("versioned short-answer grading", () => {
     expect(fixture.traces.traces[0]?.attempts[0]?.outcome).toBe(
       "validation_error",
     );
+  });
+
+  it("releases a timed-out claim and reuses the same logical submission without duplicates", async () => {
+    const fixture = gradingFixtureWithActions([
+      {
+        safeCode: "timeout",
+        transient: true,
+        type: "failure",
+      },
+      {
+        safeCode: "timeout",
+        transient: true,
+        type: "failure",
+      },
+      {
+        type: "result",
+        value: {
+          judgments: [
+            scored(ids.conceptA, "correct", 0.99),
+            scored(ids.conceptB, "correct", 0.99),
+          ],
+        },
+      },
+    ]);
+    const command = gradingCommand(fixture.policy, "attempt/timeout-retry");
+
+    await expect(fixture.service.gradeShortAnswer(command)).rejects.toMatchObject<
+      Partial<AssessmentError>
+    >({ code: "grading_unavailable" });
+    const created = await fixture.service.gradeShortAnswer(command);
+    const replayed = await fixture.service.gradeShortAnswer(command);
+
+    expect(created).toMatchObject({ outcome: "graded", status: "created" });
+    expect(replayed).toMatchObject({
+      attemptId: created.attemptId,
+      status: "replayed",
+    });
+    expect(fixture.scripted.invocations).toHaveLength(3);
+    expect(fixture.repository.finalizations.size).toBe(1);
   });
 
   it("rejects conflicting reuse of a finalized idempotency key without reinvoking the grader", async () => {
@@ -400,6 +440,14 @@ describe("versioned short-answer grading", () => {
 });
 
 function gradingFixture(results: readonly unknown[]) {
+  return gradingFixtureWithActions(
+    results.map((value) => ({ type: "result" as const, value })),
+  );
+}
+
+function gradingFixtureWithActions(
+  actions: readonly ScriptedAdapterAction[],
+) {
   const question = shortAnswerQuestion();
   const answer = "A VPC is isolated and subnets divide its address space.";
   const prompt = buildPromptBundle("assessment.grade-short-answer.v1", {
@@ -426,10 +474,7 @@ function gradingFixture(results: readonly unknown[]) {
     ratingMappingVersion: "rating-mapping-v1",
   };
   const scripted = createScriptedAdapterRegistry({
-    "assessment.grade-short-answer.v1": results.map((value) => ({
-      type: "result" as const,
-      value,
-    })),
+    "assessment.grade-short-answer.v1": actions,
   });
   const traces = new InMemoryTraceSink();
   const repository = new InMemoryAssessmentRepository();

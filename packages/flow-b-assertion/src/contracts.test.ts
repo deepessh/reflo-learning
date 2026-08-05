@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FLOW_B_ASSERTION_VERSION,
+  FLOW_B_MAX_DURATION_MS,
   FLOW_B_RUN_RECORD_VERSION,
   assertFlowBRunRecord,
   finalizeFlowBRunRecord,
@@ -21,6 +22,7 @@ describe("Flow B browser assertion contracts", () => {
       REFLO_FLOW_B_RETEST_RESPONSE: "A complete synthetic response.",
       REFLO_FLOW_B_RUN_ID: `demo-${"1".repeat(32)}`,
       REFLO_FLOW_B_STAFF_EMAIL: "staff@example.test",
+      REFLO_FLOW_B_TARGET_PROFILE: "development-fixture-v1",
       REFLO_FLOW_B_TELEGRAM_DESTINATION: "100164000",
       REFLO_FLOW_B_TELEGRAM_WEBHOOK_SECRET: "a".repeat(32),
       REFLO_FLOW_B_TRACE_PROBE_URL: "http://127.0.0.1:4000/__reflo/traces",
@@ -29,6 +31,7 @@ describe("Flow B browser assertion contracts", () => {
     expect(config).toMatchObject({
       auth: { mode: "local-inbox" },
       mode: "development-connected",
+      targetProfile: "development-fixture-v1",
       timeoutMs: 45_000,
     });
     expect(JSON.stringify(config)).toContain("staff@example.test");
@@ -47,6 +50,7 @@ describe("Flow B browser assertion contracts", () => {
         REFLO_FLOW_B_MODE: "authorized-connected",
         REFLO_FLOW_B_RETEST_RESPONSE: "complete",
         REFLO_FLOW_B_RUN_ID: `demo-${"2".repeat(32)}`,
+        REFLO_FLOW_B_TARGET_PROFILE: "operator-hosted-connected-demo-v1",
         REFLO_FLOW_B_TELEGRAM_DESTINATION: "100164000",
         REFLO_FLOW_B_TELEGRAM_WEBHOOK_SECRET: "a".repeat(32),
         REFLO_FLOW_B_TRACE_PROBE_URL: "http://127.0.0.1:4000/__reflo/traces",
@@ -96,6 +100,19 @@ describe("Flow B browser assertion contracts", () => {
         },
       }),
     ).toThrow("flow_b_assertion_invariant_failed");
+  });
+
+  it("rejects a single Flow B run over the six-minute demo limit", () => {
+    const startedAt = Date.parse(runFixture().startedAt);
+    const durationMs = FLOW_B_MAX_DURATION_MS + 1;
+
+    expect(() =>
+      finalizeFlowBRunRecord({
+        ...runFixture(),
+        completedAt: new Date(startedAt + durationMs).toISOString(),
+        durationMs,
+      }),
+    ).toThrow("flow_b_run_record_invalid");
   });
 });
 
@@ -178,6 +195,7 @@ function runFixture() {
     },
     runId: `demo-${"4".repeat(32)}`,
     startedAt: "2026-07-25T01:00:00.000Z",
+    targetProfile: "development-fixture-v1" as const,
     targetOriginDigest: `sha256:${"5".repeat(64)}`,
     trace: {
       allowlistValidated: true as const,

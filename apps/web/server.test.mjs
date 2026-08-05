@@ -29,8 +29,14 @@ describe("static web container server", () => {
     const root = await fixtureRoot();
     await mkdir(path.join(root, "demo"), { recursive: true });
     await writeFile(path.join(root, "index.html"), "home");
-    await writeFile(path.join(root, "demo/review.html"), "review");
+    await writeFile(path.join(root, "review.html"), "review");
+    await writeFile(path.join(root, "demo/review.html"), "legacy-review");
     await writeFile(path.join(root, "404.html"), "missing");
+    await mkdir(path.join(root, "_next/static/chunks"), { recursive: true });
+    await writeFile(
+      path.join(root, "_next/static/chunks/app-hash.js"),
+      "export {};",
+    );
     const server = createWebServer(root);
     servers.push(server);
     server.listen(0, "127.0.0.1");
@@ -42,9 +48,14 @@ describe("static web container server", () => {
     }
     const origin = `http://127.0.0.1:${address.port}`;
 
-    const route = await fetch(`${origin}/demo/review?delivery=synthetic`);
+    const route = await fetch(`${origin}/review?delivery=message`);
     expect(route.status).toBe(200);
+    expect(route.headers.get("cache-control")).toBe("no-store");
     expect(await route.text()).toBe("review");
+
+    const legacyRoute = await fetch(`${origin}/demo/review?delivery=message`);
+    expect(legacyRoute.status).toBe(200);
+    expect(await legacyRoute.text()).toBe("legacy-review");
 
     const health = await fetch(`${origin}/health`);
     expect(health.status).toBe(200);
@@ -54,8 +65,17 @@ describe("static web container server", () => {
       status: "ok",
     });
 
+    const staticAsset = await fetch(
+      `${origin}/_next/static/chunks/app-hash.js`,
+    );
+    expect(staticAsset.status).toBe(200);
+    expect(staticAsset.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+
     const missing = await fetch(`${origin}/outside`);
     expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("no-store");
     expect(await missing.text()).toBe("missing");
   });
 

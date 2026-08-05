@@ -138,6 +138,69 @@ test(
         "short_answer",
       );
 
+      const resumed = await connected.startOrResumeStudySession(
+        authorization,
+        ids.course,
+      );
+      assert.equal(resumed.resumed, true);
+      assert.equal(resumed.sessionId, first.sessionId);
+      await client.query(
+        `UPDATE study_session
+         SET status = 'completed', ended_at = clock_timestamp()
+         WHERE id = $1`,
+        [first.sessionId],
+      );
+      const started = await connected.startOrResumeStudySession(
+        authorization,
+        ids.course,
+      );
+      assert.equal(started.resumed, false);
+      assert.notEqual(started.sessionId, first.sessionId);
+      assert.deepEqual(started.plan, {
+        activationFailure: null,
+        activationStatus: "ready",
+        assessmentStatus: "ready",
+        contractVersion: "course-study-plan-v1",
+        focusConceptId: ids.concept,
+        nextAction: "review",
+        regeneration: null,
+        timeBudgetMinutes: 10,
+      });
+      const activationProgress = await connected.loadActivationProgress(
+        authorization,
+        started.sessionId,
+      );
+      assert.deepEqual(
+        { ...activationProgress, updatedAt: undefined },
+        {
+          activationStatus: "ready",
+          artifact: "first_text_lesson",
+          assessmentArtifact: null,
+          assessmentStatus: "ready",
+          attemptCount: 0,
+          contractVersion: "activation-progress-v1",
+          failure: null,
+          maxAttempts: 5,
+          nextAction: "open_lesson",
+          stage: "ready",
+          updatedAt: undefined,
+        },
+      );
+      assert.match(activationProgress.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+      assert.equal(
+        await connected.loadActivationProgress(
+          { ...authorization, ownerScopeId: ids.otherScope },
+          started.sessionId,
+        ),
+        null,
+      );
+      const preserved = await client.query(
+        `SELECT
+           (SELECT count(*)::integer FROM study_session) AS sessions,
+           (SELECT count(*)::integer FROM attempt) AS attempts`,
+      );
+      assert.deepEqual(preserved.rows[0], { attempts: 2, sessions: 2 });
+
       const replay = await resetAndReplay(connected, knowledge);
       assert.equal(replay.sessionId, first.sessionId);
       assert.deepEqual(await loadState(client), state);

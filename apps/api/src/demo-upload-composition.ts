@@ -10,19 +10,13 @@ import {
 } from "@reflo/db";
 import { LocalSmokeObjectStore, artifactObjectKey } from "@reflo/dev-smoke";
 import {
-  CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
   AliFunctionComputeSessionClient,
-  ClamAvScannerAdapter,
   FunctionComputeSessionDocumentWorker,
   IngestionSupervisor,
+  LOCAL_INGESTION_BRIDGE_PROFILE,
   NodeEphemeralWorkspace,
-  NodeProcessRunner,
-  NormalizedOutputFileReader,
   ObjectArtifactPublisher,
-  PodmanDocumentWorker,
   type IsolatedDocumentWorkerPort,
-  type MalwareScannerPort,
-  type ProcessRunnerPort,
   QuarantineStagingAdapter,
   validateNormalizedDocument,
 } from "@reflo/ingestion";
@@ -36,7 +30,12 @@ import {
   ApprovedDemoUploadService,
   type DemoUploadProcessingWork,
 } from "./demo-upload.js";
+import type { ActivationPackageScheduler } from "./activation-package-processing.js";
 import { DemoUploadProcessingService } from "./demo-upload-processing.js";
+import {
+  LocalIngestionBridgeBroker,
+  type LocalIngestionBridge,
+} from "./local-ingestion-bridge.js";
 import {
   createAliOssConnectedObjectStore,
   type ConnectedObjectStore,
@@ -44,18 +43,19 @@ import {
 
 const CONNECTED_MODE = "staff-only-demo-v1";
 const CONNECTED_BOUNDARY_PROFILE = "staff-controlled-rights-cleared-v1";
-const LOCAL_PROCESSOR_MODE = "local-isolated-v1";
+const LOCAL_PROCESSOR_MODE = "local-isolated-ingestion-bridge-v1";
 const SERVERLESS_PROCESSOR_MODE = "serverless-isolated-ingestion-v1";
-const CLAMAV_SCANNER_MEMORY_BYTES = 1_024 * 1_024 * 1_024;
 
 export interface DemoUploadRuntime {
   readonly demoUploads?: ApprovedDemoUploadService;
+  readonly localIngestionBridge?: LocalIngestionBridge;
   close(): Promise<void>;
 }
 
 export async function createDemoUploadRuntime(
   input: NodeJS.ProcessEnv,
   deployment: Deployment,
+  activation?: ActivationPackageScheduler,
 ): Promise<DemoUploadRuntime> {
   const mode = input.REFLO_CONNECTED_DEMO_MODE;
   if (mode === undefined || mode === "disabled") {
@@ -92,66 +92,24 @@ export async function createDemoUploadRuntime(
     input,
     "REFLO_DEMO_OPERATOR_OWNER_SCOPE_ID",
   );
-  let malwareScanner: MalwareScannerPort | undefined;
   let worker: IsolatedDocumentWorkerPort;
+  let localIngestionBridge: LocalIngestionBridge | undefined;
   if (processorMode === LOCAL_PROCESSOR_MODE) {
-    if (
-      required(input, "REFLO_DEMO_UPLOAD_MALWARE_SCANNER_MODE") !==
-      CLAMAV_UPSTREAM_SNAPSHOT_PROFILE
-    ) {
-      throw new Error("demo upload requires a verified malware scanner");
-    }
-    const clamDatabaseDirectory = requiredAbsolute(
-      input,
-      "REFLO_LOCAL_CLAMAV_DATABASE_DIR",
-    );
-    const admissionDatabaseDirectory = requiredAbsolute(
-      input,
-      "REFLO_LOCAL_CLAMAV_ADMISSION_DATABASE_DIR",
-    );
-    const scannerImage = requiredMatching(
-      input,
-      "REFLO_LOCAL_CLAMAV_SCANNER_IMAGE",
-      /^.+@sha256:[a-f0-9]{64}$/,
-    );
-    const scannerRunner = new PodmanClamAvProcessRunner(
-      {
-        databaseDirectory: admissionDatabaseDirectory,
-        imageReference: scannerImage,
-      },
-      new NodeProcessRunner(),
-    );
-    malwareScanner = new ClamAvScannerAdapter({
-      databaseDirectory: admissionDatabaseDirectory,
-      executable: "clamscan",
-      expectedFreshClamImageDigest: scannerImage.slice(
-        scannerImage.lastIndexOf("@") + 1,
-      ),
-      expectedProfile: CLAMAV_UPSTREAM_SNAPSHOT_PROFILE,
-      expectedSnapshotId: requiredMatching(
+    localIngestionBridge = new LocalIngestionBridgeBroker({
+      bearerToken: required(input, "REFLO_LOCAL_INGESTION_BRIDGE_TOKEN"),
+      expectedProfile: LOCAL_INGESTION_BRIDGE_PROFILE,
+      expectedScannerSnapshotId: requiredMatching(
         input,
         "REFLO_LOCAL_CLAMAV_SNAPSHOT_ID",
         /^cvd-[a-f0-9]{32}$/,
       ),
-      manifestPath: requiredAbsolute(input, "REFLO_LOCAL_CLAMAV_MANIFEST_PATH"),
-      runner: scannerRunner,
+      expectedWorkerImageDigest: requiredMatching(
+        input,
+        "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
+        /^sha256:[a-f0-9]{64}$/,
+      ),
     });
-    worker = new PodmanDocumentWorker(
-      {
-        clamDatabaseDirectory,
-        environment: deployment,
-        executable: "podman",
-        imageReference: required(input, "REFLO_LOCAL_INGESTION_IMAGE"),
-        resolvedImageDigest: requiredMatching(
-          input,
-          "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
-          /^sha256:[a-f0-9]{64}$/,
-        ),
-        tessdataDirectory: requiredAbsolute(input, "REFLO_LOCAL_TESSDATA_DIR"),
-      },
-      new NodeProcessRunner(),
-      new NormalizedOutputFileReader(),
-    );
+    worker = localIngestionBridge;
   } else {
     const region = required(input, "REFLO_ALIBABA_REGION");
     if (region !== "ap-southeast-1") {
@@ -278,6 +236,7 @@ export async function createDemoUploadRuntime(
   const publisher = new ObjectArtifactPublisher(objects);
   const workspaces = new NodeEphemeralWorkspace(scratchRoot);
   const processing = new DemoUploadProcessingService({
+    activation,
     artifacts: {
       async readNormalizedDocument(artifact) {
         const bytes = await objects.read(
@@ -297,11 +256,7 @@ export async function createDemoUploadRuntime(
       execute(work: DemoUploadProcessingWork) {
         return new IngestionSupervisor({
           clock: { now: () => new Date() },
-          malwareScanner,
-          malwareScanPlacement:
-            processorMode === SERVERLESS_PROCESSOR_MODE
-              ? "isolated-worker"
-              : "trusted-supervisor",
+          malwareScanPlacement: "isolated-worker",
           operations,
           publisher,
           quarantine: new QuarantineStagingAdapter(objects),
@@ -325,7 +280,9 @@ export async function createDemoUploadRuntime(
       processing,
       repository,
     }),
+    localIngestionBridge,
     close: async () => {
+      await localIngestionBridge?.close();
       await processing.close();
       const results = await Promise.allSettled([
         repository.close(),
@@ -425,132 +382,4 @@ function requiredInteger(input: NodeJS.ProcessEnv, name: string): number {
     throw new Error(`${name} is invalid`);
   }
   return parsed;
-}
-
-export class PodmanClamAvProcessRunner implements ProcessRunnerPort {
-  constructor(
-    private readonly configuration: {
-      readonly databaseDirectory: string;
-      readonly imageReference: string;
-    },
-    private readonly runner: ProcessRunnerPort,
-  ) {}
-
-  run(
-    executable: string,
-    args: readonly string[],
-    options: { readonly maxOutputBytes: number; readonly timeoutMs: number },
-  ) {
-    if (executable !== "clamscan" && executable !== "sigtool") {
-      return Promise.resolve(failedProcess());
-    }
-    if (executable === "sigtool") {
-      if (args.length === 1 && args[0] === "--version") {
-        return this.runner.run(
-          "podman",
-          [
-            ...this.#baseArguments(),
-            "--entrypoint=/usr/bin/sigtool",
-            this.configuration.imageReference,
-            "--version",
-          ],
-          options,
-        );
-      }
-      const databasePath = args[1];
-      if (
-        args.length !== 2 ||
-        args[0] !== "--info" ||
-        databasePath === undefined ||
-        path.dirname(databasePath) !== this.configuration.databaseDirectory ||
-        !/^(?:bytecode|daily|main)\.(?:cld|cvd)$/.test(
-          path.basename(databasePath),
-        )
-      ) {
-        return Promise.resolve(failedProcess());
-      }
-      return this.runner.run(
-        "podman",
-        [
-          ...this.#baseArguments(),
-          `--mount=type=bind,src=${this.configuration.databaseDirectory},dst=/database,ro=true,relabel=private`,
-          "--entrypoint=/usr/bin/sigtool",
-          this.configuration.imageReference,
-          "--info",
-          `/database/${path.basename(databasePath)}`,
-        ],
-        options,
-      );
-    }
-    if (args.length === 1 && args[0] === "--version") {
-      return this.runner.run(
-        "podman",
-        [
-          ...this.#baseArguments(),
-          "--entrypoint=/usr/bin/clamscan",
-          this.configuration.imageReference,
-          "--version",
-        ],
-        options,
-      );
-    }
-    const inputPath = args.at(-1);
-    const separatorIndex = args.lastIndexOf("--");
-    if (
-      inputPath === undefined ||
-      !path.isAbsolute(inputPath) ||
-      separatorIndex !== args.length - 2 ||
-      args[0] !== `--database=${this.configuration.databaseDirectory}` ||
-      args[1] !== "--no-summary" ||
-      args[2] !== "--stdout" ||
-      args[3] !== "--infected"
-    ) {
-      return Promise.resolve(failedProcess());
-    }
-    return this.runner.run(
-      "podman",
-      [
-        ...this.#baseArguments(),
-        `--mount=type=bind,src=${this.configuration.databaseDirectory},dst=/database,ro=true,relabel=private`,
-        `--mount=type=bind,src=${path.dirname(inputPath)},dst=/input,ro=true,relabel=private`,
-        "--entrypoint=/usr/bin/clamscan",
-        this.configuration.imageReference,
-        "--database=/database",
-        "--no-summary",
-        "--stdout",
-        "--infected",
-        "--",
-        `/input/${path.basename(inputPath)}`,
-      ],
-      options,
-    );
-  }
-
-  #baseArguments(): readonly string[] {
-    return [
-      "run",
-      "--rm",
-      "--pull=never",
-      "--network=none",
-      "--cap-drop=ALL",
-      "--security-opt=no-new-privileges",
-      "--read-only",
-      "--user=100:101",
-      "--userns=keep-id:uid=100,gid=101",
-      "--pids-limit=64",
-      `--memory=${CLAMAV_SCANNER_MEMORY_BYTES}`,
-      "--cpus=1",
-      "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864",
-    ];
-  }
-}
-
-function failedProcess() {
-  return {
-    exitCode: 127,
-    signal: null,
-    stderr: "",
-    stdout: "",
-    timedOut: false,
-  };
 }

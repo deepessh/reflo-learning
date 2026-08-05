@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { demoUploadPresentation } from "./demo-upload-view";
 
-describe("staff demo upload presentation", () => {
+describe("course upload presentation", () => {
   it("keeps live standard-profile work polling until an outline is ready", () => {
     for (const state of [
       "accepted",
@@ -23,14 +23,14 @@ describe("staff demo upload presentation", () => {
     });
   });
 
-  it("labels OCR and large-document paths separately from the standard target", () => {
+  it("labels OCR and larger-document paths in learner language", () => {
     expect(demoUploadPresentation("ocr_required")).toMatchObject({
-      label: "OCR required",
+      label: "Text recognition needed",
       poll: false,
       tone: "attention",
     });
     expect(demoUploadPresentation("large_document")).toMatchObject({
-      label: "Large-document path",
+      label: "Processing a larger PDF",
       poll: true,
       tone: "attention",
     });
@@ -52,12 +52,9 @@ describe("staff demo upload presentation", () => {
     );
     expect(
       demoUploadPresentation("failed", "source_not_approved").detail,
-    ).toContain("human-approved rights-cleared");
+    ).toContain("does not match");
     expect(
       demoUploadPresentation("failed", "unsupported_type").detail,
-    ).toContain("exact approved PDF");
-    expect(
-      demoUploadPresentation("failed", "unsupported_type").detail,
-    ).toContain("post–Demo Day");
+    ).toContain("matching approved PDF");
   });
 });

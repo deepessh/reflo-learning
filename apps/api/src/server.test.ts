@@ -1,16 +1,28 @@
 import { once } from "node:events";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AccountService, FixedWindowAuthAbuseLimiter } from "@reflo/accounts";
+import { ActivationGenerationError } from "@reflo/activation";
+import { AssessmentError } from "@reflo/assessment";
 import {
   FixedAccountClock,
   InMemoryAccountRepository,
   RecordingEmailPort,
   SequentialAccountIdGenerator,
 } from "@reflo/accounts/testing";
+import type { ConnectedActivationProgress } from "@reflo/db";
 
 import { DemoUploadAccessError } from "./demo-upload";
+import {
+  LOCAL_INGESTION_BRIDGE_PROFILE,
+  LOCAL_INGESTION_BRIDGE_VERSION,
+  LocalIngestionBridgeBroker,
+} from "./local-ingestion-bridge";
 import { createApiServer } from "./server";
 
 const servers: ReturnType<typeof createApiServer>[] = [];
@@ -52,6 +64,153 @@ describe("API health endpoint", () => {
       service: "api",
       status: "ok",
     });
+  });
+});
+
+describe("local ingestion bridge internal API", () => {
+  it("authenticates before reading bodies and streams one lease through completion", async () => {
+    const bearerToken = "server-local-bridge-token-1234567890abcdef";
+    const leaseId = "4".repeat(48);
+    const broker = new LocalIngestionBridgeBroker({
+      bearerToken,
+      expectedProfile: LOCAL_INGESTION_BRIDGE_PROFILE,
+      expectedScannerSnapshotId: `cvd-${"5".repeat(32)}`,
+      expectedWorkerImageDigest: `sha256:${"6".repeat(64)}`,
+      heartbeatTtlMs: 10_000,
+      leaseDurationMs: 10_000,
+      newLeaseId: () => leaseId,
+    });
+    const server = createApiServer(
+      {
+        deployment: "dev",
+        host: "127.0.0.1",
+        port: 0,
+        service: "api",
+      },
+      { localIngestionBridge: broker },
+    );
+    servers.push(server);
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Expected the test server to expose a TCP address");
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const authorization = { authorization: `Bearer ${bearerToken}` };
+
+    const unauthorized = await fetch(
+      `${baseUrl}/internal/v1/local-ingestion/heartbeat`,
+      { body: "not-json", method: "POST" },
+    );
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.get("access-control-allow-origin")).toBeNull();
+
+    const heartbeat = await fetch(
+      `${baseUrl}/internal/v1/local-ingestion/heartbeat`,
+      {
+        body: JSON.stringify({
+          checkedAt: "2026-07-31T12:00:00.000Z",
+          contractVersion: LOCAL_INGESTION_BRIDGE_VERSION,
+          podmanClientVersion: "6.0.1",
+          podmanServerVersion: "6.0.1",
+          profile: LOCAL_INGESTION_BRIDGE_PROFILE,
+          rootless: true,
+          scannerSnapshotId: `cvd-${"5".repeat(32)}`,
+          status: "available",
+          workerImageDigest: `sha256:${"6".repeat(64)}`,
+        }),
+        headers: {
+          ...authorization,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    expect(heartbeat.status).toBe(204);
+
+    const root = await mkdtemp(
+      path.join(tmpdir(), "reflo-bridge-server-test-"),
+    );
+    try {
+      const input = Buffer.from("%PDF-1.7\nserver-stream-test\n");
+      const inputPath = path.join(root, "source");
+      const outputDirectory = path.join(root, "output");
+      await mkdir(outputDirectory, { mode: 0o700 });
+      await writeFile(inputPath, input, { mode: 0o400 });
+      const execution = broker.execute({
+        documentKind: "pdf",
+        inputPath,
+        inputSha256: sha256(input),
+        operationId: "server-bridge-operation",
+        outputDirectory,
+        processingLane: "standard",
+      });
+
+      const leaseResponse = await fetch(
+        `${baseUrl}/internal/v1/local-ingestion/lease`,
+        { headers: authorization, method: "POST" },
+      );
+      expect(leaseResponse.status).toBe(200);
+      expect(leaseResponse.headers.get("cache-control")).toBe("no-store");
+      expect(await leaseResponse.json()).toMatchObject({ leaseId });
+
+      const inputResponse = await fetch(
+        `${baseUrl}/internal/v1/local-ingestion/leases/${leaseId}/input`,
+        { headers: authorization },
+      );
+      expect(inputResponse.status).toBe(200);
+      expect(inputResponse.headers.get("content-type")).toBe("application/pdf");
+      expect(inputResponse.headers.get("x-reflo-input-sha256")).toBe(
+        sha256(input),
+      );
+      expect(Buffer.from(await inputResponse.arrayBuffer())).toEqual(input);
+
+      const output = Buffer.from(
+        JSON.stringify({
+          blocks: [],
+          contractVersion: "normalized-document-v1",
+        }),
+      );
+      const outputResponse = await fetch(
+        `${baseUrl}/internal/v1/local-ingestion/leases/${leaseId}/output`,
+        {
+          body: output,
+          headers: {
+            ...authorization,
+            "content-type": "application/json",
+            "x-reflo-ingestion-contract": LOCAL_INGESTION_BRIDGE_VERSION,
+            "x-reflo-output-sha256": sha256(output),
+          },
+          method: "PUT",
+        },
+      );
+      expect(outputResponse.status).toBe(204);
+
+      const complete = await fetch(
+        `${baseUrl}/internal/v1/local-ingestion/leases/${leaseId}/complete`,
+        {
+          body: JSON.stringify({
+            contractVersion: LOCAL_INGESTION_BRIDGE_VERSION,
+            leaseId,
+            outcome: "success",
+          }),
+          headers: {
+            ...authorization,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      expect(complete.status).toBe(204);
+      await expect(execution).resolves.toEqual({
+        blocks: [],
+        contractVersion: "normalized-document-v1",
+      });
+    } finally {
+      await broker.close();
+      await rm(root, { force: true, recursive: true });
+    }
   });
 });
 
@@ -447,8 +606,7 @@ describe("auth, library, and session-history API", () => {
       });
       expect(invalidMedia.status).toBe(415);
       expect(await invalidMedia.json()).toEqual({
-        detail:
-          "Demo Day uploads accept only an approved digitally generated PDF.",
+        detail: "Uploads accept only an approved digitally generated PDF.",
         error: "unsupported_demo_upload_format",
         supportedMediaType: "application/pdf",
       });
@@ -471,10 +629,15 @@ describe("auth, library, and session-history API", () => {
         },
         status: "created",
       }),
+      getPreference: vi.fn().mockResolvedValue({
+        availableProviders: ["email"],
+        chosenLocalTime: "09:00",
+        provider: "email",
+        timeZone: "UTC",
+      }),
       handleTelegramWebhook: vi.fn().mockResolvedValue([]),
       previewEmail: vi.fn().mockResolvedValue({
         deliveryId: "30000000-0000-4000-8000-000000000043",
-        demoOnly: true,
         expiresAt: "2026-07-25T12:00:00.000Z",
         questions: [],
       }),
@@ -486,6 +649,10 @@ describe("auth, library, and session-history API", () => {
           streak: { current: 2, longest: 4 },
         },
       ]),
+      updatePreference: vi.fn().mockImplementation(async (_auth, value) => ({
+        ...value,
+        availableProviders: ["email"],
+      })),
     };
     const { baseUrl } = await startAccountServer(
       fixture.service,
@@ -495,10 +662,9 @@ describe("auth, library, and session-history API", () => {
     );
     const cookie = await login(baseUrl, fixture.email);
 
-    const dispatch = await fetch(`${baseUrl}/v1/demo/deliveries/dispatch`, {
+    const dispatch = await fetch(`${baseUrl}/v1/deliveries/dispatch`, {
       body: JSON.stringify({
         idempotencyKey: "api/demo-delivery/v1/43",
-        provider: "email",
       }),
       headers: {
         "content-type": "application/json",
@@ -515,23 +681,51 @@ describe("auth, library, and session-history API", () => {
           ownerScopeId: expect.any(String),
         }),
         now: "2030-07-25T09:00:00.000Z",
-        provider: "email",
       }),
     );
 
-    const preview = await fetch(
-      `${baseUrl}/v1/demo/email-quiz?token=signed-token`,
-      {
-        headers: {
-          cookie: cookie.header,
-          origin: "https://app.reflo.example",
-        },
+    const preference = await fetch(`${baseUrl}/v1/delivery-preference`, {
+      headers: {
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
       },
-    );
-    expect(preview.status).toBe(200);
-    expect((await preview.json()).quiz.demoOnly).toBe(true);
+    });
+    expect(preference.status).toBe(200);
+    expect(await preference.json()).toEqual({
+      preference: {
+        availableProviders: ["email"],
+        chosenLocalTime: "09:00",
+        provider: "email",
+        timeZone: "UTC",
+      },
+    });
 
-    const submission = await fetch(`${baseUrl}/v1/demo/email-quiz/submit`, {
+    const updatedPreference = await fetch(`${baseUrl}/v1/delivery-preference`, {
+      body: JSON.stringify({
+        chosenLocalTime: "18:45",
+        provider: "email",
+        timeZone: "America/Los_Angeles",
+      }),
+      headers: {
+        "content-type": "application/json",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+      },
+      method: "POST",
+    });
+    expect(updatedPreference.status).toBe(200);
+
+    const preview = await fetch(`${baseUrl}/v1/email-quiz?token=signed-token`, {
+      headers: {
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+      },
+    });
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).quiz).not.toHaveProperty("demoOnly");
+
+    const submission = await fetch(`${baseUrl}/v1/email-quiz/submit`, {
       body: JSON.stringify({
         answers: [{ answer: "B", deliveryItemId }],
         token: "signed-token",
@@ -734,6 +928,7 @@ describe("auth, library, and session-history API", () => {
     const assessment = {
       gradeReplacement: vi.fn().mockResolvedValue(assessmentResult),
       gradeShortAnswer: vi.fn().mockResolvedValue(assessmentResult),
+      loadPendingFallback: vi.fn().mockResolvedValue(assessmentResult),
     };
     const preflight = {
       check: vi.fn().mockResolvedValue({
@@ -776,11 +971,25 @@ describe("auth, library, and session-history API", () => {
       }),
     };
     const sessions = {
+      completeLesson: vi.fn().mockResolvedValue(true),
       loadSummary: vi.fn().mockResolvedValue({
         courseId: "50000000-0000-4000-8000-000000000002",
         sessionId,
         status: "active",
         summary: { flowB: {} },
+      }),
+      startOrResume: vi.fn().mockResolvedValue({
+        courseId: "50000000-0000-4000-8000-000000000002",
+        plan: {
+          activationStatus: "ready",
+          contractVersion: "course-study-plan-v1",
+          focusConceptId: "40000000-0000-4000-8000-000000000162",
+          nextAction: "review",
+          timeBudgetMinutes: 10,
+        },
+        resumed: false,
+        sessionId,
+        status: "active" as const,
       }),
     };
     const study = {
@@ -816,6 +1025,26 @@ describe("auth, library, and session-history API", () => {
         sourceDocumentId: "90000000-0000-4000-8000-000000000002",
         state: "question",
       }),
+      loadLesson: vi.fn().mockResolvedValue({
+        concept: {
+          chapterId: "30000000-0000-4000-8000-000000000002",
+          conceptId: "40000000-0000-4000-8000-000000000162",
+          conceptName: "Virtual Private Cloud",
+          mastery: "0.16667",
+        },
+        content: "A VPC is an isolated network.",
+        courseId: "50000000-0000-4000-8000-000000000002",
+        kind: "review",
+        lesson: {
+          assetId: "20000000-0000-4000-8000-000000000002",
+          modality: "text",
+          servedAt: "2026-07-24T12:00:00.000Z",
+          sourceSpanCount: 1,
+          strategyTag: "micro-lesson-v1",
+        },
+        sessionId,
+        sourceDocumentId: "90000000-0000-4000-8000-000000000002",
+      }),
     };
     const seed = {
       reset: vi.fn().mockResolvedValue({
@@ -825,11 +1054,12 @@ describe("auth, library, and session-history API", () => {
         sessionId: "70000000-0000-4000-8000-000000000162",
       }),
     };
+    const activation = { schedule: vi.fn() };
     const { baseUrl } = await startAccountServer(
       fixture.service,
       undefined,
       undefined,
-      { assessment, preflight, seed, sessions, study },
+      { activation, assessment, preflight, seed, sessions, study },
     );
 
     const preflightResponse = await fetch(`${baseUrl}/v1/demo/preflight`);
@@ -845,8 +1075,112 @@ describe("auth, library, and session-history API", () => {
       ],
       status: "unavailable",
     });
+    preflight.check.mockResolvedValueOnce({
+      ...(await preflight.check.mock.results[0]!.value),
+      status: "ready",
+    });
+    const studyPreflight = await fetch(
+      `${baseUrl}/v1/preflight?capability=study`,
+    );
+    expect(studyPreflight.status).toBe(200);
+    expect(await studyPreflight.json()).toMatchObject({ status: "ready" });
+    expect(preflight.check).toHaveBeenLastCalledWith(false, "study");
 
     const cookie = await login(baseUrl, fixture.email);
+    const started = await fetch(
+      `${baseUrl}/v1/courses/50000000-0000-4000-8000-000000000002/study-sessions`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(started.status).toBe(201);
+    expect(await started.json()).toMatchObject({
+      session: {
+        courseId: "50000000-0000-4000-8000-000000000002",
+        plan: { nextAction: "review" },
+        sessionId,
+      },
+    });
+    expect(activation.schedule).not.toHaveBeenCalled();
+
+    sessions.startOrResume.mockResolvedValueOnce({
+      courseId: "50000000-0000-4000-8000-000000000002",
+      plan: {
+        activationStatus: "lesson_pending",
+        contractVersion: "course-study-plan-v1",
+        focusConceptId: "40000000-0000-4000-8000-000000000162",
+        nextAction: "prepare_activation",
+        timeBudgetMinutes: 10,
+      },
+      resumed: true,
+      sessionId,
+      status: "active" as const,
+    });
+    const resumedPending = await fetch(
+      `${baseUrl}/v1/courses/50000000-0000-4000-8000-000000000002/study-sessions`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(resumedPending.status).toBe(200);
+    expect(activation.schedule).toHaveBeenCalledWith({
+      authorization: expect.objectContaining({
+        actorId: expect.any(String),
+        ownerScopeId: expect.any(String),
+      }),
+      courseId: "50000000-0000-4000-8000-000000000002",
+    });
+
+    const lesson = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/lesson`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(lesson.status).toBe(200);
+    expect(await lesson.json()).toMatchObject({
+      lesson: { content: "A VPC is an isolated network.", kind: "review" },
+    });
+    const completedLesson = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/lesson/complete`,
+      {
+        body: JSON.stringify({
+          assetId: "20000000-0000-4000-8000-000000000002",
+          conceptId: "40000000-0000-4000-8000-000000000162",
+          idempotencyKey: "course-study-v1/lesson-completed/test",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(completedLesson.status).toBe(200);
+    expect(await completedLesson.json()).toEqual({ completed: true });
+    expect(sessions.completeLesson).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+      sessionId,
+      expect.objectContaining({
+        assetId: "20000000-0000-4000-8000-000000000002",
+        conceptId: "40000000-0000-4000-8000-000000000162",
+      }),
+    );
     const submission = await fetch(
       `${baseUrl}/v1/study-sessions/${sessionId}/answers/short-answer`,
       {
@@ -873,9 +1207,102 @@ describe("auth, library, and session-history API", () => {
         authorization: expect.objectContaining({
           ownerScopeId: expect.any(String),
         }),
+        deadlineMs: 90_000,
         sessionId,
       }),
     );
+    const pendingFallback = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/assessments/pending-fallback`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+    expect(pendingFallback.status).toBe(200);
+    expect(await pendingFallback.json()).toMatchObject({
+      result: { attemptId: assessmentResult.attemptId, status: "replayed" },
+    });
+
+    assessment.gradeReplacement
+      .mockResolvedValueOnce({ ...assessmentResult, status: "created" })
+      .mockResolvedValueOnce(assessmentResult);
+    const replacementRequest = {
+      body: JSON.stringify({
+        answer: "Eligible assessment evidence",
+        bundleId: "81000000-0000-4000-8000-000000000002",
+        idempotencyKey: "web/study/replacement/v1/stable-answer",
+        itemId: "82000000-0000-4000-8000-000000000002",
+      }),
+      headers: {
+        "content-type": "application/json",
+        cookie: cookie.header,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+      },
+      method: "POST",
+    } as const;
+    const replacementCreated = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/answers/replacement`,
+      replacementRequest,
+    );
+    expect(replacementCreated.status).toBe(200);
+    expect(await replacementCreated.json()).toMatchObject({
+      result: { status: "created" },
+    });
+    const replacementReplayed = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/answers/replacement`,
+      replacementRequest,
+    );
+    expect(replacementReplayed.status).toBe(200);
+    expect(await replacementReplayed.json()).toMatchObject({
+      result: { status: "replayed" },
+    });
+    expect(assessment.gradeReplacement).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        answer: "Eligible assessment evidence",
+        bundleId: "81000000-0000-4000-8000-000000000002",
+        idempotencyKey: "web/study/replacement/v1/stable-answer",
+        itemId: "82000000-0000-4000-8000-000000000002",
+        sessionId,
+      }),
+    );
+    expect(assessment.gradeReplacement).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        idempotencyKey: "web/study/replacement/v1/stable-answer",
+        sessionId,
+      }),
+    );
+
+    assessment.gradeShortAnswer.mockRejectedValueOnce(
+      new AssessmentError("projection_unavailable"),
+    );
+    const persistedProjectionFailure = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/answers/short-answer`,
+      {
+        body: JSON.stringify({
+          answer: "A source-grounded answer",
+          idempotencyKey: "demo/assessment/v1/retest-projection-replay",
+          questionId: "60000000-0000-4000-8000-000000000002",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(persistedProjectionFailure.status).toBe(503);
+    expect(await persistedProjectionFailure.json()).toEqual({
+      error: "assessment_projection_unavailable",
+      persisted: true,
+      retryable: true,
+    });
 
     const state = await fetch(
       `${baseUrl}/v1/study-sessions/${sessionId}/state`,
@@ -927,6 +1354,416 @@ describe("auth, library, and session-history API", () => {
     });
     expect(seed.reset).toHaveBeenCalledWith(
       expect.objectContaining({ ownerScopeId: expect.any(String) }),
+    );
+  });
+});
+
+describe("activation progress event stream", () => {
+  const sessionId = "70000000-0000-4000-8000-000000000071";
+
+  it("requires authentication and hides sessions outside the owner scope", async () => {
+    const fixture = createAccountFixture();
+    const loadActivationProgress = vi.fn().mockResolvedValue(null);
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        sessions: {
+          loadActivationProgress,
+          loadSummary: vi.fn(),
+        },
+      },
+    );
+    const url = `${baseUrl}/v1/study-sessions/${sessionId}/activation/events`;
+
+    expect((await fetch(url)).status).toBe(401);
+    expect(loadActivationProgress).not.toHaveBeenCalled();
+
+    const cookie = await login(baseUrl, fixture.email);
+    const unavailable = await fetch(url, {
+      headers: { cookie: cookie.header },
+    });
+    expect(unavailable.status).toBe(404);
+    expect(await unavailable.json()).toEqual({
+      error: "study_session_not_found",
+    });
+    expect(loadActivationProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: expect.any(String),
+        ownerScopeId: expect.any(String),
+      }),
+      sessionId,
+    );
+  });
+
+  it("streams processing and retry changes before closing on readiness", async () => {
+    const fixture = createAccountFixture();
+    const loadActivationProgress = vi
+      .fn()
+      .mockResolvedValueOnce(
+        activationSnapshot({
+          activationStatus: "pending",
+          attemptCount: 1,
+          stage: "generating",
+          updatedAt: "2026-08-01T12:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        activationSnapshot({
+          activationStatus: "retrying",
+          attemptCount: 1,
+          stage: "retry_scheduled",
+          updatedAt: "2026-08-01T12:00:01.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        activationSnapshot({
+          activationStatus: "ready",
+          attemptCount: 2,
+          nextAction: "open_lesson",
+          stage: "ready",
+          updatedAt: "2026-08-01T12:00:02.000Z",
+        }),
+      );
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        activationStream: {
+          heartbeatIntervalMs: 100,
+          maxConnectionMs: 500,
+          pollIntervalMs: 5,
+          retryAfterMs: 250,
+        },
+        sessions: {
+          loadActivationProgress,
+          loadSummary: vi.fn(),
+        },
+      },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const response = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/activation/events`,
+      {
+        headers: {
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/event-stream; charset=utf-8",
+    );
+    expect(response.headers.get("cache-control")).toBe(
+      "no-cache, no-store, no-transform",
+    );
+    expect(response.headers.get("x-accel-buffering")).toBe("no");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "https://app.reflo.example",
+    );
+    expect(response.headers.get("access-control-allow-credentials")).toBe(
+      "true",
+    );
+    const body = await response.text();
+    expect(body).toContain("retry: 250");
+    expect(body.match(/event: activation/g)).toHaveLength(3);
+    expect(body).toContain('"stage":"generating"');
+    expect(body).toContain('"stage":"retry_scheduled"');
+    expect(body).toContain('"nextAction":"open_lesson"');
+    expect(loadActivationProgress).toHaveBeenCalledTimes(3);
+  });
+
+  it("emits a safe terminal failure and closes immediately", async () => {
+    const fixture = createAccountFixture();
+    const loadActivationProgress = vi.fn().mockResolvedValue(
+      activationSnapshot({
+        activationStatus: "failed",
+        attemptCount: 5,
+        failure: {
+          code: "generation_timed_out",
+          message: "Lesson preparation took too long to finish.",
+        },
+        nextAction: "activation_failed",
+        stage: "failed",
+      }),
+    );
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        sessions: {
+          loadActivationProgress,
+          loadSummary: vi.fn(),
+        },
+      },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const response = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/activation/events`,
+      { headers: { cookie: cookie.header } },
+    );
+    const body = await response.text();
+
+    expect(body.match(/event: activation/g)).toHaveLength(1);
+    expect(body).toContain('"code":"generation_timed_out"');
+    expect(body).not.toContain("provider");
+    expect(loadActivationProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops polling when the browser disconnects", async () => {
+    const fixture = createAccountFixture();
+    const loadActivationProgress = vi.fn().mockResolvedValue(
+      activationSnapshot({
+        activationStatus: "pending",
+        stage: "generating",
+      }),
+    );
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        activationStream: {
+          heartbeatIntervalMs: 500,
+          maxConnectionMs: 1_000,
+          pollIntervalMs: 5,
+          retryAfterMs: 250,
+        },
+        sessions: {
+          loadActivationProgress,
+          loadSummary: vi.fn(),
+        },
+      },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const response = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/activation/events`,
+      { headers: { cookie: cookie.header } },
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const callsAfterDisconnect = loadActivationProgress.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(loadActivationProgress).toHaveBeenCalledTimes(callsAfterDisconnect);
+  });
+
+  it("sends heartbeats and a reconnect instruction at the bounded timeout", async () => {
+    const fixture = createAccountFixture();
+    const loadActivationProgress = vi
+      .fn()
+      .mockResolvedValue(activationSnapshot({ activationStatus: "pending" }));
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        activationStream: {
+          heartbeatIntervalMs: 5,
+          maxConnectionMs: 15,
+          pollIntervalMs: 5,
+          retryAfterMs: 250,
+        },
+        sessions: {
+          loadActivationProgress,
+          loadSummary: vi.fn(),
+        },
+      },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const response = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/activation/events`,
+      { headers: { cookie: cookie.header } },
+    );
+    const body = await response.text();
+
+    expect(body).toContain("event: heartbeat");
+    expect(body).toContain("event: reconnect");
+    expect(body).toContain('"retryAfterMs":250');
+  });
+});
+
+describe("lesson regeneration endpoint", () => {
+  const sessionId = "71000000-0000-4000-8000-000000000071";
+  const courseId = "71000000-0000-4000-8000-000000000072";
+  const requestId = "71000000-0000-4000-8000-000000000073";
+
+  it("requires CSRF and forwards one owner-scoped idempotent request", async () => {
+    const fixture = createAccountFixture();
+    const regenerateLesson = vi.fn().mockResolvedValue({
+      operation: {
+        attemptCount: 0,
+        id: "71000000-0000-4000-8000-000000000074",
+        regenerationOrdinal: 1,
+        status: "queued",
+      },
+      replayed: false,
+    });
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        sessions: {
+          loadSummary: vi.fn(),
+          regenerateLesson,
+        },
+      },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const url = `${baseUrl}/v1/study-sessions/${sessionId}/activation/regenerate`;
+    const preflight = await fetch(url, {
+      headers: {
+        "access-control-request-headers":
+          "content-type,idempotency-key,x-reflo-csrf",
+        "access-control-request-method": "POST",
+        origin: "https://app.reflo.example",
+      },
+      method: "OPTIONS",
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-headers")).toContain(
+      "idempotency-key",
+    );
+    const denied = await fetch(url, {
+      body: JSON.stringify({ courseId }),
+      headers: {
+        "content-type": "application/json",
+        cookie: cookie.header,
+        "idempotency-key": requestId,
+        origin: "https://app.reflo.example",
+      },
+      method: "POST",
+    });
+    expect(denied.status).toBe(403);
+
+    const accepted = await fetch(url, {
+      body: JSON.stringify({ courseId }),
+      headers: {
+        "content-type": "application/json",
+        cookie: cookie.header,
+        "idempotency-key": requestId,
+        origin: "https://app.reflo.example",
+        "x-reflo-csrf": cookie.csrf,
+      },
+      method: "POST",
+    });
+    expect(accepted.status).toBe(202);
+    expect(await accepted.json()).toEqual({
+      regeneration: {
+        attemptCount: 0,
+        maxAttempts: 5,
+        operationId: "71000000-0000-4000-8000-000000000074",
+        regenerationOrdinal: 1,
+        replayed: false,
+        status: "queued",
+      },
+    });
+    expect(regenerateLesson).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+      sessionId,
+      courseId,
+      requestId,
+    );
+  });
+
+  it("returns bounded cooldown and scope-denial responses", async () => {
+    const fixture = createAccountFixture();
+    const retryAt = new Date(Date.now() + 30_000);
+    const regenerateLesson = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ActivationGenerationError("regeneration_cooldown", undefined, {
+          retryAt,
+        }),
+      )
+      .mockRejectedValueOnce(
+        new ActivationGenerationError("authorization_denied"),
+      );
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      { sessions: { loadSummary: vi.fn(), regenerateLesson } },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const request = () =>
+      fetch(`${baseUrl}/v1/study-sessions/${sessionId}/activation/regenerate`, {
+        body: JSON.stringify({ courseId }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          "idempotency-key": requestId,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      });
+    const cooldown = await request();
+    expect(cooldown.status).toBe(429);
+    expect(Number(cooldown.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await cooldown.json()).toMatchObject({
+      error: "regeneration_cooldown",
+    });
+    expect((await request()).status).toBe(404);
+  });
+});
+
+describe("assessment regeneration endpoint", () => {
+  it("forwards the typed assessment kind with owner scope and idempotency", async () => {
+    const fixture = createAccountFixture();
+    const regenerateAssessment = vi.fn().mockResolvedValue({
+      operation: {
+        attemptCount: 0,
+        id: "72000000-0000-4000-8000-000000000074",
+        regenerationOrdinal: 1,
+        status: "queued",
+      },
+      replayed: false,
+    });
+    const { baseUrl } = await startAccountServer(
+      fixture.service,
+      undefined,
+      undefined,
+      {
+        sessions: { loadSummary: vi.fn(), regenerateAssessment },
+      },
+    );
+    const cookie = await login(baseUrl, fixture.email);
+    const sessionId = "72000000-0000-4000-8000-000000000071";
+    const courseId = "72000000-0000-4000-8000-000000000072";
+    const requestId = "72000000-0000-4000-8000-000000000073";
+    const response = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/assessments/chapter_quiz/regenerate`,
+      {
+        body: JSON.stringify({ courseId }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          "idempotency-key": requestId,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({
+      regeneration: { artifactKind: "chapter_quiz", maxAttempts: 5 },
+    });
+    expect(regenerateAssessment).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerScopeId: expect.any(String) }),
+      sessionId,
+      courseId,
+      "chapter_quiz",
+      requestId,
     );
   });
 });
@@ -1008,4 +1845,26 @@ async function login(baseUrl: string, email: RecordingEmailPort) {
     csrf,
     header: cookies.map((value) => value.split(";", 1)[0]).join("; "),
   };
+}
+
+function activationSnapshot(
+  overrides: Partial<ConnectedActivationProgress> = {},
+): ConnectedActivationProgress {
+  return {
+    activationStatus: "pending",
+    artifact: "first_text_lesson",
+    assessmentStatus: "pending",
+    attemptCount: 0,
+    contractVersion: "activation-progress-v1",
+    failure: null,
+    maxAttempts: 5,
+    nextAction: "wait",
+    stage: "awaiting_generation",
+    updatedAt: "2026-08-01T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function sha256(value: Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
 }

@@ -10,6 +10,15 @@ import type {
   TutorArtifactStorePort,
   TutorConceptSnapshot,
 } from "@reflo/tutor-agent";
+import type { ConnectedStudyLessonAssets } from "@reflo/db";
+
+interface ConnectedLessonAssetPort {
+  loadStudyLessonAssets(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+    conceptId: string,
+  ): Promise<ConnectedStudyLessonAssets | null>;
+}
 
 export class ConnectedStudyService {
   constructor(
@@ -18,6 +27,7 @@ export class ConnectedStudyService {
       TutorArtifactStorePort,
       "readAuthorizedText"
     >,
+    private readonly lessonAssets?: ConnectedLessonAssetPort,
   ) {}
 
   async load(
@@ -103,6 +113,85 @@ export class ConnectedStudyService {
       state,
     };
   }
+
+  async loadLesson(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<Readonly<Record<string, unknown>> | null> {
+    const session = await this.repository.loadSession(authorization, sessionId);
+    if (session === null) {
+      return null;
+    }
+    const concept = activeConcept(session.concepts);
+    const selectedLesson =
+      concept?.reteachLessons.at(-1) ?? concept?.lesson ?? null;
+    if (concept === null || selectedLesson === null) {
+      return null;
+    }
+    const assets = await this.lessonAssets?.loadStudyLessonAssets(
+      authorization,
+      sessionId,
+      concept.conceptId,
+    );
+    if (this.lessonAssets !== undefined && assets === null) {
+      return null;
+    }
+    const textLesson =
+      assets?.text ??
+      (selectedLesson.modality === "text"
+        ? {
+            assetId: selectedLesson.assetId,
+            contentHash: selectedLesson.contentHash,
+            objectKey: selectedLesson.objectKey,
+            servedAt: selectedLesson.servedAt,
+            strategyTag: selectedLesson.strategyTag,
+          }
+        : null);
+    if (textLesson === null) {
+      return null;
+    }
+    const content = await this.artifacts.readAuthorizedText({
+      authorization,
+      lesson: { ...textLesson, modality: "text" },
+    });
+    if (content === null || sha256(content) !== textLesson.contentHash) {
+      return null;
+    }
+    const presented = assets?.media ?? {
+      assetId: textLesson.assetId,
+      modality: "text" as const,
+      status: "ready" as const,
+    };
+    return {
+      concept: {
+        chapterId: concept.chapterId,
+        conceptId: concept.conceptId,
+        conceptName: concept.conceptName,
+        mastery: concept.mastery,
+      },
+      content,
+      courseId: session.courseId,
+      kind:
+        concept.reteachLessons.at(-1)?.assetId === textLesson.assetId
+          ? "reteach"
+          : concept.dueForReview
+            ? "review"
+            : "advance",
+      lesson: {
+        assetId: presented.assetId,
+        media:
+          presented.modality === "text"
+            ? null
+            : { delivery: null, status: presented.status },
+        modality: presented.modality,
+        servedAt: textLesson.servedAt,
+        sourceSpanCount: concept.sourceSpans.length,
+        strategyTag: textLesson.strategyTag,
+      },
+      sessionId: session.sessionId,
+      sourceDocumentId: session.sourceDocumentId,
+    };
+  }
 }
 
 function activeConcept(
@@ -111,7 +200,15 @@ function activeConcept(
   return (
     concepts.find((concept) => concept.loopResult !== null) ??
     concepts.find((concept) => concept.reteachLessons.length > 0) ??
+    concepts.find((concept) => concept.dueForReview) ??
+    concepts.find(
+      (concept) =>
+        concept.latestEligibleAttempt !== null &&
+        concept.latestEligibleAttempt.rubricBand !== "correct",
+    ) ??
+    concepts.find((concept) => concept.latestLessonExposureAt === null) ??
     concepts.find((concept) => concept.eligibleAttemptCount > 0) ??
+    concepts.find((concept) => concept.loopResult === null) ??
     null
   );
 }

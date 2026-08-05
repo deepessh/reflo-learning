@@ -41,7 +41,8 @@ async function main(): Promise<void> {
       `${record.recordVersion}: passed`,
       `runs=${record.runCount}`,
       `failures=${record.observedFailureCount}`,
-      `p95Ms=${record.duration.p95Ms}`,
+      `maximumMs=${record.duration.maximumMs}`,
+      "qualificationClaims=false",
       `record=${record.recordDigest}`,
     ].join(" "),
   );

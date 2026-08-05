@@ -512,12 +512,14 @@ function safeBaseUrl(value: string): URL {
   } catch {
     throw new Error("REFLO_LITELLM_BASE_URL is invalid");
   }
-  const loopback =
+  const developmentLocalGateway =
     url.hostname === "127.0.0.1" ||
     url.hostname === "localhost" ||
-    url.hostname === "[::1]";
+    url.hostname === "[::1]" ||
+    url.hostname === "host.docker.internal";
   if (
-    (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    (url.protocol !== "https:" &&
+      !(url.protocol === "http:" && developmentLocalGateway)) ||
     url.username !== "" ||
     url.password !== "" ||
     url.pathname !== "/" ||

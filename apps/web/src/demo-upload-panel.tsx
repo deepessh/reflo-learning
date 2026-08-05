@@ -126,12 +126,12 @@ export function DemoUploadPanel({
     setLocalError(null);
     setOutline(null);
     if (approval === undefined || file === null) {
-      setLocalError("Choose an approved source and its exact local artifact.");
+      setLocalError("Choose an approved source and the matching PDF file.");
       return;
     }
     if (!isDemoPdfSelection(file)) {
       setLocalError(
-        "Choose the exact approved PDF artifact within the 50 MB limit. EPUB and DOCX are post–Demo Day.",
+        "Choose the matching approved PDF within the 50 MB limit. Other file types are not supported yet.",
       );
       return;
     }
@@ -161,8 +161,8 @@ export function DemoUploadPanel({
         response?.status === 413
           ? "The selected file exceeds the 50 MB product maximum."
           : response?.status === 415
-            ? "Demo Day uploads accept only the approved digitally generated PDF. EPUB and DOCX are post–Demo Day."
-            : "The upload was not accepted. No successful outcome was recorded.",
+            ? "Course setup currently accepts only the matching approved PDF."
+            : "The upload was not accepted. Check the file and try again.",
       );
       return;
     }
@@ -183,33 +183,35 @@ export function DemoUploadPanel({
     >
       <div className="panel-heading demo-upload-heading">
         <div>
-          <p className="eyebrow">Staff operator · separate SLO proof</p>
-          <h2 id="demo-upload-title">Approved PDF to course outline</h2>
+          <p className="eyebrow">Course setup</p>
+          <h2 id="demo-upload-title">Build a course from a PDF</h2>
           <p>
-            This surface accepts only the configured, human-approved PDF. EPUB
-            and DOCX are post–Demo Day. It demonstrates upload to outline;
-            lessons, quizzes, and media generate separately.
+            Choose an approved source and the matching PDF. Reflo will validate
+            it and build a source-backed course outline; lessons, quizzes, and
+            audio may continue preparing afterward.
           </p>
         </div>
-        <span className="demo-boundary">No public or learner uploads</span>
+        <span className="source-boundary">Approved sources only</span>
       </div>
 
       {approvalScreen === "loading" ? (
-        <p className="upload-loading">Loading approved demo sources…</p>
+        <p className="upload-loading" role="status">
+          Loading approved sources…
+        </p>
       ) : null}
       {approvalScreen === "error" ? (
         <div className="upload-state tone-negative">
-          <strong>Operator upload unavailable</strong>
+          <strong>Course setup is temporarily unavailable</strong>
           <p>
-            The approved-source dependency could not be verified. No upload is
-            enabled.
+            Approved sources could not be loaded. Your existing courses are
+            unaffected.
           </p>
           <button
             className="secondary-button"
             onClick={() => void loadApprovals()}
             type="button"
           >
-            Retry approval check
+            Try again
           </button>
         </div>
       ) : null}
@@ -217,8 +219,7 @@ export function DemoUploadPanel({
         <div className="upload-state tone-attention">
           <strong>No approved sources configured</strong>
           <p>
-            Upload stays disabled until a human-approved rights record is
-            available.
+            Course setup becomes available when an approved source is added.
           </p>
         </div>
       ) : null}
@@ -249,9 +250,7 @@ export function DemoUploadPanel({
                 {approval.extension.toUpperCase()}
               </p>
             )}
-            <label htmlFor="demo-source-file">
-              Exact approved PDF artifact
-            </label>
+            <label htmlFor="demo-source-file">Matching PDF file</label>
             <input
               accept={DEMO_UPLOAD_FILE_ACCEPT}
               id="demo-source-file"
@@ -289,7 +288,7 @@ export function DemoUploadPanel({
           {outline === null ? null : (
             <div className="uploaded-outline">
               <div>
-                <p className="eyebrow">Owner-scoped generated outline</p>
+                <p className="eyebrow">Course outline</p>
                 <h3>{outline.title}</h3>
               </div>
               <ol>

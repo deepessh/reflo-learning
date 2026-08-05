@@ -1,5 +1,6 @@
 import type { DeliveryMessage } from "../contracts.js";
 import { DeliveryError } from "../errors.js";
+import { REVIEW_MESSAGE_COPY } from "../experience.js";
 import type { DemoMessagePort } from "../ports.js";
 
 export interface TelegramAdapterConfig {
@@ -44,7 +45,7 @@ export class TelegramDemoMessageAdapter implements DemoMessagePort {
         ),
       },
       text: [
-        "Staff-controlled Reflo demo only",
+        REVIEW_MESSAGE_COPY.telegramHeading,
         ...message.questions.map(
           (question, index) =>
             `${index + 1}. ${question.prompt}\n${question.responseOptions

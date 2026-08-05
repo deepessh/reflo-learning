@@ -24,17 +24,27 @@ describe("Flow B repeated rehearsal evidence", () => {
 
     expect(record).toMatchObject({
       assertionVersion: FLOW_B_ASSERTION_VERSION,
+      claims: {
+        capacity: false,
+        causalLearning: false,
+        certification: false,
+        p95: false,
+        pilot: false,
+        productionReadiness: false,
+        releaseGate: false,
+        retention: false,
+        securityQualification: false,
+      },
       duration: {
         maximumMs: 4_900,
         medianMs: 4_400,
         minimumMs: 4_000,
-        p95Ms: 4_900,
       },
       fixes: [],
       observedFailureCount: 0,
-      productionReliabilityClaimed: false,
       recordVersion: FLOW_B_REHEARSAL_RECORD_VERSION,
       runCount: 10,
+      targetProfile: "development-fixture-v1",
       tenConsecutiveRunsCompleted: true,
     });
     expect(record.recordDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -63,7 +73,7 @@ describe("Flow B repeated rehearsal evidence", () => {
         ...runs.slice(0, 9),
         runFixture(9, FLOW_B_REHEARSAL_MAX_DURATION_MS + 1),
       ]),
-    ).toThrow("flow_b_rehearsal_record_invalid");
+    ).toThrow("flow_b_run_record_invalid");
   });
 
   it("rejects duplicate or overlapping run evidence and changed aggregates", () => {
@@ -85,7 +95,7 @@ describe("Flow B repeated rehearsal evidence", () => {
     expect(() =>
       assertFlowBRehearsalRecord({
         ...record,
-        duration: { ...record.duration, p95Ms: record.duration.p95Ms - 1 },
+        claims: { ...record.claims, p95: true as false },
       }),
     ).toThrow("flow_b_rehearsal_record_invalid");
   });
@@ -185,6 +195,7 @@ function unsignedRun(
     },
     runId: `demo-${uniqueHex.padStart(32, "0")}`,
     startedAt,
+    targetProfile: "development-fixture-v1" as const,
     targetOriginDigest: `sha256:${"5".repeat(64)}`,
     trace: {
       allowlistValidated: true as const,

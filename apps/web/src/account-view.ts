@@ -19,16 +19,23 @@ export interface ReadinessPresentation {
   readonly value: string;
 }
 
+export interface SessionSummaryPresentation {
+  readonly detail: string;
+  readonly reviewedConceptCount: number;
+  readonly statusLabel: string;
+  readonly successfulReviewCount: number;
+}
+
 export function courseProgress(course: LibraryCourse): {
   readonly label: string;
-  readonly percent: number;
+  readonly percent: number | null;
   readonly tone: "active" | "danger" | "ready" | "waiting";
 } {
   if (course.courseStatus === "failed" || course.sourceStatus === "failed") {
     return { label: "Needs attention", percent: 0, tone: "danger" };
   }
   if (course.sourceStatus === "ocr_required") {
-    return { label: "OCR queued", percent: 10, tone: "waiting" };
+    return { label: "OCR queued", percent: null, tone: "waiting" };
   }
   if (course.courseStatus === "ready") {
     return { label: "Ready to study", percent: 100, tone: "ready" };
@@ -36,13 +43,12 @@ export function courseProgress(course: LibraryCourse): {
   if (course.chapterCount === 0) {
     return {
       label: ingestionLabel(course.sourceStatus),
-      percent: 18,
+      percent: null,
       tone: "waiting",
     };
   }
-  const percent = Math.max(
-    22,
-    Math.round((course.chaptersReady / course.chapterCount) * 100),
+  const percent = Math.round(
+    (course.chaptersReady / course.chapterCount) * 100,
   );
   return {
     label: `${course.chaptersReady} of ${course.chapterCount} chapters ready`,
@@ -59,6 +65,50 @@ export function sessionDuration(session: SessionHistoryItem): string {
     new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime();
   const minutes = Math.max(1, Math.round(milliseconds / 60_000));
   return `${minutes} min`;
+}
+
+export function sessionSummaryPresentation(
+  session: SessionHistoryItem,
+): SessionSummaryPresentation {
+  const flowResults = objectValues(objectField(session.summary, "flowB"));
+  const reviewedConceptCount =
+    flowResults.length > 0
+      ? flowResults.length
+      : (nonNegativeIntegerField(session.summary, "conceptsReviewed") ?? 0);
+  const successfulReviewCount = flowResults.filter((result) => {
+    const outcome = stringField(result, "outcome");
+    const delta = stringField(result, "masteryDelta");
+    return outcome === "retest_succeeded" || Number(delta) > 0;
+  }).length;
+
+  if (session.status === "active") {
+    return {
+      detail: "Your completed activities and answers are saved.",
+      reviewedConceptCount,
+      statusLabel: "In progress",
+      successfulReviewCount,
+    };
+  }
+  if (session.status === "abandoned") {
+    return {
+      detail:
+        reviewedConceptCount > 0
+          ? conceptSummary(reviewedConceptCount, successfulReviewCount)
+          : "This session ended before an activity was completed.",
+      reviewedConceptCount,
+      statusLabel: "Ended early",
+      successfulReviewCount,
+    };
+  }
+  return {
+    detail:
+      reviewedConceptCount > 0
+        ? conceptSummary(reviewedConceptCount, successfulReviewCount)
+        : "Your completed work is saved in this course.",
+    reviewedConceptCount,
+    statusLabel: "Completed",
+    successfulReviewCount,
+  };
 }
 
 export function conceptProgressPresentation(
@@ -166,6 +216,53 @@ function ingestionLabel(status: LibraryCourse["sourceStatus"]): string {
     case "failed":
       return "Needs attention";
   }
+}
+
+function conceptSummary(reviewed: number, successful: number): string {
+  const reviewedCopy = `${reviewed} concept${reviewed === 1 ? "" : "s"} reviewed`;
+  if (successful === 0) {
+    return `${reviewedCopy}. Your next session will build on this work.`;
+  }
+  return `${reviewedCopy} · ${successful} strengthened after a follow-up check.`;
+}
+
+function objectField(
+  value: Readonly<Record<string, unknown>> | null,
+  name: string,
+): Readonly<Record<string, unknown>> | null {
+  const field = value?.[name];
+  return field !== null && typeof field === "object" && !Array.isArray(field)
+    ? (field as Readonly<Record<string, unknown>>)
+    : null;
+}
+
+function objectValues(
+  value: Readonly<Record<string, unknown>> | null,
+): readonly Readonly<Record<string, unknown>>[] {
+  return value === null
+    ? []
+    : Object.values(value).filter(
+        (entry): entry is Readonly<Record<string, unknown>> =>
+          entry !== null && typeof entry === "object" && !Array.isArray(entry),
+      );
+}
+
+function nonNegativeIntegerField(
+  value: Readonly<Record<string, unknown>> | null,
+  name: string,
+): number | null {
+  const field = value?.[name];
+  return typeof field === "number" && Number.isSafeInteger(field) && field >= 0
+    ? field
+    : null;
+}
+
+function stringField(
+  value: Readonly<Record<string, unknown>>,
+  name: string,
+): string | null {
+  const field = value[name];
+  return typeof field === "string" ? field : null;
 }
 
 function exactPercent(value: string): string {

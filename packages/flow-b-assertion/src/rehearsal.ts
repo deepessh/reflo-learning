@@ -2,34 +2,45 @@ import { createHash } from "node:crypto";
 
 import {
   FLOW_B_ASSERTION_VERSION,
+  FLOW_B_MAX_DURATION_MS,
   type FlowBRunRecord,
   assertFlowBRunRecord,
 } from "./contracts.js";
 
 export const FLOW_B_REHEARSAL_RECORD_VERSION =
-  "flow-b-rehearsal-record-v1" as const;
+  "flow-b-rehearsal-record-v2" as const;
 export const FLOW_B_REHEARSAL_RUN_COUNT = 10 as const;
-export const FLOW_B_REHEARSAL_MAX_DURATION_MS = 6 * 60 * 1_000;
+export const FLOW_B_REHEARSAL_MAX_DURATION_MS = FLOW_B_MAX_DURATION_MS;
 
 export interface FlowBRehearsalRecord {
   readonly assertionVersion: typeof FLOW_B_ASSERTION_VERSION;
+  readonly claims: {
+    readonly capacity: false;
+    readonly causalLearning: false;
+    readonly certification: false;
+    readonly p95: false;
+    readonly pilot: false;
+    readonly productionReadiness: false;
+    readonly releaseGate: false;
+    readonly retention: false;
+    readonly securityQualification: false;
+  };
   readonly completedAt: string;
   readonly dependencyVersions: FlowBRunRecord["dependencyPreflight"]["versions"];
   readonly duration: {
     readonly maximumMs: number;
     readonly medianMs: number;
     readonly minimumMs: number;
-    readonly p95Ms: number;
   };
   readonly fixes: readonly [];
   readonly mode: FlowBRunRecord["mode"];
   readonly observedFailureCount: 0;
-  readonly productionReliabilityClaimed: false;
   readonly recordDigest: string;
   readonly recordVersion: typeof FLOW_B_REHEARSAL_RECORD_VERSION;
   readonly runCount: typeof FLOW_B_REHEARSAL_RUN_COUNT;
   readonly runs: readonly FlowBRehearsalRun[];
   readonly startedAt: string;
+  readonly targetProfile: FlowBRunRecord["targetProfile"];
   readonly targetOriginDigest: string;
   readonly tenConsecutiveRunsCompleted: true;
   readonly versions: FlowBRunRecord["versions"];
@@ -62,22 +73,32 @@ export function finalizeFlowBRehearsalRecord(
   const durations = runs.map((run) => run.durationMs).sort((a, b) => a - b);
   const unsigned: Omit<FlowBRehearsalRecord, "recordDigest"> = {
     assertionVersion: FLOW_B_ASSERTION_VERSION,
+    claims: {
+      capacity: false,
+      causalLearning: false,
+      certification: false,
+      p95: false,
+      pilot: false,
+      productionReadiness: false,
+      releaseGate: false,
+      retention: false,
+      securityQualification: false,
+    },
     completedAt: requiredRun(runs.at(-1)).completedAt,
     dependencyVersions: first.dependencyPreflight.versions,
     duration: {
       maximumMs: requiredNumber(durations.at(-1)),
       medianMs: nearestRank(durations, 0.5),
       minimumMs: requiredNumber(durations[0]),
-      p95Ms: nearestRank(durations, 0.95),
     },
     fixes: [],
     mode: first.mode,
     observedFailureCount: 0,
-    productionReliabilityClaimed: false,
     recordVersion: FLOW_B_REHEARSAL_RECORD_VERSION,
     runCount: FLOW_B_REHEARSAL_RUN_COUNT,
     runs,
     startedAt: requiredRun(runs[0]).startedAt,
+    targetProfile: first.targetProfile,
     targetOriginDigest: first.targetOriginDigest,
     tenConsecutiveRunsCompleted: true,
     versions: first.versions,
@@ -127,14 +148,26 @@ export function assertFlowBRehearsalRecord(
     completedAt < startedAt ||
     record.startedAt !== requiredRun(record.runs[0]).startedAt ||
     record.completedAt !== requiredRun(record.runs.at(-1)).completedAt ||
+    (record.targetProfile !== "development-fixture-v1" &&
+      record.targetProfile !== "operator-hosted-connected-demo-v1") ||
     record.tenConsecutiveRunsCompleted !== true ||
     record.observedFailureCount !== 0 ||
     record.fixes.length !== 0 ||
-    record.productionReliabilityClaimed !== false ||
+    canonicalJson(record.claims) !==
+      canonicalJson({
+        capacity: false,
+        causalLearning: false,
+        certification: false,
+        p95: false,
+        pilot: false,
+        productionReadiness: false,
+        releaseGate: false,
+        retention: false,
+        securityQualification: false,
+      }) ||
     record.duration.minimumMs !== requiredNumber(durations[0]) ||
     record.duration.maximumMs !== requiredNumber(durations.at(-1)) ||
     record.duration.medianMs !== nearestRank(durations, 0.5) ||
-    record.duration.p95Ms !== nearestRank(durations, 0.95) ||
     record.duration.maximumMs > FLOW_B_REHEARSAL_MAX_DURATION_MS ||
     !sequential
   ) {
@@ -157,6 +190,7 @@ export function verifyFlowBRehearsalSources(
     assertFlowBRunRecord(run);
     if (
       run.mode !== record.mode ||
+      run.targetProfile !== record.targetProfile ||
       run.targetOriginDigest !== record.targetOriginDigest ||
       canonicalJson(run.dependencyPreflight.versions) !==
         canonicalJson(record.dependencyVersions) ||

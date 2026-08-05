@@ -3,6 +3,7 @@ import path from "node:path";
 
 export const FLOW_B_ASSERTION_VERSION = "flow-b-browser-assertion-v1" as const;
 export const FLOW_B_RUN_RECORD_VERSION = "flow-b-run-record-v1" as const;
+export const FLOW_B_MAX_DURATION_MS = 6 * 60 * 1_000;
 export const FLOW_B_CORE_TRACE_FIELDS = [
   "attemptCount",
   "durationMs",
@@ -60,6 +61,8 @@ export interface FlowBAssertionConfig {
   readonly mode: "authorized-connected" | "development-connected";
   readonly retestResponse: string;
   readonly runId: string;
+  readonly targetProfile:
+    "development-fixture-v1" | "operator-hosted-connected-demo-v1";
   readonly timeoutMs: number;
   readonly traceProbeUrl: URL;
 }
@@ -120,6 +123,7 @@ export interface FlowBRunRecord {
   };
   readonly runId: string;
   readonly startedAt: string;
+  readonly targetProfile: FlowBAssertionConfig["targetProfile"];
   readonly targetOriginDigest: string;
   readonly trace: {
     readonly allowlistValidated: true;
@@ -191,6 +195,13 @@ export function readFlowBAssertionConfig(
   ) {
     throw new Error("Development Flow B targets must use loopback");
   }
+  const targetProfile = required(input, "REFLO_FLOW_B_TARGET_PROFILE");
+  if (
+    targetProfile !== "development-fixture-v1" &&
+    targetProfile !== "operator-hosted-connected-demo-v1"
+  ) {
+    throw new Error("REFLO_FLOW_B_TARGET_PROFILE is invalid");
+  }
   const timeoutMs = Number(input.REFLO_FLOW_B_TIMEOUT_MS ?? "45000");
   if (
     !Number.isSafeInteger(timeoutMs) ||
@@ -243,6 +254,7 @@ export function readFlowBAssertionConfig(
       required(input, "REFLO_FLOW_B_RETEST_RESPONSE"),
     ),
     runId,
+    targetProfile,
     timeoutMs,
     traceProbeUrl,
   };
@@ -300,12 +312,14 @@ export function assertFlowBRunRecord(record: FlowBRunRecord): FlowBRunRecord {
     !DIGEST.test(record.evidence.retestAttemptDigest) ||
     !DIGEST.test(record.lesson.strategyDigest) ||
     !RUN_ID.test(record.runId) ||
+    (record.targetProfile !== "development-fixture-v1" &&
+      record.targetProfile !== "operator-hosted-connected-demo-v1") ||
     !Number.isFinite(startedAt) ||
     !Number.isFinite(completedAt) ||
     completedAt < startedAt ||
     record.durationMs !== completedAt - startedAt ||
     record.durationMs < 0 ||
-    record.durationMs > 900_000 ||
+    record.durationMs > FLOW_B_MAX_DURATION_MS ||
     record.dependencyPreflight.contractVersion !==
       "connected-demo-preflight-v1" ||
     canonicalJson(record.dependencyPreflight.attempts) !==

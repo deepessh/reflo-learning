@@ -10,7 +10,11 @@ import type {
   GenerationFailure,
   GenerationOperationView,
   GenerationWork,
+  ActivationRegenerationRegistration,
+  LessonRegenerationRegistration,
   PlannedGenerationOperation,
+  RegenerateArtifactCommand,
+  RegenerateLessonCommand,
   TextArtifactWriteResult,
 } from "./contracts.js";
 import type {
@@ -23,6 +27,7 @@ export class InMemoryActivationRepository implements ActivationRepositoryPort {
   readonly operations = new Map<string, GenerationOperationView>();
   readonly lessons = new Map<string, GeneratedTextLesson>();
   readonly quizBanks = new Map<string, GeneratedQuizBank>();
+  readonly regenerationRequests = new Map<string, string>();
 
   async loadCourse(
     authorization: ScopeAuthorizationContext,
@@ -46,6 +51,7 @@ export class InMemoryActivationRepository implements ActivationRepositoryPort {
           artifactId: null,
           attemptCount: 0,
           failureClass: null,
+          regenerationOrdinal: 0,
           retryable: false,
           status: "queued",
           updatedAt: now,
@@ -55,6 +61,57 @@ export class InMemoryActivationRepository implements ActivationRepositoryPort {
     return operations.map((operation) =>
       required(this.operations.get(operation.id)),
     );
+  }
+
+  async registerLessonRegeneration(
+    command: RegenerateLessonCommand,
+  ): Promise<LessonRegenerationRegistration> {
+    return this.registerArtifactRegeneration({
+      ...command,
+      artifactKind: "first_text_lesson",
+    });
+  }
+
+  async registerArtifactRegeneration(
+    command: RegenerateArtifactCommand,
+  ): Promise<ActivationRegenerationRegistration> {
+    const course = await this.loadCourse(
+      command.authorization,
+      command.courseId,
+    );
+    if (course === null) {
+      throw new Error("authorization denied");
+    }
+    const replayId = this.regenerationRequests.get(
+      command.requestIdempotencyKey,
+    );
+    const replay =
+      replayId === undefined ? undefined : this.operations.get(replayId);
+    if (replay !== undefined) return { operation: replay, replayed: true };
+    const previous = [...this.operations.values()]
+      .filter((operation) => operation.artifactKind === command.artifactKind)
+      .sort(
+        (left, right) => right.regenerationOrdinal - left.regenerationOrdinal,
+      )[0];
+    if (previous?.status !== "failed_permanent") {
+      throw new Error("regeneration not allowed");
+    }
+    const id = `10000000-0000-4000-8000-${String(previous.regenerationOrdinal + 1).padStart(12, "0")}`;
+    const operation: GenerationOperationView = {
+      ...previous,
+      artifactId: null,
+      attemptCount: 0,
+      failureClass: null,
+      id,
+      idempotencyKey: `${command.environment}/content.activation.generate/v1/${id}`,
+      regenerationOrdinal: previous.regenerationOrdinal + 1,
+      retryable: false,
+      status: "queued",
+      updatedAt: new Date(),
+    };
+    this.operations.set(id, operation);
+    this.regenerationRequests.set(command.requestIdempotencyKey, id);
+    return { operation, replayed: false };
   }
 
   async claimOperation(

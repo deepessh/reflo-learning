@@ -59,6 +59,11 @@ describe("demo-only ambient delivery", () => {
     telegram = new FakeDemoMessagePort("telegram");
     knowledge = new InMemoryDeliveryKnowledgePort();
     service = new DemoDeliveryService({
+      defaultPreference: {
+        chosenLocalTime: "09:00",
+        provider: "telegram",
+        timeZone: "UTC",
+      },
       destinations: [emailDestination, telegramDestination],
       emailLinkOrigin: "https://app.reflo.example",
       emailLinkSigningKey: Buffer.alloc(32, 7),
@@ -72,13 +77,49 @@ describe("demo-only ambient delivery", () => {
     vi.useRealTimers();
   });
 
+  it("allows a loopback HTTP review origin only when explicitly enabled", () => {
+    expect(
+      () =>
+        new DemoDeliveryService({
+          defaultPreference: {
+            chosenLocalTime: "09:00",
+            provider: "email",
+            timeZone: "UTC",
+          },
+          destinations: [emailDestination],
+          emailLinkOrigin: "http://127.0.0.1:53000",
+          emailLinkSigningKey: Buffer.alloc(32, 7),
+          knowledge,
+          messagePorts: [email],
+          repository,
+        }),
+    ).toThrowError(expect.objectContaining({ code: "invalid_configuration" }));
+
+    expect(
+      () =>
+        new DemoDeliveryService({
+          allowLocalHttpEmailOrigin: true,
+          defaultPreference: {
+            chosenLocalTime: "09:00",
+            provider: "email",
+            timeZone: "UTC",
+          },
+          destinations: [emailDestination],
+          emailLinkOrigin: "http://127.0.0.1:53000",
+          emailLinkSigningKey: Buffer.alloc(32, 7),
+          knowledge,
+          messagePorts: [email],
+          repository,
+        }),
+    ).not.toThrow();
+  });
+
   it("batches a due item once and reuses the logical delivery on retry", async () => {
     repository.nextDelivery = delivery("telegram");
     const command = {
       authorization,
       idempotencyKey: "due/2026-07-24",
       now: "2026-07-24T09:00:00.000Z",
-      provider: "telegram" as const,
     };
 
     const created = await service.dispatch(command);
@@ -87,9 +128,7 @@ describe("demo-only ambient delivery", () => {
     expect(created?.status).toBe("created");
     expect(replayed?.status).toBe("replayed");
     expect(telegram.messages).toHaveLength(1);
-    expect(telegram.messages[0]?.demoOnlyLabel).toBe(
-      "Staff-controlled demo only",
-    );
+    expect(telegram.messages[0]).not.toHaveProperty("demoOnlyLabel");
   });
 
   it("rejects an invalid Telegram secret and deduplicates webhook replays", async () => {
@@ -98,7 +137,6 @@ describe("demo-only ambient delivery", () => {
       authorization,
       idempotencyKey: "due/telegram",
       now: "2026-07-24T09:00:00.000Z",
-      provider: "telegram",
     });
     const body = JSON.stringify({
       callback_query: {
@@ -146,14 +184,19 @@ describe("demo-only ambient delivery", () => {
   });
 
   it("uses an authenticated 24-hour signed email link exactly once", async () => {
+    await service.updatePreference(authorization, {
+      chosenLocalTime: "08:15",
+      provider: "email",
+      timeZone: "America/Los_Angeles",
+    });
     repository.nextDelivery = delivery("email");
     await service.dispatch({
       authorization,
       idempotencyKey: "due/email",
       now: "2026-07-24T09:00:00.000Z",
-      provider: "email",
     });
     const link = new URL(email.messages[0]!.emailLink!);
+    expect(link.pathname).toBe("/review");
     const token = link.searchParams.get("token")!;
 
     const preview = await service.previewEmail(
@@ -161,7 +204,7 @@ describe("demo-only ambient delivery", () => {
       token,
       "2026-07-24T09:01:00.000Z",
     );
-    expect(preview.demoOnly).toBe(true);
+    expect(preview).not.toHaveProperty("demoOnly");
     expect(preview.questions[0]).not.toHaveProperty("keyedAnswer");
 
     const answers = [{ answer: "B", deliveryItemId: ids.item }];
@@ -191,7 +234,6 @@ describe("demo-only ambient delivery", () => {
         authorization: { ...authorization, actorId: "external-user" },
         idempotencyKey: "external",
         now: "2026-07-24T09:00:00.000Z",
-        provider: "email",
       }),
     ).rejects.toMatchObject<Partial<DeliveryError>>({
       code: "authorization_denied",
@@ -208,7 +250,6 @@ describe("demo-only ambient delivery", () => {
       authorization,
       idempotencyKey: "due/ambiguous",
       now: "2026-07-24T09:00:00.000Z",
-      provider: "telegram" as const,
     };
 
     await expect(service.dispatch(command)).rejects.toMatchObject<
@@ -218,6 +259,41 @@ describe("demo-only ambient delivery", () => {
       Partial<DeliveryError>
     >({ code: "dispatch_failed" });
     expect(telegram.messages).toHaveLength(1);
+  });
+
+  it("persists review time and channel choices per authorized user", async () => {
+    expect(await service.getPreference(authorization)).toEqual({
+      availableProviders: ["email", "telegram"],
+      chosenLocalTime: "09:00",
+      provider: "telegram",
+      timeZone: "UTC",
+    });
+
+    expect(
+      await service.updatePreference(authorization, {
+        chosenLocalTime: "18:45",
+        provider: "email",
+        timeZone: "America/Los_Angeles",
+      }),
+    ).toEqual({
+      availableProviders: ["email", "telegram"],
+      chosenLocalTime: "18:45",
+      provider: "email",
+      timeZone: "America/Los_Angeles",
+    });
+    expect(await service.getPreference(authorization)).toMatchObject({
+      chosenLocalTime: "18:45",
+      provider: "email",
+      timeZone: "America/Los_Angeles",
+    });
+
+    await expect(
+      service.updatePreference(authorization, {
+        chosenLocalTime: "8:45",
+        provider: "email",
+        timeZone: "America/Los_Angeles",
+      }),
+    ).rejects.toMatchObject<Partial<DeliveryError>>({ code: "invalid_input" });
   });
 });
 

@@ -25,11 +25,25 @@ import type {
 } from "./ports.js";
 
 export class InMemoryTutorRepository implements TutorAgentRepositoryPort {
+  readonly completedSessions: string[] = [];
   readonly questions: TutorQuestionRecord[] = [];
   readonly sessions = new Map<string, TutorSessionSnapshot>();
   readonly stopped: TutorLoopResult[] = [];
   readonly succeeded: TutorLoopResult[] = [];
   servedAt = "2026-07-24T12:05:00.000Z";
+
+  async completeSession(
+    authorization: ScopeAuthorizationContext,
+    sessionId: string,
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session === undefined || !authorized(session, authorization)) {
+      throw new Error("unauthorized fixture completion");
+    }
+    if (!this.completedSessions.includes(sessionId)) {
+      this.completedSessions.push(sessionId);
+    }
+  }
 
   async loadSession(
     authorization: ScopeAuthorizationContext,

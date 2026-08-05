@@ -39,7 +39,12 @@ const DIRECTMAIL_REGIONS = new Set<DemoDirectMailRegion>([
 export interface DeliveryRuntime {
   readonly delivery?: Pick<
     DemoDeliveryService,
-    "dispatch" | "handleTelegramWebhook" | "previewEmail" | "submitEmail"
+    | "dispatch"
+    | "getPreference"
+    | "handleTelegramWebhook"
+    | "previewEmail"
+    | "submitEmail"
+    | "updatePreference"
   >;
   close(): Promise<void>;
 }
@@ -70,12 +75,14 @@ export function createDeliveryRuntime(
     throw new Error("REFLO_DEMO_DELIVERY_PROVIDER is not allowlisted");
   }
   const provider = selectedProvider as "email" | "telegram";
-  const prefix = provider === "email" ? "EMAIL" : "TELEGRAM";
-  const selectedDestination = destination(
-    input,
-    prefix,
-    provider,
-    destinationLookupKey,
+  const configuredProviders = configuredDeliveryProviders(input, provider);
+  const destinations = configuredProviders.map((configuredProvider) =>
+    destination(
+      input,
+      configuredProvider === "email" ? "EMAIL" : "TELEGRAM",
+      configuredProvider,
+      destinationLookupKey,
+    ),
   );
   const messageAdapter = input.REFLO_DEMO_MESSAGE_ADAPTER ?? "provider";
   if (messageAdapter !== "provider" && messageAdapter !== "local-fixture") {
@@ -97,18 +104,18 @@ export function createDeliveryRuntime(
       );
     },
   };
-  const messagePort =
+  const messagePorts = configuredProviders.map((configuredProvider) =>
     messageAdapter === "local-fixture"
-      ? new LocalFixtureMessagePort(provider)
-      : provider === "telegram"
+      ? new LocalFixtureMessagePort(configuredProvider)
+      : configuredProvider === "telegram"
         ? createTelegramDemoMessageAdapter({
             botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
           })
-        : createEmailPort(input, capacityRepository);
-  const emailLinkSigningKey =
-    provider === "email"
-      ? readKey(input, "REFLO_DEMO_EMAIL_LINK_SIGNING_KEY")
-      : undefined;
+        : createEmailPort(input, capacityRepository),
+  );
+  const emailLinkSigningKey = configuredProviders.includes("email")
+    ? readKey(input, "REFLO_DEMO_EMAIL_LINK_SIGNING_KEY")
+    : undefined;
   if (
     emailLinkSigningKey !== undefined &&
     Buffer.from(emailLinkSigningKey).equals(Buffer.from(destinationLookupKey))
@@ -116,14 +123,16 @@ export function createDeliveryRuntime(
     throw new Error("Demo delivery keys must be independent");
   }
   const delivery = new DemoDeliveryService({
-    destinations: [selectedDestination],
-    emailLinkOrigin:
-      provider === "email"
-        ? required(input, "REFLO_DEMO_EMAIL_LINK_ORIGIN")
-        : undefined,
+    allowLocalHttpEmailOrigin:
+      deployment === "dev" && messageAdapter === "local-fixture",
+    defaultPreference: defaultPreference(input, provider),
+    destinations,
+    emailLinkOrigin: configuredProviders.includes("email")
+      ? required(input, "REFLO_DEMO_EMAIL_LINK_ORIGIN")
+      : undefined,
     emailLinkSigningKey,
     knowledge,
-    messagePorts: [messagePort],
+    messagePorts,
     repository,
   });
   const tracing = createDemoTraceRuntime(input, {
@@ -145,7 +154,12 @@ export function createDeliveryRuntime(
 export function instrumentDemoDelivery(
   delivery: Pick<
     DemoDeliveryService,
-    "dispatch" | "handleTelegramWebhook" | "previewEmail" | "submitEmail"
+    | "dispatch"
+    | "getPreference"
+    | "handleTelegramWebhook"
+    | "previewEmail"
+    | "submitEmail"
+    | "updatePreference"
   >,
   tracing: DemoTraceRuntime,
 ): NonNullable<DeliveryRuntime["delivery"]> {
@@ -159,6 +173,7 @@ export function instrumentDemoDelivery(
           value: result,
         };
       }),
+    getPreference: (authorization) => delivery.getPreference(authorization),
     handleTelegramWebhook: (rawBody, secretToken) =>
       traced(tracing, "test_delivery_response", async () => {
         const value = await delivery.handleTelegramWebhook(
@@ -185,6 +200,8 @@ export function instrumentDemoDelivery(
           value,
         };
       }),
+    updatePreference: (authorization, preference) =>
+      delivery.updatePreference(authorization, preference),
   };
 }
 
@@ -352,6 +369,34 @@ function destination(
         }
       : {}),
   };
+}
+
+function defaultPreference(
+  input: NodeJS.ProcessEnv,
+  provider: "email" | "telegram",
+) {
+  const chosenLocalTime = required(input, "REFLO_DEMO_REVIEW_LOCAL_TIME");
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(chosenLocalTime)) {
+    throw new Error("REFLO_DEMO_REVIEW_LOCAL_TIME is invalid");
+  }
+  const timeZone = required(input, "REFLO_DEMO_REVIEW_TIME_ZONE");
+  try {
+    new Intl.DateTimeFormat("en", { timeZone });
+  } catch {
+    throw new Error("REFLO_DEMO_REVIEW_TIME_ZONE is invalid");
+  }
+  return { chosenLocalTime, provider, timeZone };
+}
+
+function configuredDeliveryProviders(
+  input: NodeJS.ProcessEnv,
+  selected: "email" | "telegram",
+): readonly ("email" | "telegram")[] {
+  const other = selected === "email" ? "telegram" : "email";
+  const prefix = other === "email" ? "EMAIL" : "TELEGRAM";
+  return input[`REFLO_DEMO_${prefix}_DESTINATION`]?.trim()
+    ? [selected, other]
+    : [selected];
 }
 
 function required(input: NodeJS.ProcessEnv, name: string): string {

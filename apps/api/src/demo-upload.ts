@@ -67,6 +67,11 @@ export interface DemoUploadPersistence {
     authorization: ScopeAuthorizationContext,
     sourceDocumentId: string,
   ): Promise<DemoUploadOutlineSnapshot | null>;
+  withReplacementLease<T>(
+    authorization: ScopeAuthorizationContext,
+    sourceDocumentId: string,
+    work: () => Promise<T>,
+  ): Promise<T>;
 }
 
 export interface DemoUploadProcessingWork {
@@ -190,68 +195,77 @@ export class ApprovedDemoUploadService {
         this.#clock(),
       );
     }
-    if (input.replacesUploadId !== undefined) {
-      const replaced = await this.#repository.get(
-        authorization,
-        input.replacesUploadId,
-      );
-      if (
-        replaced === null ||
-        replaced.checksum !== actualSha256 ||
-        uploadState(replaced, processingLane(replaced)) !== "failed" ||
-        !isRetryableFailureClass(replaced.failureClass)
-      ) {
-        throw new DemoUploadAccessError("not_found");
+    const persist = async () => {
+      if (input.replacesUploadId !== undefined) {
+        const replaced = await this.#repository.get(
+          authorization,
+          input.replacesUploadId,
+        );
+        if (
+          replaced === null ||
+          replaced.checksum !== actualSha256 ||
+          uploadState(replaced, processingLane(replaced)) !== "failed" ||
+          !isRetryableFailureClass(replaced.failureClass)
+        ) {
+          throw new DemoUploadAccessError("not_found");
+        }
       }
-    }
-    const courseId = this.#createId();
-    const operationId = this.#createId();
-    const generationOperationId = this.#createId();
-    const objectKey = `owners/${authorization.ownerScopeId}/sources/${uploadId}/versions/v1/original.${approval.extension}`;
-    const stored = await this.#objects.putIfAbsent({
-      bytes: input.bytes,
-      objectKey,
-      sha256: actualSha256,
-    });
-    if (
-      stored.objectKey !== objectKey ||
-      stored.byteLength !== input.bytes.byteLength ||
-      stored.sha256 !== actualSha256
-    ) {
-      throw new Error("demo_upload_storage_mismatch");
-    }
-    await this.#repository.create({
-      authorization,
-      byteSize: input.bytes.byteLength,
-      checksum: actualSha256,
-      courseId,
-      generationOperationId,
-      mediaType: approval.mediaType,
-      objectKey,
-      operationId,
-      replacesSourceDocumentId: input.replacesUploadId,
-      sourceDocumentId: uploadId,
-      title: approval.title,
-    });
-    const snapshot = await this.#repository.get(authorization, uploadId);
-    if (
-      snapshot === null ||
-      snapshot.sourceDocumentId !== uploadId ||
-      snapshot.courseId !== courseId ||
-      snapshot.checksum !== actualSha256
-    ) {
-      throw new Error("demo_upload_persistence_mismatch");
-    }
-    const view = this.#project(snapshot, approval);
-    this.#processing?.schedule({
-      authorization,
-      courseId,
-      expectedInputSha256: actualSha256,
-      generationOperationId,
-      operationId,
-      sourceDocumentId: uploadId,
-    });
-    return view;
+      const courseId = this.#createId();
+      const operationId = this.#createId();
+      const generationOperationId = this.#createId();
+      const objectKey = `owners/${authorization.ownerScopeId}/sources/${uploadId}/versions/v1/original.${approval.extension}`;
+      const stored = await this.#objects.putIfAbsent({
+        bytes: input.bytes,
+        objectKey,
+        sha256: actualSha256,
+      });
+      if (
+        stored.objectKey !== objectKey ||
+        stored.byteLength !== input.bytes.byteLength ||
+        stored.sha256 !== actualSha256
+      ) {
+        throw new Error("demo_upload_storage_mismatch");
+      }
+      await this.#repository.create({
+        authorization,
+        byteSize: input.bytes.byteLength,
+        checksum: actualSha256,
+        courseId,
+        generationOperationId,
+        mediaType: approval.mediaType,
+        objectKey,
+        operationId,
+        replacesSourceDocumentId: input.replacesUploadId,
+        sourceDocumentId: uploadId,
+        title: approval.title,
+      });
+      const snapshot = await this.#repository.get(authorization, uploadId);
+      if (
+        snapshot === null ||
+        snapshot.sourceDocumentId !== uploadId ||
+        snapshot.courseId !== courseId ||
+        snapshot.checksum !== actualSha256
+      ) {
+        throw new Error("demo_upload_persistence_mismatch");
+      }
+      const view = this.#project(snapshot, approval);
+      this.#processing?.schedule({
+        authorization,
+        courseId,
+        expectedInputSha256: actualSha256,
+        generationOperationId,
+        operationId,
+        sourceDocumentId: uploadId,
+      });
+      return view;
+    };
+    return input.replacesUploadId === undefined
+      ? persist()
+      : this.#repository.withReplacementLease(
+          authorization,
+          input.replacesUploadId,
+          persist,
+        );
   }
 
   async get(

@@ -96,6 +96,7 @@ export interface DemoUploadOutlineSnapshot {
 export class PostgresDemoUploadRepository {
   readonly #environment: "dev" | "pilot" | "staging";
   readonly #pool: InstanceType<typeof Pool>;
+  readonly #replacementPool: InstanceType<typeof Pool>;
 
   constructor(
     connectionString: string,
@@ -106,10 +107,49 @@ export class PostgresDemoUploadRepository {
     }
     this.#environment = options.environment;
     this.#pool = new Pool({ connectionString });
+    this.#replacementPool = new Pool({ connectionString });
   }
 
-  close(): Promise<void> {
-    return this.#pool.end();
+  async close(): Promise<void> {
+    await Promise.all([this.#pool.end(), this.#replacementPool.end()]);
+  }
+
+  async withReplacementLease<T>(
+    authorization: ScopeAuthorizationContext,
+    sourceDocumentId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    if (
+      !isUuid(authorization.actorId) ||
+      !isUuid(authorization.ownerScopeId) ||
+      !isUuid(sourceDocumentId)
+    ) {
+      throw new Error("invalid demo upload replacement lease");
+    }
+    const client = await this.#replacementPool.connect();
+    const lockKey = `${this.#environment}:demo-upload-replacement:${authorization.ownerScopeId}:${sourceDocumentId}`;
+    let locked = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        lockKey,
+      ]);
+      locked = true;
+      return await work();
+    } finally {
+      if (locked) {
+        try {
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [lockKey],
+          );
+          client.release();
+        } catch {
+          (client.release as (destroy?: boolean) => void)(true);
+        }
+      } else {
+        client.release();
+      }
+    }
   }
 
   async create(input: DemoUploadCreate): Promise<void> {

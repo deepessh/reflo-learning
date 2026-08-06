@@ -176,6 +176,86 @@ describe("approved staff demo upload service", () => {
     );
   });
 
+  it("leases one predecessor across concurrent retry services before storage", async () => {
+    const repository = new FakeRepository();
+    const failedPredecessor = {
+      ...snapshot(),
+      failureClass: "infrastructure_unavailable",
+      operationState: "failed_permanent",
+      parseStatus: "failed",
+      sourceDocumentId: ids.replacedUpload,
+    } satisfies DemoUploadSnapshot;
+    let winner: DemoUploadCreate | null = null;
+    vi.spyOn(repository, "create").mockImplementation(async (input) => {
+      winner = input;
+    });
+    vi.spyOn(repository, "get").mockImplementation(
+      async (_authorization, sourceDocumentId) => {
+        if (sourceDocumentId === ids.replacedUpload) {
+          return winner === null ? failedPredecessor : null;
+        }
+        return winner !== null && winner.sourceDocumentId === sourceDocumentId
+          ? {
+              ...snapshot(),
+              courseId: winner.courseId,
+              sourceDocumentId: winner.sourceDocumentId,
+            }
+          : null;
+      },
+    );
+    const objects = {
+      putIfAbsent: vi.fn(async (input) => {
+        return {
+          byteLength: input.bytes.byteLength,
+          objectKey: input.objectKey,
+          sha256: input.sha256,
+        };
+      }),
+    };
+    const makeService = (generatedIds: string[]) =>
+      new ApprovedDemoUploadService({
+        approvals: [approval],
+        createId: () => generatedIds.shift() ?? ids.operation,
+        objects,
+        operatorUserIds: [ids.user],
+        repository,
+      });
+    const firstService = makeService([
+      ids.upload,
+      ids.course,
+      ids.operation,
+      ids.generationOperation,
+    ]);
+    const secondService = makeService([
+      "55000000-0000-4000-8000-000000000009",
+      "55000000-0000-4000-8000-00000000000a",
+      "55000000-0000-4000-8000-00000000000b",
+      "55000000-0000-4000-8000-00000000000c",
+    ]);
+    const retryInput = {
+      approvalId: approval.approvalId,
+      bytes,
+      mediaType: approval.mediaType,
+      replacesUploadId: ids.replacedUpload,
+    } as const;
+
+    const first = firstService.create(authorization, retryInput);
+    const second = secondService.create(authorization, retryInput);
+    const outcomes = await Promise.allSettled([first, second]);
+
+    expect(
+      outcomes.filter((outcome) => outcome.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      outcomes.filter((outcome) => outcome.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      objects.putIfAbsent.mock.calls.map(([input]) => input.objectKey),
+    ).toEqual([
+      `owners/${ids.scope}/sources/${ids.upload}/versions/v1/original.pdf`,
+    ]);
+  });
+
   it("rejects retry lineage that is inaccessible, ready, active, non-retryable, or for different approved bytes", async () => {
     const ineligibleSnapshots: readonly DemoUploadSnapshot[] = [
       {
@@ -445,6 +525,7 @@ function createFixture() {
 }
 
 class FakeRepository implements DemoUploadPersistence {
+  #replacementTail: Promise<void> = Promise.resolve();
   readonly claimCourseGeneration = vi.fn(async () => ({
     deadlineMs: 960_000,
     kind: "claimed" as const,
@@ -459,7 +540,10 @@ class FakeRepository implements DemoUploadPersistence {
   > = null;
   snapshot: DemoUploadSnapshot | null = null;
 
-  async get(): Promise<DemoUploadSnapshot | null> {
+  async get(
+    _authorization: Parameters<DemoUploadPersistence["get"]>[0],
+    _sourceDocumentId: string,
+  ): Promise<DemoUploadSnapshot | null> {
     return this.snapshot;
   }
 
@@ -469,6 +553,26 @@ class FakeRepository implements DemoUploadPersistence {
 
   async loadOutline(): Promise<DemoUploadOutlineSnapshot | null> {
     return this.outline;
+  }
+
+  async withReplacementLease<T>(
+    _authorization: Parameters<
+      DemoUploadPersistence["withReplacementLease"]
+    >[0],
+    _sourceDocumentId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.#replacementTail;
+    let release!: () => void;
+    this.#replacementTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
   }
 }
 

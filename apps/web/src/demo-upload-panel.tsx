@@ -19,12 +19,15 @@ import {
   isDemoPdfSelection,
 } from "./demo-upload-file";
 import {
+  demoCourseOutlineForUpload,
   demoUploadFailureAction,
   demoUploadPresentation,
+  demoUploadTrackedTarget,
 } from "./demo-upload-view";
 
 type ApprovalScreen = "error" | "hidden" | "loading" | "ready";
 type SubmissionScreen = "idle" | "submitting" | "tracking";
+type TrackedUploadScreen = "error" | "idle" | "loading" | "ready";
 
 const STATUS_UNAVAILABLE_COPY =
   "Upload status is temporarily unavailable. Reflo will keep checking; no successful outcome was assumed.";
@@ -33,9 +36,11 @@ const STATUS_POLL_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 10_000] as const;
 export function DemoUploadPanel({
   apiOrigin,
   onCourseReady,
+  trackedUploadId,
 }: {
   readonly apiOrigin: string;
   readonly onCourseReady: (courseId: string) => void;
+  readonly trackedUploadId: string | null;
 }) {
   const [approvalScreen, setApprovalScreen] =
     useState<ApprovalScreen>("loading");
@@ -48,6 +53,12 @@ export function DemoUploadPanel({
   const [outline, setOutline] = useState<DemoCourseOutline | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const [resolvedTrackedUploadId, setResolvedTrackedUploadId] = useState<
+    string | null
+  >(null);
+  const [trackedUploadScreen, setTrackedUploadScreen] =
+    useState<TrackedUploadScreen>("idle");
+  const [trackedUploadReloadKey, setTrackedUploadReloadKey] = useState(0);
   const submitGuard = useRef(false);
 
   const loadApprovals = useCallback(async () => {
@@ -75,6 +86,73 @@ export function DemoUploadPanel({
     const timer = window.setTimeout(() => void loadApprovals(), 0);
     return () => window.clearTimeout(timer);
   }, [loadApprovals]);
+
+  useEffect(() => {
+    let controller: AbortController | null = null;
+    const timer = window.setTimeout(async () => {
+      setResolvedTrackedUploadId(null);
+      setUpload(null);
+      setOutline(null);
+      setFile(null);
+      setLocalError(null);
+      setLastCheckedAt(null);
+      setSubmissionScreen("idle");
+      submitGuard.current = trackedUploadId !== null;
+      if (trackedUploadId === null) {
+        setTrackedUploadScreen("idle");
+        return;
+      }
+      setTrackedUploadScreen("loading");
+      controller = new AbortController();
+      const response = await fetch(
+        `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(trackedUploadId)}`,
+        { credentials: "include", signal: controller.signal },
+      ).catch(() => null);
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (response?.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          readonly upload?: DemoUploadView;
+        } | null;
+        if (controller.signal.aborted) {
+          return;
+        }
+        const trackedTarget =
+          body?.upload === undefined
+            ? null
+            : demoUploadTrackedTarget(trackedUploadId, body.upload);
+        if (trackedTarget !== null) {
+          const trackedPresentation = demoUploadPresentation(
+            trackedTarget.state,
+            trackedTarget.failure?.code ?? null,
+          );
+          if (controller.signal.aborted) {
+            return;
+          }
+          setUpload(trackedTarget);
+          setLastCheckedAt(new Date().toISOString());
+          setSubmissionScreen("tracking");
+          setResolvedTrackedUploadId(trackedUploadId);
+          setTrackedUploadScreen("ready");
+          submitGuard.current = trackedPresentation.formLocked;
+          return;
+        }
+      }
+      if (controller.signal.aborted) {
+        return;
+      }
+      setResolvedTrackedUploadId(trackedUploadId);
+      setTrackedUploadScreen("error");
+      setLocalError(
+        "This upload status could not be loaded. No new course was created or assumed ready.",
+      );
+    }, 0);
+    return () => {
+      controller?.abort();
+      window.clearTimeout(timer);
+    };
+  }, [apiOrigin, trackedUploadId, trackedUploadReloadKey]);
 
   useEffect(() => {
     if (upload === null) {
@@ -161,24 +239,44 @@ export function DemoUploadPanel({
     if (upload?.state !== "outline_ready" || outline !== null) {
       return;
     }
+    let controller: AbortController | null = null;
     const timer = window.setTimeout(async () => {
+      controller = new AbortController();
+      const uploadId = upload.uploadId;
       const response = await fetch(
-        `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(upload.uploadId)}/outline`,
-        { credentials: "include" },
+        `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(uploadId)}/outline`,
+        { credentials: "include", signal: controller.signal },
       ).catch(() => null);
+      if (controller.signal.aborted) {
+        return;
+      }
       if (response?.ok) {
-        const body = (await response.json()) as {
-          outline: DemoCourseOutline;
-        };
-        setOutline(body.outline);
-        setSubmissionScreen("tracking");
+        const body = await response.json().catch(() => null);
+        if (controller.signal.aborted) {
+          return;
+        }
+        const validatedOutline = demoCourseOutlineForUpload(uploadId, body);
+        if (validatedOutline !== null) {
+          setOutline(validatedOutline);
+          setSubmissionScreen("tracking");
+        } else {
+          setLocalError(
+            "The outline reference is not available. No generated course was opened.",
+          );
+        }
       } else {
+        if (controller.signal.aborted) {
+          return;
+        }
         setLocalError(
           "The outline reference is not available. No generated course was opened.",
         );
       }
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      controller?.abort();
+      window.clearTimeout(timer);
+    };
   }, [apiOrigin, outline, upload]);
 
   if (approvalScreen === "hidden") {
@@ -194,10 +292,20 @@ export function DemoUploadPanel({
       : demoUploadPresentation(upload.state, upload.failure?.code ?? null);
   const failureAction =
     upload === null ? null : demoUploadFailureAction(upload);
+  const trackedUploadPending =
+    trackedUploadId !== null &&
+    (trackedUploadScreen === "loading" ||
+      resolvedTrackedUploadId !== trackedUploadId);
+  const trackedUploadUnavailable = trackedUploadScreen === "error";
   const isBusy =
-    submissionScreen === "submitting" || presentation?.poll === true;
+    submissionScreen === "submitting" ||
+    presentation?.poll === true ||
+    trackedUploadPending;
   const formLocked =
-    submissionScreen === "submitting" || presentation?.formLocked === true;
+    submissionScreen === "submitting" ||
+    presentation?.formLocked === true ||
+    trackedUploadPending ||
+    trackedUploadUnavailable;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -357,7 +465,7 @@ export function DemoUploadPanel({
               accept={DEMO_UPLOAD_FILE_ACCEPT}
               disabled={formLocked}
               id="demo-source-file"
-              key={selectedApprovalId}
+              key={`${selectedApprovalId}:${trackedUploadId ?? "new"}`}
               onChange={(event) =>
                 setFile(event.currentTarget.files?.[0] ?? null)
               }
@@ -367,23 +475,43 @@ export function DemoUploadPanel({
             <button disabled={formLocked} type="submit">
               {submissionScreen === "submitting"
                 ? "Uploading…"
-                : presentation?.poll
-                  ? "Processing…"
-                  : upload?.state === "outline_ready"
-                    ? "Outline ready"
-                    : upload?.state === "ocr_required"
-                      ? "Validate another PDF"
-                      : failureAction !== null
-                        ? failureAction.label
-                        : "Validate and build outline"}
+                : trackedUploadPending
+                  ? "Loading upload status…"
+                  : trackedUploadUnavailable
+                    ? "Upload status unavailable"
+                    : presentation?.poll
+                      ? "Processing…"
+                      : upload?.state === "outline_ready"
+                        ? "Outline ready"
+                        : upload?.state === "ocr_required"
+                          ? "Validate another PDF"
+                          : failureAction !== null
+                            ? failureAction.label
+                            : "Validate and build outline"}
             </button>
           </form>
 
           {localError === null ? null : (
-            <p className="upload-local-error" role="alert">
-              {localError}
-            </p>
+            <div className="upload-local-error" role="alert">
+              <p>{localError}</p>
+              {trackedUploadUnavailable ? (
+                <button
+                  className="secondary-button"
+                  onClick={() =>
+                    setTrackedUploadReloadKey((current) => current + 1)
+                  }
+                  type="button"
+                >
+                  Retry loading upload status
+                </button>
+              ) : null}
+            </div>
           )}
+          {trackedUploadPending ? (
+            <p aria-live="polite" className="upload-loading" role="status">
+              Loading the selected course upload status…
+            </p>
+          ) : null}
           {presentation === null ? null : (
             <div className={`upload-state tone-${presentation.tone}`}>
               <div

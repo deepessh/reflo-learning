@@ -743,6 +743,14 @@ function Dashboard({
           <DemoUploadPanel
             apiOrigin={apiOrigin}
             onCourseReady={onUploadedCourse}
+            trackedUploadId={
+              selectedCourse !== null &&
+              (selectedCourse.courseStatus === "generating" ||
+                selectedCourse.courseStatus === "failed" ||
+                selectedCourse.sourceStatus === "failed")
+                ? selectedCourse.sourceDocumentId
+                : null
+            }
           />
         </details>
       </div>

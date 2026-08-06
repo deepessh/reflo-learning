@@ -1,8 +1,10 @@
 import type {
+  DemoCourseOutline,
   DemoUploadFailureCode,
   DemoUploadState,
   DemoUploadView,
 } from "@reflo/contracts";
+import { DEMO_UPLOAD_CONTRACT_VERSION } from "@reflo/contracts";
 
 export interface DemoUploadPresentation {
   readonly detail: string;
@@ -32,6 +34,73 @@ export function demoUploadFailureAction(
   return upload.failure?.retryable === true
     ? { label: "Try again", replacesUploadId: upload.uploadId }
     : { label: "Validate another PDF", replacesUploadId: null };
+}
+
+export function demoUploadTrackedTarget(
+  uploadId: string,
+  upload: DemoUploadView,
+): DemoUploadView | null {
+  return upload.uploadId === uploadId ? upload : null;
+}
+
+export function demoCourseOutlineForUpload(
+  uploadId: string,
+  value: unknown,
+): DemoCourseOutline | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const outline = value.outline;
+  if (
+    !isRecord(outline) ||
+    outline.contractVersion !== DEMO_UPLOAD_CONTRACT_VERSION ||
+    !isUuid(outline.courseId) ||
+    !isUuid(outline.uploadId) ||
+    outline.uploadId !== uploadId ||
+    typeof outline.generatedAt !== "string" ||
+    !Number.isFinite(new Date(outline.generatedAt).getTime()) ||
+    typeof outline.title !== "string" ||
+    outline.title.trim() === "" ||
+    !Array.isArray(outline.chapters) ||
+    !outline.chapters.every(isOutlineChapter)
+  ) {
+    return null;
+  }
+  return outline as unknown as DemoCourseOutline;
+}
+
+function isOutlineChapter(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isUuid(value.chapterId) &&
+    Number.isSafeInteger(value.order) &&
+    Number(value.order) >= 1 &&
+    typeof value.title === "string" &&
+    value.title.trim() !== "" &&
+    Array.isArray(value.concepts) &&
+    value.concepts.every(
+      (concept) =>
+        isRecord(concept) &&
+        isUuid(concept.conceptId) &&
+        typeof concept.name === "string" &&
+        concept.name.trim() !== "" &&
+        Number.isSafeInteger(concept.sourceSpanCount) &&
+        Number(concept.sourceSpanCount) >= 1,
+    )
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  );
 }
 
 export function demoUploadPresentation(

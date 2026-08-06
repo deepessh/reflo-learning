@@ -157,6 +157,7 @@ describe("auth-v1 account service", () => {
       chaptersReady: 0,
       courseId,
       courseStatus: "ready",
+      sourceDocumentId: "30000000-0000-4000-8000-000000000002",
       sourceStatus: "parsed",
       title: "Older ready course",
       updatedAt: new Date("2026-07-20T11:00:00.000Z"),

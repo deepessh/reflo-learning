@@ -102,6 +102,7 @@ interface LibraryRow extends Record<string, unknown> {
   chapters_ready: number;
   course_id: string;
   course_status: LibraryCourse["courseStatus"];
+  source_document_id: string;
   source_status: LibraryCourse["sourceStatus"];
   title: string;
   updated_at: Date;
@@ -443,7 +444,8 @@ export class PostgresAccountRepository implements AccountRepository {
   ): Promise<readonly LibraryCourse[]> {
     return this.#scopedRead(account, async (client) => {
       const result = await client.query<LibraryRow>(
-        `SELECT course.id AS course_id, course.title,
+        `SELECT course.id AS course_id, course.source_document_id,
+                course.title,
                 course.status AS course_status,
                 source_document.parse_status AS source_status,
                 count(chapter.id)::integer AS chapter_count,
@@ -465,7 +467,8 @@ export class PostgresAccountRepository implements AccountRepository {
           )
          WHERE course.owner_scope_id = $1
            AND course.status <> 'archived'
-         GROUP BY course.id, source_document.parse_status
+         GROUP BY course.id, course.source_document_id,
+                  source_document.parse_status
          ORDER BY course.updated_at DESC, course.id`,
         [account.ownerScopeId],
       );
@@ -474,6 +477,7 @@ export class PostgresAccountRepository implements AccountRepository {
         chaptersReady: row.chapters_ready,
         courseId: row.course_id,
         courseStatus: row.course_status,
+        sourceDocumentId: row.source_document_id,
         sourceStatus: row.source_status,
         title: row.title,
         updatedAt: row.updated_at,

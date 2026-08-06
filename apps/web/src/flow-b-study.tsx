@@ -1509,18 +1509,20 @@ export function FlowBStudy({
           placementFallback !== null ? (
             <div className="fallback-card">
               <strong>Choose the best answer instead</strong>
-              <p>{placementFallback.question.prompt}</p>
-              {placementFallback.question.responseOptions.map((option) => (
-                <label className="choice-row" key={option}>
-                  <input
-                    checked={placementFallbackAnswer === option}
-                    name="placement-fallback"
-                    onChange={() => setPlacementFallbackAnswer(option)}
-                    type="radio"
-                  />
-                  <span>{option}</span>
-                </label>
-              ))}
+              <fieldset className="fallback-choices">
+                <legend>{placementFallback.question.prompt}</legend>
+                {placementFallback.question.responseOptions.map((option) => (
+                  <label className="choice-row" key={option}>
+                    <input
+                      checked={placementFallbackAnswer === option}
+                      name="placement-fallback"
+                      onChange={() => setPlacementFallbackAnswer(option)}
+                      type="radio"
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </fieldset>
               <button
                 disabled={placementSubmitting || placementFallbackAnswer === ""}
                 onClick={() => void submitPlacementFallback()}
@@ -1664,18 +1666,20 @@ export function FlowBStudy({
           {disposition === "abstained" && fallback !== null ? (
             <div className="fallback-card">
               <strong>Choose the best answer instead</strong>
-              <p>{fallback.question.prompt}</p>
-              {fallback.question.responseOptions.map((option) => (
-                <label className="choice-row" key={option}>
-                  <input
-                    checked={fallbackAnswer === option}
-                    name="fallback"
-                    onChange={() => setFallbackAnswer(option)}
-                    type="radio"
-                  />
-                  <span>{option}</span>
-                </label>
-              ))}
+              <fieldset className="fallback-choices">
+                <legend>{fallback.question.prompt}</legend>
+                {fallback.question.responseOptions.map((option) => (
+                  <label className="choice-row" key={option}>
+                    <input
+                      checked={fallbackAnswer === option}
+                      name="fallback"
+                      onChange={() => setFallbackAnswer(option)}
+                      type="radio"
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </fieldset>
               <button
                 disabled={fallbackAnswer === ""}
                 onClick={() => void submitFallback()}

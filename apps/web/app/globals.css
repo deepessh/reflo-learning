@@ -1276,7 +1276,15 @@ button,
   border-radius: 14px;
   background: rgba(39, 33, 17, 0.38);
 }
-.fallback-card > p {
+.fallback-choices {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fallback-choices legend {
+  width: 100%;
+  padding: 0;
   line-height: 1.5;
 }
 .choice-row {

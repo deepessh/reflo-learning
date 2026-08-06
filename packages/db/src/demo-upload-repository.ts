@@ -112,6 +112,44 @@ export class PostgresDemoUploadRepository {
     return this.#pool.end();
   }
 
+  async withReplacementLease<T>(
+    authorization: ScopeAuthorizationContext,
+    sourceDocumentId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    if (
+      !isUuid(authorization.actorId) ||
+      !isUuid(authorization.ownerScopeId) ||
+      !isUuid(sourceDocumentId)
+    ) {
+      throw new Error("invalid demo upload replacement lease");
+    }
+    const client = await this.#pool.connect();
+    const lockKey = `${this.#environment}:demo-upload-replacement:${authorization.ownerScopeId}:${sourceDocumentId}`;
+    let locked = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        lockKey,
+      ]);
+      locked = true;
+      return await work();
+    } finally {
+      if (locked) {
+        try {
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [lockKey],
+          );
+          client.release();
+        } catch {
+          (client.release as (destroy?: boolean) => void)(true);
+        }
+      } else {
+        client.release();
+      }
+    }
+  }
+
   async create(input: DemoUploadCreate): Promise<void> {
     validateCreate(input);
     await this.#transaction(input.authorization, async (client) => {

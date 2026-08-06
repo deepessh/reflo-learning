@@ -253,15 +253,17 @@ export function DemoUploadPanel({
         const body = (await response.json().catch(() => null)) as {
           outline: DemoCourseOutline;
         } | null;
-        if (
-          controller.signal.aborted ||
-          body === null ||
-          body.outline.uploadId !== uploadId
-        ) {
+        if (controller.signal.aborted) {
           return;
         }
-        setOutline(body.outline);
-        setSubmissionScreen("tracking");
+        if (body?.outline?.uploadId === uploadId) {
+          setOutline(body.outline);
+          setSubmissionScreen("tracking");
+        } else {
+          setLocalError(
+            "The outline reference is not available. No generated course was opened.",
+          );
+        }
       } else {
         if (controller.signal.aborted) {
           return;

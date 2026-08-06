@@ -69,6 +69,37 @@ test(
         authorizationId: "demo-upload-test-session",
         ownerScopeId: ids.scope,
       };
+      let signalFirstEntered;
+      const firstEntered = new Promise((resolve) => {
+        signalFirstEntered = resolve;
+      });
+      let releaseFirst;
+      const firstGate = new Promise((resolve) => {
+        releaseFirst = resolve;
+      });
+      const firstLease = repository.withReplacementLease(
+        authorization,
+        ids.source,
+        async () => {
+          signalFirstEntered();
+          await firstGate;
+        },
+      );
+      await firstEntered;
+      let secondEntered = false;
+      const secondLease = repository.withReplacementLease(
+        authorization,
+        ids.source,
+        async () => {
+          secondEntered = true;
+        },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(secondEntered, false);
+      releaseFirst();
+      await Promise.all([firstLease, secondLease]);
+      assert.equal(secondEntered, true);
+
       await repository.create({
         authorization,
         byteSize: 478_301,

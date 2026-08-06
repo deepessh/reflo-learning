@@ -176,7 +176,7 @@ describe("approved staff demo upload service", () => {
     );
   });
 
-  it("shares one immutable predecessor object across concurrent retry services", async () => {
+  it("leases one predecessor across concurrent retry services before storage", async () => {
     const repository = new FakeRepository();
     const failedPredecessor = {
       ...snapshot(),
@@ -187,15 +187,12 @@ describe("approved staff demo upload service", () => {
     } satisfies DemoUploadSnapshot;
     let winner: DemoUploadCreate | null = null;
     vi.spyOn(repository, "create").mockImplementation(async (input) => {
-      if (winner !== null) {
-        throw new DemoUploadAccessError("not_found");
-      }
       winner = input;
     });
     vi.spyOn(repository, "get").mockImplementation(
       async (_authorization, sourceDocumentId) => {
         if (sourceDocumentId === ids.replacedUpload) {
-          return failedPredecessor;
+          return winner === null ? failedPredecessor : null;
         }
         return winner !== null && winner.sourceDocumentId === sourceDocumentId
           ? {
@@ -206,13 +203,8 @@ describe("approved staff demo upload service", () => {
           : null;
       },
     );
-    let releaseStorage!: () => void;
-    const storageGate = new Promise<void>((resolve) => {
-      releaseStorage = resolve;
-    });
     const objects = {
       putIfAbsent: vi.fn(async (input) => {
-        await storageGate;
         return {
           byteLength: input.bytes.byteLength,
           objectKey: input.objectKey,
@@ -249,10 +241,6 @@ describe("approved staff demo upload service", () => {
 
     const first = firstService.create(authorization, retryInput);
     const second = secondService.create(authorization, retryInput);
-    await vi.waitFor(() =>
-      expect(objects.putIfAbsent).toHaveBeenCalledTimes(2),
-    );
-    releaseStorage();
     const outcomes = await Promise.allSettled([first, second]);
 
     expect(
@@ -262,12 +250,10 @@ describe("approved staff demo upload service", () => {
       outcomes.filter((outcome) => outcome.status === "rejected"),
     ).toHaveLength(1);
     expect(
-      new Set(objects.putIfAbsent.mock.calls.map(([input]) => input.objectKey)),
-    ).toEqual(
-      new Set([
-        `owners/${ids.scope}/sources/${ids.replacedUpload}/versions/v1/original.pdf`,
-      ]),
-    );
+      objects.putIfAbsent.mock.calls.map(([input]) => input.objectKey),
+    ).toEqual([
+      `owners/${ids.scope}/sources/${ids.upload}/versions/v1/original.pdf`,
+    ]);
   });
 
   it("rejects retry lineage that is inaccessible, ready, active, non-retryable, or for different approved bytes", async () => {
@@ -539,6 +525,7 @@ function createFixture() {
 }
 
 class FakeRepository implements DemoUploadPersistence {
+  #replacementTail: Promise<void> = Promise.resolve();
   readonly claimCourseGeneration = vi.fn(async () => ({
     deadlineMs: 960_000,
     kind: "claimed" as const,
@@ -566,6 +553,26 @@ class FakeRepository implements DemoUploadPersistence {
 
   async loadOutline(): Promise<DemoUploadOutlineSnapshot | null> {
     return this.outline;
+  }
+
+  async withReplacementLease<T>(
+    _authorization: Parameters<
+      DemoUploadPersistence["withReplacementLease"]
+    >[0],
+    _sourceDocumentId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.#replacementTail;
+    let release!: () => void;
+    this.#replacementTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
   }
 }
 

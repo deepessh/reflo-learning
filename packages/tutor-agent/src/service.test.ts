@@ -121,6 +121,49 @@ describe("TutorAgentService", () => {
     }
   });
 
+  it("skips concepts without an available lesson or follow-up question", async () => {
+    const fixture = createFixture();
+    const session = fixture.repository.sessions.get(ids.session)!;
+    const unavailable = {
+      ...session.concepts[0]!,
+      latestLessonExposureAt: null,
+      lesson: null,
+      nextRetestQuestion: null,
+    };
+    const actionable = {
+      ...session.concepts[0]!,
+      conceptId: "actionable-concept",
+      eligibleAttemptCount: 0,
+      latestEligibleAttempt: null,
+      latestLessonExposureAt: null,
+      mastery: "0.25000" as const,
+    };
+    fixture.repository.sessions.set(ids.session, {
+      ...session,
+      concepts: [unavailable, actionable],
+    });
+
+    await expect(next(fixture.service)).resolves.toEqual({
+      conceptId: "actionable-concept",
+      kind: "advance",
+    });
+  });
+
+  it("completes the session when no remaining concept is actionable", async () => {
+    const fixture = createFixture({
+      concept: {
+        latestLessonExposureAt: null,
+        lesson: null,
+        nextRetestQuestion: null,
+      },
+    });
+
+    await expect(next(fixture.service)).resolves.toEqual({
+      kind: "session_complete",
+    });
+    expect(fixture.repository.completedSessions).toEqual([ids.session]);
+  });
+
   it("requires strategy change and similarity strictly below 0.85", async () => {
     const sameStrategy = createFixture({
       lessonResult: {

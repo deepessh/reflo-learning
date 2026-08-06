@@ -200,15 +200,25 @@ function activeConcept(
   return (
     concepts.find((concept) => concept.loopResult !== null) ??
     concepts.find((concept) => concept.reteachLessons.length > 0) ??
-    concepts.find((concept) => concept.dueForReview) ??
+    concepts.find(
+      (concept) => concept.dueForReview && concept.nextRetestQuestion !== null,
+    ) ??
     concepts.find(
       (concept) =>
         concept.latestEligibleAttempt !== null &&
-        concept.latestEligibleAttempt.rubricBand !== "correct",
+        concept.latestEligibleAttempt.rubricBand !== "correct" &&
+        concept.nextRetestQuestion !== null,
     ) ??
-    concepts.find((concept) => concept.latestLessonExposureAt === null) ??
-    concepts.find((concept) => concept.eligibleAttemptCount > 0) ??
-    concepts.find((concept) => concept.loopResult === null) ??
+    concepts.find(
+      (concept) =>
+        concept.latestLessonExposureAt === null &&
+        concept.lesson !== null &&
+        concept.nextRetestQuestion !== null,
+    ) ??
+    concepts.find(
+      (concept) =>
+        concept.eligibleAttemptCount > 0 && concept.nextRetestQuestion !== null,
+    ) ??
     null
   );
 }

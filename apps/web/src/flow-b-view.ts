@@ -40,6 +40,7 @@ export function assessmentRequestErrorCopy(
 export type StudyErrorRetryTarget =
   | { readonly kind: "course_lesson"; readonly sessionId: string }
   | { readonly kind: "idle" }
+  | { readonly kind: "next_action"; readonly sessionId: string }
   | { readonly kind: "persisted_state"; readonly sessionId: string }
   | { readonly kind: "replacement" }
   | { readonly kind: "short_answer" };
@@ -52,6 +53,7 @@ export function initialStudyPhase(
 
 export function studyErrorRetryTarget(input: {
   readonly courseLessonSessionId: string | null;
+  readonly nextActionSessionId: string | null;
   readonly submissionRetry: "replacement" | "short_answer" | null;
   readonly viewSessionId: string | null;
 }): StudyErrorRetryTarget {
@@ -60,6 +62,9 @@ export function studyErrorRetryTarget(input: {
   }
   if (input.submissionRetry === "replacement") {
     return { kind: "replacement" };
+  }
+  if (input.nextActionSessionId !== null) {
+    return { kind: "next_action", sessionId: input.nextActionSessionId };
   }
   if (input.courseLessonSessionId !== null) {
     return {

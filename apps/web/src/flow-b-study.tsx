@@ -144,6 +144,9 @@ export function FlowBStudy({
     null,
   );
   const [completedFromNextAction, setCompletedFromNextAction] = useState(false);
+  const [nextActionRetrySessionId, setNextActionRetrySessionId] = useState<
+    string | null
+  >(null);
   const [submissionRetry, setSubmissionRetry] =
     useState<SubmissionRetry | null>(null);
   const [fallbackAnswer, setFallbackAnswer] = useState("");
@@ -1030,6 +1033,7 @@ export function FlowBStudy({
     setRetryAnnouncement("Retrying your saved activity…");
     const target = studyErrorRetryTarget({
       courseLessonSessionId: courseLesson?.sessionId ?? null,
+      nextActionSessionId: nextActionRetrySessionId,
       submissionRetry,
       viewSessionId: view?.sessionId ?? null,
     });
@@ -1044,6 +1048,8 @@ export function FlowBStudy({
         if (!recovered) {
           throw new Error("The lesson remains unavailable.");
         }
+      } else if (target.kind === "next_action") {
+        recovered = await nextAction(target.sessionId);
       } else if (target.kind === "idle") {
         recovered = await start(true);
       } else {
@@ -1068,11 +1074,13 @@ export function FlowBStudy({
     }
   }
 
-  async function nextAction() {
-    const sessionId = view?.sessionId ?? courseLesson?.sessionId;
+  async function nextAction(retrySessionId?: string): Promise<boolean> {
+    const sessionId =
+      retrySessionId ?? view?.sessionId ?? courseLesson?.sessionId;
     if (sessionId === undefined) {
-      return;
+      return false;
     }
+    setNextActionRetrySessionId(null);
     setPhase("checking");
     try {
       const response = await postJson<{
@@ -1102,15 +1110,15 @@ export function FlowBStudy({
         if (completion.refreshProgress) {
           onProgressRefresh();
         }
-        return;
+        return true;
       }
       if (response.action.kind === "reteach") {
         await loadView(sessionId);
-        return;
+        return true;
       }
       if (response.action.kind === "retest") {
         showQuestion(response.action.question, "retest");
-        return;
+        return true;
       }
       if (
         response.action.kind === "retest_succeeded" ||
@@ -1123,7 +1131,7 @@ export function FlowBStudy({
             response.action.kind === "review") &&
           (await loadCourseLesson(sessionId))
         ) {
-          return;
+          return true;
         }
         await loadView(sessionId);
         if (
@@ -1132,10 +1140,13 @@ export function FlowBStudy({
         ) {
           onProgressRefresh();
         }
-        return;
+        return true;
       }
+      throw new Error("The next activity could not be selected.");
     } catch (error) {
+      setNextActionRetrySessionId(sessionId);
       fail(error, "The next activity could not be opened.");
+      return false;
     }
   }
 

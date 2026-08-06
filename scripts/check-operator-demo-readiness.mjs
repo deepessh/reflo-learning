@@ -11,6 +11,11 @@ const REQUIRED_DEPENDENCIES = [
   "storage",
   "vector",
 ];
+const LOCAL_UPLOAD_PROCESSOR = "local-isolated-ingestion-bridge-v1";
+const LOCAL_UPLOAD_IDENTITY_KEYS = [
+  "REFLO_LOCAL_CLAMAV_SNAPSHOT_ID",
+  "REFLO_LOCAL_INGESTION_IMAGE_DIGEST",
+];
 
 export async function collectOperatorDemoReadiness({
   apiOrigin,
@@ -34,6 +39,25 @@ export function assertOperatorDemoReady(results) {
     throw new Error("operator_demo_not_ready");
   }
   return results;
+}
+
+export function localUploadIdentityResult(runtimeSource, workerSource) {
+  const runtime = parseEnvironment(runtimeSource);
+  const workers = parseEnvironment(workerSource);
+  const available =
+    runtime.REFLO_DEMO_UPLOAD_PROCESSOR_MODE === LOCAL_UPLOAD_PROCESSOR &&
+    LOCAL_UPLOAD_IDENTITY_KEYS.every((key) => {
+      const expected = runtime[key];
+      const prepared = workers[key];
+      return (
+        expected !== undefined &&
+        expected === prepared &&
+        (key.endsWith("_DIGEST")
+          ? /^sha256:[a-f0-9]{64}$/.test(expected)
+          : /^cvd-[a-f0-9]{32}$/.test(expected))
+      );
+    });
+  return { available, component: "upload-identities" };
 }
 
 async function healthResult(fetchImpl, origin, service) {
@@ -136,6 +160,35 @@ async function readGeneratedOrigins() {
   };
 }
 
+async function readLocalUploadIdentityResult() {
+  const [runtimeSource, workerSource] = await Promise.all([
+    readFile(path.join(root, ".reflo", "local-stack", "runtime.env"), "utf8"),
+    readFile(path.join(root, ".reflo", "local-workers", "profile.env"), "utf8"),
+  ]);
+  return localUploadIdentityResult(runtimeSource, workerSource);
+}
+
+function parseEnvironment(source) {
+  return Object.fromEntries(
+    source
+      .split(/\r?\n/)
+      .map((line) => /^([A-Z0-9_]+)=(.*)$/.exec(line.trim()))
+      .filter((match) => match !== null)
+      .map((match) => [match[1], unquote(match[2])]),
+  );
+}
+
+function unquote(value) {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
 function requiredOrigin(values, name) {
   const value = values[name];
   const origin = new URL(value);
@@ -158,12 +211,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const results = await collectOperatorDemoReadiness(
       await readGeneratedOrigins(),
     );
+    const uploadIdentities = await readLocalUploadIdentityResult();
     for (const result of results) {
       console.info(
         `${result.available ? "AVAILABLE" : "UNAVAILABLE"} ${result.component}`,
       );
     }
+    console.info(
+      `${uploadIdentities.available ? "AVAILABLE" : "UNAVAILABLE"} ${uploadIdentities.component}`,
+    );
     assertOperatorDemoReady(results);
+    if (!uploadIdentities.available) {
+      throw new Error("operator_upload_identities_not_ready");
+    }
   } catch {
     console.error("UNAVAILABLE operator-demo: bounded readiness failed");
     process.exitCode = 1;

@@ -1452,6 +1452,12 @@ button,
   background: #091812;
   color: #f4faf7;
 }
+.tutor-input input:focus-visible {
+  border-color: #83e6ba;
+  outline: 2px solid #83e6ba;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(92, 224, 167, 0.16);
+}
 .tutor-answer,
 .tutor-not-found,
 .tutor-error {

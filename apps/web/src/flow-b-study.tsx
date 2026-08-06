@@ -56,6 +56,11 @@ import {
   type PlacementAnswerResult,
   type PlacementView,
 } from "./placement-view";
+import {
+  clearPlacementDraft,
+  readPlacementDraft,
+  storePlacementDraft,
+} from "./placement-draft";
 
 type Phase =
   | "activation_failed"
@@ -199,6 +204,16 @@ export function FlowBStudy({
   const retryInFlight = useRef(false);
   const placementSubmissionInFlight = useRef(false);
   const tutorInputId = useId();
+
+  useEffect(() => {
+    if (phase !== "placement_question" || placement?.question == null) return;
+    storePlacementDraft(
+      window.sessionStorage,
+      courseId,
+      placement.question.id,
+      placementAnswer,
+    );
+  }, [courseId, phase, placement, placementAnswer]);
 
   async function start(focusAfterReplacement = false): Promise<boolean> {
     if (focusAfterReplacement) {
@@ -651,13 +666,21 @@ export function FlowBStudy({
       throw new Error("Placement status could not be verified.");
     }
     setMessage("");
+    const restoredDraft =
+      loaded.placement.question === null
+        ? ""
+        : readPlacementDraft(
+            window.sessionStorage,
+            courseId,
+            loaded.placement.question,
+          );
     setPlacement(loaded.placement);
     setPlacementSessionId(sessionId);
     setCourseLesson(null);
     setView(null);
     setAssessment(null);
     setPlacementResult(null);
-    setPlacementAnswer("");
+    setPlacementAnswer(restoredDraft);
     setPlacementFallbackAnswer("");
     if (loaded.placement.status === "pending") {
       setPreparingSessionId(sessionId);
@@ -813,6 +836,11 @@ export function FlowBStudy({
         setPlacementResult({ kind: "keyed", ...response.result });
         onProgressRefresh();
       }
+      clearPlacementDraft(
+        window.sessionStorage,
+        courseId,
+        placementQuestion!.id,
+      );
       setPhase("placement_result");
     } catch (error) {
       setMessage(

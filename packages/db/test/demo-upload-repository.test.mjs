@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -83,22 +84,21 @@ test(
         async () => {
           signalFirstEntered();
           await firstGate;
+          assert.equal(await repository.get(authorization, ids.source), null);
         },
       );
       await firstEntered;
-      let secondEntered = false;
-      const secondLease = repository.withReplacementLease(
-        authorization,
-        ids.source,
-        async () => {
-          secondEntered = true;
-        },
+      let waiterEntries = 0;
+      const waitingLeases = Array.from({ length: 10 }, () =>
+        repository.withReplacementLease(authorization, ids.source, async () => {
+          waiterEntries += 1;
+        }),
       );
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(secondEntered, false);
+      await delay(100);
+      assert.equal(waiterEntries, 0);
       releaseFirst();
-      await Promise.all([firstLease, secondLease]);
-      assert.equal(secondEntered, true);
+      await Promise.all([firstLease, ...waitingLeases]);
+      assert.equal(waiterEntries, waitingLeases.length);
 
       await repository.create({
         authorization,

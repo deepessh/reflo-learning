@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DemoUploadView } from "@reflo/contracts";
 
 import {
+  demoCourseOutlineForUpload,
   demoUploadFailureAction,
   demoUploadPresentation,
   demoUploadTrackedTarget,
@@ -148,5 +149,40 @@ describe("course upload presentation", () => {
         state: "outline_ready",
       }),
     ).not.toBeNull();
+  });
+
+  it("accepts only a complete outline for the exact tracked upload", () => {
+    const uploadId = "55000000-0000-4000-8000-000000000001";
+    const outline = {
+      chapters: [
+        {
+          chapterId: "55000000-0000-4000-8000-000000000003",
+          concepts: [
+            {
+              conceptId: "55000000-0000-4000-8000-000000000004",
+              name: "Tool use",
+              sourceSpanCount: 2,
+            },
+          ],
+          order: 1,
+          title: "Agents",
+        },
+      ],
+      contractVersion: "demo-upload-v2",
+      courseId: "55000000-0000-4000-8000-000000000002",
+      generatedAt: "2026-08-06T07:00:00.000Z",
+      title: "Approved course",
+      uploadId,
+    } as const;
+
+    expect(demoCourseOutlineForUpload(uploadId, { outline })).toEqual(outline);
+    expect(
+      demoCourseOutlineForUpload(uploadId, { outline: { uploadId } }),
+    ).toBeNull();
+    expect(
+      demoCourseOutlineForUpload("55000000-0000-4000-8000-000000000009", {
+        outline,
+      }),
+    ).toBeNull();
   });
 });

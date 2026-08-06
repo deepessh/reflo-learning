@@ -96,6 +96,7 @@ export interface DemoUploadOutlineSnapshot {
 export class PostgresDemoUploadRepository {
   readonly #environment: "dev" | "pilot" | "staging";
   readonly #pool: InstanceType<typeof Pool>;
+  readonly #replacementPool: InstanceType<typeof Pool>;
 
   constructor(
     connectionString: string,
@@ -106,10 +107,11 @@ export class PostgresDemoUploadRepository {
     }
     this.#environment = options.environment;
     this.#pool = new Pool({ connectionString });
+    this.#replacementPool = new Pool({ connectionString });
   }
 
-  close(): Promise<void> {
-    return this.#pool.end();
+  async close(): Promise<void> {
+    await Promise.all([this.#pool.end(), this.#replacementPool.end()]);
   }
 
   async withReplacementLease<T>(
@@ -124,7 +126,7 @@ export class PostgresDemoUploadRepository {
     ) {
       throw new Error("invalid demo upload replacement lease");
     }
-    const client = await this.#pool.connect();
+    const client = await this.#replacementPool.connect();
     const lockKey = `${this.#environment}:demo-upload-replacement:${authorization.ownerScopeId}:${sourceDocumentId}`;
     let locked = false;
     try {

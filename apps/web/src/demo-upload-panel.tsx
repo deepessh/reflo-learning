@@ -19,6 +19,7 @@ import {
   isDemoPdfSelection,
 } from "./demo-upload-file";
 import {
+  demoCourseOutlineForUpload,
   demoUploadFailureAction,
   demoUploadPresentation,
   demoUploadTrackedTarget,
@@ -250,14 +251,13 @@ export function DemoUploadPanel({
         return;
       }
       if (response?.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          outline: DemoCourseOutline;
-        } | null;
+        const body = await response.json().catch(() => null);
         if (controller.signal.aborted) {
           return;
         }
-        if (body?.outline?.uploadId === uploadId) {
-          setOutline(body.outline);
+        const validatedOutline = demoCourseOutlineForUpload(uploadId, body);
+        if (validatedOutline !== null) {
+          setOutline(validatedOutline);
           setSubmissionScreen("tracking");
         } else {
           setLocalError(

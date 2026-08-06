@@ -9,6 +9,11 @@ import type {
 } from "./contracts.js";
 
 export interface AccountRepository {
+  archiveCourse(
+    account: AuthenticatedAccount,
+    courseId: string,
+    now: Date,
+  ): Promise<boolean>;
   authenticateSession(
     sessionDigest: string,
     now: Date,

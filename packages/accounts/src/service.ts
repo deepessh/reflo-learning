@@ -222,6 +222,20 @@ export class AccountService {
     return this.#options.repository.listLibrary(account);
   }
 
+  archiveCourse(
+    account: AuthenticatedAccount,
+    courseId: string,
+  ): Promise<boolean> {
+    if (!isUuid(courseId)) {
+      throw new AccountInputError("invalid_course_id");
+    }
+    return this.#options.repository.archiveCourse(
+      account,
+      courseId,
+      this.#options.clock.now(),
+    );
+  }
+
   getCourseProgress(
     account: AuthenticatedAccount,
     courseId: string,

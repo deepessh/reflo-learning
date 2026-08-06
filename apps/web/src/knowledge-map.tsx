@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import type { CourseProgress } from "@reflo/accounts";
 
 import {
@@ -9,12 +11,17 @@ import {
 import { chapterProgressPresentation } from "./knowledge-map-view";
 
 export function KnowledgeMap({
+  archivePending,
+  onArchive,
   onRefresh,
   progress,
 }: {
+  readonly archivePending: boolean;
+  readonly onArchive: () => void;
   readonly onRefresh: () => void;
   readonly progress: CourseProgress;
 }) {
+  const [archiveConfirming, setArchiveConfirming] = useState(false);
   const mastery = progress.mastery.value;
   const readiness = readinessPresentation(progress.readiness);
   return (
@@ -39,6 +46,46 @@ export function KnowledgeMap({
           >
             Refresh
           </button>
+          <details className="course-options">
+            <summary>Course options</summary>
+            {archiveConfirming ? (
+              <div
+                aria-label={`Archive ${progress.title}`}
+                className="course-archive-confirmation"
+                role="group"
+              >
+                <p>
+                  Remove this course from the library? Its stored data is
+                  preserved.
+                </p>
+                <div>
+                  <button
+                    disabled={archivePending}
+                    onClick={onArchive}
+                    type="button"
+                  >
+                    {archivePending ? "Archiving…" : "Archive course"}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={archivePending}
+                    onClick={() => setArchiveConfirming(false)}
+                    type="button"
+                  >
+                    Keep course
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="secondary-button"
+                onClick={() => setArchiveConfirming(true)}
+                type="button"
+              >
+                Archive course…
+              </button>
+            )}
+          </details>
         </div>
       </div>
 

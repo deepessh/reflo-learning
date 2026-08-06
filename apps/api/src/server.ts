@@ -827,6 +827,21 @@ export function createApiRequestListener(
               response.end(JSON.stringify({ accepted: true }));
               return;
             }
+            const archiveCourseId = courseArchiveRoute(url.pathname);
+            if (archiveCourseId !== null) {
+              const archived = await accounts.archiveCourse(
+                account,
+                archiveCourseId,
+              );
+              writeCors(response, origin!);
+              if (!archived) {
+                sendJson(response, 404, { error: "course_not_found" });
+                return;
+              }
+              response.writeHead(204);
+              response.end();
+              return;
+            }
             if (
               url.pathname === "/v1/deliveries/dispatch" ||
               url.pathname === "/v1/demo/deliveries/dispatch"
@@ -2002,6 +2017,14 @@ function preflightCapability(
 function courseProgressRoute(pathname: string): string | null {
   const match =
     /^\/v1\/courses\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/progress$/i.exec(
+      pathname,
+    );
+  return match?.[1] ?? null;
+}
+
+function courseArchiveRoute(pathname: string): string | null {
+  const match =
+    /^\/v1\/courses\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/archive$/i.exec(
       pathname,
     );
   return match?.[1] ?? null;

@@ -217,6 +217,7 @@ describe("local ingestion bridge internal API", () => {
 describe("auth, library, and session-history API", () => {
   it("creates an opaque cookie session and serves the authenticated shells", async () => {
     const fixture = createAccountFixture();
+    const failedCourseId = "30000000-0000-4000-8000-000000000001";
     fixture.repository.library.push({
       chapterCount: 6,
       chaptersReady: 2,
@@ -234,6 +235,15 @@ describe("auth, library, and session-history API", () => {
       startedAt: new Date("2026-07-20T12:00:00.000Z"),
       status: "completed",
       summary: { conceptsReviewed: 3 },
+    });
+    fixture.repository.library.push({
+      chapterCount: 0,
+      chaptersReady: 0,
+      courseId: failedCourseId,
+      courseStatus: "failed",
+      sourceStatus: "failed",
+      title: "Failed upload attempt",
+      updatedAt: new Date("2026-07-20T11:00:00.000Z"),
     });
     const { baseUrl } = await startAccountServer(fixture.service);
 
@@ -278,6 +288,11 @@ describe("auth, library, and session-history API", () => {
           courseStatus: "generating",
           title: "Cloud Architecture Foundations",
         },
+        {
+          courseId: failedCourseId,
+          courseStatus: "failed",
+          title: "Failed upload attempt",
+        },
       ],
     });
 
@@ -296,6 +311,37 @@ describe("auth, library, and session-history API", () => {
     expect(await csrfResponse.json()).toEqual({
       csrfToken: setCookies[1]!.split("=", 2)[1]!.split(";", 1)[0],
     });
+    const csrfToken = setCookies[1]!.split("=", 2)[1]!.split(";", 1)[0]!;
+    const archiveResponse = await fetch(
+      `${baseUrl}/v1/courses/${failedCourseId}/archive`,
+      {
+        headers: {
+          cookie,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": csrfToken,
+        },
+        method: "POST",
+      },
+    );
+    expect(archiveResponse.status).toBe(204);
+    const updatedLibraryResponse = await fetch(`${baseUrl}/v1/library`, {
+      headers: { cookie, origin: "https://app.reflo.example" },
+    });
+    expect(await updatedLibraryResponse.json()).toMatchObject({
+      courses: [{ title: "Cloud Architecture Foundations" }],
+    });
+    expect(
+      (
+        await fetch(`${baseUrl}/v1/courses/${failedCourseId}/archive`, {
+          headers: {
+            cookie,
+            origin: "https://app.reflo.example",
+            "x-reflo-csrf": csrfToken,
+          },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
     expect(
       (
         await fetch(`${baseUrl}/v1/csrf-token`, {

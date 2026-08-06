@@ -481,6 +481,25 @@ export class PostgresAccountRepository implements AccountRepository {
     });
   }
 
+  async archiveCourse(
+    account: AuthenticatedAccount,
+    courseId: string,
+    now: Date,
+  ): Promise<boolean> {
+    return this.#scopedRead(account, async (client) => {
+      const result = await client.query(
+        `UPDATE course
+         SET status = 'archived', updated_at = $3
+         WHERE course.owner_scope_id = $1
+           AND course.id = $2
+           AND course.status <> 'archived'
+         RETURNING course.id`,
+        [account.ownerScopeId, courseId, now],
+      );
+      return result.rowCount === 1;
+    });
+  }
+
   async getCourseProgress(
     account: AuthenticatedAccount,
     courseId: string,

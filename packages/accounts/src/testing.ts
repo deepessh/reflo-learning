@@ -131,8 +131,29 @@ export class InMemoryAccountRepository implements AccountRepository {
     }
   }
 
+  async archiveCourse(
+    _account: AuthenticatedAccount,
+    courseId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const index = this.library.findIndex(
+      (course) =>
+        course.courseId === courseId && course.courseStatus !== "archived",
+    );
+    const course = this.library[index];
+    if (course === undefined) {
+      return false;
+    }
+    this.library[index] = {
+      ...course,
+      courseStatus: "archived",
+      updatedAt: now,
+    };
+    return true;
+  }
+
   async listLibrary(): Promise<readonly LibraryCourse[]> {
-    return this.library;
+    return this.library.filter((course) => course.courseStatus !== "archived");
   }
 
   async getCourseProgress(

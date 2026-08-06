@@ -149,6 +149,34 @@ describe("auth-v1 account service", () => {
     ).resolves.toBeNull();
   });
 
+  it("archives an owner-scoped course and rejects invalid identifiers", async () => {
+    const { clock, repository, service } = createFixture();
+    const courseId = "30000000-0000-4000-8000-000000000001";
+    repository.library.push({
+      chapterCount: 0,
+      chaptersReady: 0,
+      courseId,
+      courseStatus: "ready",
+      sourceStatus: "parsed",
+      title: "Older ready course",
+      updatedAt: new Date("2026-07-20T11:00:00.000Z"),
+    });
+    const account = {
+      absoluteExpiresAt: new Date("2026-08-20T12:00:00.000Z"),
+      authenticatedAt: clock.now(),
+      idleExpiresAt: new Date("2026-07-21T12:00:00.000Z"),
+      ownerScopeId: "60000000-0000-4000-8000-000000000001",
+      sessionId: "80000000-0000-4000-8000-000000000001",
+      userId: "70000000-0000-4000-8000-000000000001",
+    };
+
+    await expect(service.archiveCourse(account, courseId)).resolves.toBe(true);
+    await expect(service.listLibrary(account)).resolves.toEqual([]);
+    expect(() => service.archiveCourse(account, "not-a-course-id")).toThrow(
+      AccountInputError,
+    );
+  });
+
   it("silently rate-limits repeated requests to preserve account privacy", async () => {
     const { emailPort, service } = createFixture();
     for (let attempt = 0; attempt < 7; attempt += 1) {

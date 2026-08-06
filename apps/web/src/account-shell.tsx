@@ -297,6 +297,9 @@ export function AccountShell({ apiOrigin, appName }: AccountShellProps) {
           <Dashboard
             apiOrigin={resolvedApiOrigin}
             courses={courses}
+            onArchiveCourse={async () => {
+              await loadAccount(undefined, "refresh");
+            }}
             onRetryProgress={() => {
               if (selectedCourseId !== null) {
                 void loadProgress(selectedCourseId);
@@ -386,6 +389,7 @@ function EmailSent({ email }: { readonly email: string }) {
 function Dashboard({
   apiOrigin,
   courses,
+  onArchiveCourse,
   onRetryProgress,
   onSelectCourse,
   onUploadedCourse,
@@ -396,6 +400,7 @@ function Dashboard({
 }: {
   readonly apiOrigin: string;
   readonly courses: readonly LibraryCourse[];
+  readonly onArchiveCourse: (courseId: string) => Promise<void>;
   readonly onRetryProgress: () => void;
   readonly onSelectCourse: (courseId: string) => void;
   readonly onUploadedCourse: (courseId: string) => void;
@@ -407,8 +412,15 @@ function Dashboard({
   const [selectedHistorySessionId, setSelectedHistorySessionId] = useState<
     string | null
   >(null);
+  const [archivePendingCourseId, setArchivePendingCourseId] = useState<
+    string | null
+  >(null);
+  const [archiveStatusMessage, setArchiveStatusMessage] = useState("");
+  const visibleSessions = sessions.filter((session) =>
+    courses.some((course) => course.courseId === session.courseId),
+  );
   const selectedHistorySession =
-    sessions.find(
+    visibleSessions.find(
       (session) => session.sessionId === selectedHistorySessionId,
     ) ?? null;
   const selectedCourse =
@@ -449,8 +461,61 @@ function Dashboard({
     }, 0);
   }
 
+  async function archiveCourse(course: LibraryCourse) {
+    if (archivePendingCourseId !== null) {
+      return;
+    }
+    const label =
+      course.courseStatus === "failed" || course.sourceStatus === "failed"
+        ? "failed upload attempt"
+        : "course";
+    setArchivePendingCourseId(course.courseId);
+    setArchiveStatusMessage(`Archiving ${label} ${course.title}.`);
+    try {
+      const csrfResponse = await fetch(`${apiOrigin}/v1/csrf-token`, {
+        credentials: "include",
+      });
+      if (!csrfResponse.ok) {
+        throw new Error("csrf_unavailable");
+      }
+      const { csrfToken } = (await csrfResponse.json()) as {
+        readonly csrfToken: string;
+      };
+      const response = await fetch(
+        `${apiOrigin}/v1/courses/${encodeURIComponent(course.courseId)}/archive`,
+        {
+          credentials: "include",
+          headers: { "x-reflo-csrf": csrfToken },
+          method: "POST",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("archive_failed");
+      }
+      await onArchiveCourse(course.courseId);
+      setArchiveStatusMessage(`${course.title} was archived.`);
+      window.setTimeout(() => {
+        document
+          .querySelector<HTMLButtonElement>('.course-card[aria-pressed="true"]')
+          ?.focus();
+      }, 0);
+    } catch {
+      setArchiveStatusMessage(`Could not archive ${course.title}. Try again.`);
+    } finally {
+      setArchivePendingCourseId(null);
+    }
+  }
+
   return (
     <div className="dashboard" onKeyDown={activateDashboardControlFromKeyboard}>
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="visually-hidden"
+        role="status"
+      >
+        {archiveStatusMessage}
+      </p>
       <div className="dashboard-heading">
         <div>
           <p className="eyebrow">Personal library</p>
@@ -533,14 +598,14 @@ function Dashboard({
             <h2>Recent sessions</h2>
             <span>Latest</span>
           </div>
-          {sessions.length === 0 ? (
+          {visibleSessions.length === 0 ? (
             <EmptyState
               title="No study sessions"
               copy="Completed and paused sessions will appear here."
             />
           ) : (
             <ol className="history-list">
-              {sessions.slice(0, 6).map((session) => (
+              {visibleSessions.slice(0, 6).map((session) => (
                 <li key={session.sessionId}>
                   <span className={`history-dot status-${session.status}`} />
                   <button
@@ -594,7 +659,7 @@ function Dashboard({
           apiOrigin={apiOrigin}
           courseId={selectedCourseId}
           key={`${selectedCourseId}:${
-            sessions.find(
+            visibleSessions.find(
               (session) =>
                 session.courseId === selectedCourseId &&
                 session.status === "active",
@@ -602,7 +667,7 @@ function Dashboard({
           }`}
           onProgressRefresh={onRetryProgress}
           resumeSessionId={
-            sessions.find(
+            visibleSessions.find(
               (session) =>
                 session.courseId === selectedCourseId &&
                 session.status === "active",
@@ -615,6 +680,12 @@ function Dashboard({
       studyAvailability.kind !== "available" ? (
         <CourseStudyUnavailable
           availability={studyAvailability}
+          canDismiss={
+            selectedCourse.courseStatus === "failed" ||
+            selectedCourse.sourceStatus === "failed"
+          }
+          dismissPending={archivePendingCourseId === selectedCourse.courseId}
+          onDismiss={() => void archiveCourse(selectedCourse)}
           onReviewCourseSetup={openCourseSetup}
         />
       ) : null}
@@ -640,7 +711,17 @@ function Dashboard({
         </section>
       ) : null}
       {progressScreen === "ready" && progress !== null ? (
-        <KnowledgeMap onRefresh={onRetryProgress} progress={progress} />
+        <KnowledgeMap
+          archivePending={archivePendingCourseId === progress.courseId}
+          key={progress.courseId}
+          onArchive={() => {
+            if (selectedCourse !== null) {
+              void archiveCourse(selectedCourse);
+            }
+          }}
+          onRefresh={onRetryProgress}
+          progress={progress}
+        />
       ) : null}
 
       <div className="dashboard-settings">
@@ -671,12 +752,18 @@ function Dashboard({
 
 function CourseStudyUnavailable({
   availability,
+  canDismiss,
+  dismissPending,
+  onDismiss,
   onReviewCourseSetup,
 }: {
   readonly availability: Exclude<
     ReturnType<typeof courseStudyAvailability>,
     { readonly kind: "available" }
   >;
+  readonly canDismiss: boolean;
+  readonly dismissPending: boolean;
+  readonly onDismiss: () => void;
   readonly onReviewCourseSetup: () => void;
 }) {
   return (
@@ -694,13 +781,20 @@ function CourseStudyUnavailable({
       >
         <strong>{availability.title}</strong>
         <p>{availability.copy}</p>
-        <button
-          aria-controls="course-setup-disclosure"
-          onClick={onReviewCourseSetup}
-          type="button"
-        >
-          Review upload options
-        </button>
+        <div className="flow-notice-actions">
+          <button
+            aria-controls="course-setup-disclosure"
+            onClick={onReviewCourseSetup}
+            type="button"
+          >
+            Review upload options
+          </button>
+          {canDismiss ? (
+            <button disabled={dismissPending} onClick={onDismiss} type="button">
+              {dismissPending ? "Dismissing…" : "Dismiss failed attempt"}
+            </button>
+          ) : null}
+        </div>
       </div>
     </section>
   );

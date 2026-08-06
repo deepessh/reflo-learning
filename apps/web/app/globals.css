@@ -1155,10 +1155,48 @@ button,
 .flow-notice button {
   margin-top: 1rem;
 }
+.flow-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
 .flow-notice small {
   margin-top: 0.55rem;
   color: #718d80;
   font-size: 0.7rem;
+}
+.course-options {
+  position: relative;
+  text-align: left;
+}
+.course-options summary {
+  cursor: pointer;
+  color: #8da99b;
+  font-size: 0.76rem;
+}
+.course-options > .secondary-button {
+  margin-top: 0.65rem;
+}
+.course-archive-confirmation {
+  width: min(320px, 80vw);
+  margin-top: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(224, 152, 130, 0.3);
+  border-radius: 12px;
+  background: rgba(30, 18, 15, 0.96);
+}
+.course-archive-confirmation p {
+  margin: 0;
+  color: #d8e9e1;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.course-archive-confirmation > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
 }
 .assessment-availability {
   max-width: 64ch;

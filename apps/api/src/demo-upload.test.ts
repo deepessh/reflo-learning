@@ -176,7 +176,7 @@ describe("approved staff demo upload service", () => {
     );
   });
 
-  it("rejects a concurrent retry before writing a second immutable object", async () => {
+  it("shares one immutable predecessor object across concurrent retry services", async () => {
     const repository = new FakeRepository();
     const failedPredecessor = {
       ...snapshot(),
@@ -185,11 +185,26 @@ describe("approved staff demo upload service", () => {
       parseStatus: "failed",
       sourceDocumentId: ids.replacedUpload,
     } satisfies DemoUploadSnapshot;
+    let winner: DemoUploadCreate | null = null;
+    vi.spyOn(repository, "create").mockImplementation(async (input) => {
+      if (winner !== null) {
+        throw new DemoUploadAccessError("not_found");
+      }
+      winner = input;
+    });
     vi.spyOn(repository, "get").mockImplementation(
-      async (_authorization, sourceDocumentId) =>
-        sourceDocumentId === ids.replacedUpload
-          ? failedPredecessor
-          : snapshot(),
+      async (_authorization, sourceDocumentId) => {
+        if (sourceDocumentId === ids.replacedUpload) {
+          return failedPredecessor;
+        }
+        return winner !== null && winner.sourceDocumentId === sourceDocumentId
+          ? {
+              ...snapshot(),
+              courseId: winner.courseId,
+              sourceDocumentId: winner.sourceDocumentId,
+            }
+          : null;
+      },
     );
     let releaseStorage!: () => void;
     const storageGate = new Promise<void>((resolve) => {
@@ -205,20 +220,26 @@ describe("approved staff demo upload service", () => {
         };
       }),
     };
-    const generatedIds = [
+    const makeService = (generatedIds: string[]) =>
+      new ApprovedDemoUploadService({
+        approvals: [approval],
+        createId: () => generatedIds.shift() ?? ids.operation,
+        objects,
+        operatorUserIds: [ids.user],
+        repository,
+      });
+    const firstService = makeService([
       ids.upload,
       ids.course,
       ids.operation,
       ids.generationOperation,
+    ]);
+    const secondService = makeService([
       "55000000-0000-4000-8000-000000000009",
-    ];
-    const service = new ApprovedDemoUploadService({
-      approvals: [approval],
-      createId: () => generatedIds.shift() ?? ids.operation,
-      objects,
-      operatorUserIds: [ids.user],
-      repository,
-    });
+      "55000000-0000-4000-8000-00000000000a",
+      "55000000-0000-4000-8000-00000000000b",
+      "55000000-0000-4000-8000-00000000000c",
+    ]);
     const retryInput = {
       approvalId: approval.approvalId,
       bytes,
@@ -226,17 +247,27 @@ describe("approved staff demo upload service", () => {
       replacesUploadId: ids.replacedUpload,
     } as const;
 
-    const first = service.create(authorization, retryInput);
+    const first = firstService.create(authorization, retryInput);
+    const second = secondService.create(authorization, retryInput);
     await vi.waitFor(() =>
-      expect(objects.putIfAbsent).toHaveBeenCalledTimes(1),
+      expect(objects.putIfAbsent).toHaveBeenCalledTimes(2),
     );
-    await expect(service.create(authorization, retryInput)).rejects.toEqual(
-      new DemoUploadAccessError("not_found"),
-    );
-    expect(objects.putIfAbsent).toHaveBeenCalledTimes(1);
-
     releaseStorage();
-    await expect(first).resolves.toMatchObject({ uploadId: ids.upload });
+    const outcomes = await Promise.allSettled([first, second]);
+
+    expect(
+      outcomes.filter((outcome) => outcome.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      outcomes.filter((outcome) => outcome.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      new Set(objects.putIfAbsent.mock.calls.map(([input]) => input.objectKey)),
+    ).toEqual(
+      new Set([
+        `owners/${ids.scope}/sources/${ids.replacedUpload}/versions/v1/original.pdf`,
+      ]),
+    );
   });
 
   it("rejects retry lineage that is inaccessible, ready, active, non-retryable, or for different approved bytes", async () => {

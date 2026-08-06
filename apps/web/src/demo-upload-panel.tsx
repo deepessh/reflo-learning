@@ -141,6 +141,7 @@ export function DemoUploadPanel({
       if (controller.signal.aborted) {
         return;
       }
+      setResolvedTrackedUploadId(trackedUploadId);
       setTrackedUploadScreen("error");
       setLocalError(
         "This upload status could not be loaded. No new course was created or assumed ready.",
@@ -237,24 +238,43 @@ export function DemoUploadPanel({
     if (upload?.state !== "outline_ready" || outline !== null) {
       return;
     }
+    let controller: AbortController | null = null;
     const timer = window.setTimeout(async () => {
+      controller = new AbortController();
+      const uploadId = upload.uploadId;
       const response = await fetch(
-        `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(upload.uploadId)}/outline`,
-        { credentials: "include" },
+        `${apiOrigin}/v1/demo/uploads/${encodeURIComponent(uploadId)}/outline`,
+        { credentials: "include", signal: controller.signal },
       ).catch(() => null);
+      if (controller.signal.aborted) {
+        return;
+      }
       if (response?.ok) {
-        const body = (await response.json()) as {
+        const body = (await response.json().catch(() => null)) as {
           outline: DemoCourseOutline;
-        };
+        } | null;
+        if (
+          controller.signal.aborted ||
+          body === null ||
+          body.outline.uploadId !== uploadId
+        ) {
+          return;
+        }
         setOutline(body.outline);
         setSubmissionScreen("tracking");
       } else {
+        if (controller.signal.aborted) {
+          return;
+        }
         setLocalError(
           "The outline reference is not available. No generated course was opened.",
         );
       }
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      controller?.abort();
+      window.clearTimeout(timer);
+    };
   }, [apiOrigin, outline, upload]);
 
   if (approvalScreen === "hidden") {

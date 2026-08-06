@@ -145,7 +145,10 @@ export class TutorAgentService {
     }
 
     const review = session.concepts.find(
-      (concept) => concept.loopResult === null && concept.dueForReview,
+      (concept) =>
+        concept.loopResult === null &&
+        concept.dueForReview &&
+        concept.nextRetestQuestion !== null,
     );
     if (review !== undefined) {
       return { conceptId: review.conceptId, kind: "review" };
@@ -155,6 +158,7 @@ export class TutorAgentService {
         concept.loopResult === null &&
         concept.latestEligibleAttempt !== null &&
         concept.latestEligibleAttempt.rubricBand !== "correct" &&
+        concept.nextRetestQuestion !== null &&
         compareFixed(concept.mastery, RETEACH_MASTERY_THRESHOLD) < 0,
     );
     if (weak !== undefined) {
@@ -162,7 +166,10 @@ export class TutorAgentService {
     }
     const advance = session.concepts.find(
       (concept) =>
-        concept.loopResult === null && concept.latestLessonExposureAt === null,
+        concept.loopResult === null &&
+        concept.latestLessonExposureAt === null &&
+        concept.lesson !== null &&
+        concept.nextRetestQuestion !== null,
     );
     if (advance !== undefined) {
       return { conceptId: advance.conceptId, kind: "advance" };

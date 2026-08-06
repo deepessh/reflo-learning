@@ -38,6 +38,7 @@ describe("Flow B browser presentation", () => {
     expect(
       studyErrorRetryTarget({
         courseLessonSessionId: null,
+        nextActionSessionId: null,
         submissionRetry: null,
         viewSessionId: "session-with-finalized-fallback",
       }),
@@ -51,10 +52,25 @@ describe("Flow B browser presentation", () => {
     expect(
       studyErrorRetryTarget({
         courseLessonSessionId: null,
+        nextActionSessionId: null,
         submissionRetry: "short_answer",
         viewSessionId: "session",
       }),
     ).toEqual({ kind: "short_answer" });
+  });
+
+  it("re-runs the planner after the next activity could not be opened", () => {
+    expect(
+      studyErrorRetryTarget({
+        courseLessonSessionId: "stale-lesson",
+        nextActionSessionId: "session-with-unavailable-next-activity",
+        submissionRetry: null,
+        viewSessionId: "session-with-unavailable-next-activity",
+      }),
+    ).toEqual({
+      kind: "next_action",
+      sessionId: "session-with-unavailable-next-activity",
+    });
   });
 
   it("disables duplicate retry activation and announces pending recovery", () => {

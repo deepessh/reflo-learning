@@ -126,6 +126,56 @@ describe("connected study projection", () => {
       sourceDocumentId: "source",
     });
   });
+
+  it("skips a non-actionable weak concept when loading the next lesson", async () => {
+    const repository = new InMemoryTutorRepository();
+    const artifacts = new InMemoryTutorArtifactStore();
+    const session = sessionFixture();
+    const content = "A source-grounded actionable lesson.";
+    const contentHash = artifacts.seed(
+      "owners/scope/courses/course/assets/actionable.md",
+      content,
+    );
+    repository.sessions.set("session", {
+      ...session,
+      concepts: [
+        {
+          ...session.concepts[0]!,
+          lesson: null,
+          nextRetestQuestion: null,
+        },
+        {
+          ...session.concepts[0]!,
+          conceptId: "actionable-concept",
+          conceptName: "Actionable concept",
+          eligibleAttemptCount: 0,
+          latestEligibleAttempt: null,
+          latestLessonExposureAt: null,
+          lesson: {
+            ...session.concepts[0]!.lesson!,
+            assetId: "actionable-lesson",
+            contentHash,
+            objectKey: "owners/scope/courses/course/assets/actionable.md",
+          },
+          mastery: "0.25000",
+          nextRetestQuestion: {
+            ...session.concepts[0]!.nextRetestQuestion!,
+            conceptId: "actionable-concept",
+            itemId: "actionable-question",
+          },
+        },
+      ],
+    });
+    const service = new ConnectedStudyService(repository, artifacts);
+
+    await expect(
+      service.loadLesson(authorization, "session"),
+    ).resolves.toMatchObject({
+      concept: { conceptId: "actionable-concept" },
+      content,
+      lesson: { assetId: "actionable-lesson" },
+    });
+  });
 });
 
 function sessionFixture(): TutorSessionSnapshot {

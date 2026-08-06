@@ -46,6 +46,7 @@ export interface LibraryCourse {
   readonly chaptersReady: number;
   readonly courseId: string;
   readonly courseStatus: CourseGenerationStatus;
+  readonly sourceDocumentId: string;
   readonly sourceStatus: SourceIngestionStatus;
   readonly title: string;
   readonly updatedAt: Date;

@@ -228,6 +228,11 @@ test(
         userId: ids.user,
       };
 
+      const library = await repository.listLibrary(account);
+      assert.equal(library.length, 1);
+      assert.equal(library[0].courseId, ids.course);
+      assert.equal(library[0].sourceDocumentId, ids.document);
+
       const progress = await repository.getCourseProgress(account, ids.course);
 
       assert.equal(progress.courseId, ids.course);

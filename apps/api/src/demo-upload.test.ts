@@ -176,6 +176,69 @@ describe("approved staff demo upload service", () => {
     );
   });
 
+  it("rejects a concurrent retry before writing a second immutable object", async () => {
+    const repository = new FakeRepository();
+    const failedPredecessor = {
+      ...snapshot(),
+      failureClass: "infrastructure_unavailable",
+      operationState: "failed_permanent",
+      parseStatus: "failed",
+      sourceDocumentId: ids.replacedUpload,
+    } satisfies DemoUploadSnapshot;
+    vi.spyOn(repository, "get").mockImplementation(
+      async (_authorization, sourceDocumentId) =>
+        sourceDocumentId === ids.replacedUpload
+          ? failedPredecessor
+          : snapshot(),
+    );
+    let releaseStorage!: () => void;
+    const storageGate = new Promise<void>((resolve) => {
+      releaseStorage = resolve;
+    });
+    const objects = {
+      putIfAbsent: vi.fn(async (input) => {
+        await storageGate;
+        return {
+          byteLength: input.bytes.byteLength,
+          objectKey: input.objectKey,
+          sha256: input.sha256,
+        };
+      }),
+    };
+    const generatedIds = [
+      ids.upload,
+      ids.course,
+      ids.operation,
+      ids.generationOperation,
+      "55000000-0000-4000-8000-000000000009",
+    ];
+    const service = new ApprovedDemoUploadService({
+      approvals: [approval],
+      createId: () => generatedIds.shift() ?? ids.operation,
+      objects,
+      operatorUserIds: [ids.user],
+      repository,
+    });
+    const retryInput = {
+      approvalId: approval.approvalId,
+      bytes,
+      mediaType: approval.mediaType,
+      replacesUploadId: ids.replacedUpload,
+    } as const;
+
+    const first = service.create(authorization, retryInput);
+    await vi.waitFor(() =>
+      expect(objects.putIfAbsent).toHaveBeenCalledTimes(1),
+    );
+    await expect(service.create(authorization, retryInput)).rejects.toEqual(
+      new DemoUploadAccessError("not_found"),
+    );
+    expect(objects.putIfAbsent).toHaveBeenCalledTimes(1);
+
+    releaseStorage();
+    await expect(first).resolves.toMatchObject({ uploadId: ids.upload });
+  });
+
   it("rejects retry lineage that is inaccessible, ready, active, non-retryable, or for different approved bytes", async () => {
     const ineligibleSnapshots: readonly DemoUploadSnapshot[] = [
       {
@@ -459,7 +522,10 @@ class FakeRepository implements DemoUploadPersistence {
   > = null;
   snapshot: DemoUploadSnapshot | null = null;
 
-  async get(): Promise<DemoUploadSnapshot | null> {
+  async get(
+    _authorization: Parameters<DemoUploadPersistence["get"]>[0],
+    _sourceDocumentId: string,
+  ): Promise<DemoUploadSnapshot | null> {
     return this.snapshot;
   }
 

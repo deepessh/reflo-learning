@@ -34,6 +34,13 @@ export function demoUploadFailureAction(
     : { label: "Validate another PDF", replacesUploadId: null };
 }
 
+export function demoUploadTrackedTarget(
+  uploadId: string,
+  upload: DemoUploadView,
+): DemoUploadView | null {
+  return upload.uploadId === uploadId ? upload : null;
+}
+
 export function demoUploadPresentation(
   state: DemoUploadState,
   failureCode: DemoUploadFailureCode | null = null,

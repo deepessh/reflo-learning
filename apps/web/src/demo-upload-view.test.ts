@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type { DemoUploadView } from "@reflo/contracts";
+
 import {
   demoUploadFailureAction,
   demoUploadPresentation,
+  demoUploadTrackedTarget,
 } from "./demo-upload-view";
 
 describe("course upload presentation", () => {
@@ -122,5 +125,28 @@ describe("course upload presentation", () => {
       label: "Validate another PDF",
       replacesUploadId: null,
     });
+  });
+
+  it("hydrates only the exact tracked upload across terminal states", () => {
+    const failed = {
+      approvalId: "approved-pdf-v1",
+      contractVersion: "demo-upload-v2",
+      courseId: "55000000-0000-4000-8000-000000000002",
+      failure: { code: "dependency_unavailable", retryable: true },
+      processingLane: "standard",
+      state: "failed",
+      statusUpdatedAt: "2026-08-05T20:00:00.000Z",
+      uploadId: "55000000-0000-4000-8000-000000000001",
+    } satisfies DemoUploadView;
+
+    expect(demoUploadTrackedTarget(failed.uploadId, failed)).toBe(failed);
+    expect(demoUploadTrackedTarget("different-upload", failed)).toBeNull();
+    expect(
+      demoUploadTrackedTarget(failed.uploadId, {
+        ...failed,
+        failure: null,
+        state: "outline_ready",
+      }),
+    ).not.toBeNull();
   });
 });

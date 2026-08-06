@@ -296,6 +296,7 @@ function libraryCourse(
     chaptersReady: 1,
     courseId: "course-a",
     courseStatus: "generating",
+    sourceDocumentId: "source-a",
     sourceStatus: "parsed",
     title: "Course A",
     updatedAt: new Date("2026-08-05T12:00:00.000Z"),

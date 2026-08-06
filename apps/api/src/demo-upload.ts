@@ -109,6 +109,7 @@ export class ApprovedDemoUploadService {
   readonly #operatorUserIds: ReadonlySet<string>;
   readonly #processing: DemoUploadProcessingQueue | undefined;
   readonly #repository: DemoUploadPersistence;
+  readonly #activeReplacementKeys = new Set<string>();
 
   constructor(options: {
     readonly approvals: readonly ApprovedDemoSource[];
@@ -190,6 +191,7 @@ export class ApprovedDemoUploadService {
         this.#clock(),
       );
     }
+    let activeReplacementKey: string | null = null;
     if (input.replacesUploadId !== undefined) {
       const replaced = await this.#repository.get(
         authorization,
@@ -203,55 +205,66 @@ export class ApprovedDemoUploadService {
       ) {
         throw new DemoUploadAccessError("not_found");
       }
+      activeReplacementKey = `${authorization.ownerScopeId}:${input.replacesUploadId}`;
+      if (this.#activeReplacementKeys.has(activeReplacementKey)) {
+        throw new DemoUploadAccessError("not_found");
+      }
+      this.#activeReplacementKeys.add(activeReplacementKey);
     }
-    const courseId = this.#createId();
-    const operationId = this.#createId();
-    const generationOperationId = this.#createId();
-    const objectKey = `owners/${authorization.ownerScopeId}/sources/${uploadId}/versions/v1/original.${approval.extension}`;
-    const stored = await this.#objects.putIfAbsent({
-      bytes: input.bytes,
-      objectKey,
-      sha256: actualSha256,
-    });
-    if (
-      stored.objectKey !== objectKey ||
-      stored.byteLength !== input.bytes.byteLength ||
-      stored.sha256 !== actualSha256
-    ) {
-      throw new Error("demo_upload_storage_mismatch");
+    try {
+      const courseId = this.#createId();
+      const operationId = this.#createId();
+      const generationOperationId = this.#createId();
+      const objectKey = `owners/${authorization.ownerScopeId}/sources/${uploadId}/versions/v1/original.${approval.extension}`;
+      const stored = await this.#objects.putIfAbsent({
+        bytes: input.bytes,
+        objectKey,
+        sha256: actualSha256,
+      });
+      if (
+        stored.objectKey !== objectKey ||
+        stored.byteLength !== input.bytes.byteLength ||
+        stored.sha256 !== actualSha256
+      ) {
+        throw new Error("demo_upload_storage_mismatch");
+      }
+      await this.#repository.create({
+        authorization,
+        byteSize: input.bytes.byteLength,
+        checksum: actualSha256,
+        courseId,
+        generationOperationId,
+        mediaType: approval.mediaType,
+        objectKey,
+        operationId,
+        replacesSourceDocumentId: input.replacesUploadId,
+        sourceDocumentId: uploadId,
+        title: approval.title,
+      });
+      const snapshot = await this.#repository.get(authorization, uploadId);
+      if (
+        snapshot === null ||
+        snapshot.sourceDocumentId !== uploadId ||
+        snapshot.courseId !== courseId ||
+        snapshot.checksum !== actualSha256
+      ) {
+        throw new Error("demo_upload_persistence_mismatch");
+      }
+      const view = this.#project(snapshot, approval);
+      this.#processing?.schedule({
+        authorization,
+        courseId,
+        expectedInputSha256: actualSha256,
+        generationOperationId,
+        operationId,
+        sourceDocumentId: uploadId,
+      });
+      return view;
+    } finally {
+      if (activeReplacementKey !== null) {
+        this.#activeReplacementKeys.delete(activeReplacementKey);
+      }
     }
-    await this.#repository.create({
-      authorization,
-      byteSize: input.bytes.byteLength,
-      checksum: actualSha256,
-      courseId,
-      generationOperationId,
-      mediaType: approval.mediaType,
-      objectKey,
-      operationId,
-      replacesSourceDocumentId: input.replacesUploadId,
-      sourceDocumentId: uploadId,
-      title: approval.title,
-    });
-    const snapshot = await this.#repository.get(authorization, uploadId);
-    if (
-      snapshot === null ||
-      snapshot.sourceDocumentId !== uploadId ||
-      snapshot.courseId !== courseId ||
-      snapshot.checksum !== actualSha256
-    ) {
-      throw new Error("demo_upload_persistence_mismatch");
-    }
-    const view = this.#project(snapshot, approval);
-    this.#processing?.schedule({
-      authorization,
-      courseId,
-      expectedInputSha256: actualSha256,
-      generationOperationId,
-      operationId,
-      sourceDocumentId: uploadId,
-    });
-    return view;
   }
 
   async get(

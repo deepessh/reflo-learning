@@ -201,6 +201,7 @@ export function FlowBStudy({
   const focusHandoffOrigin = useRef<HTMLElement | null>(null);
   const focusHandoffRequested = useRef(false);
   const studyPanel = useRef<HTMLElement>(null);
+  const transitionFocusTarget = useRef<HTMLHeadingElement>(null);
   const retryInFlight = useRef(false);
   const placementSubmissionInFlight = useRef(false);
   const tutorInputId = useId();
@@ -1277,6 +1278,38 @@ export function FlowBStudy({
   const placementFailurePresentation = placementFailureAction(
     placementQuizPlan?.regeneration,
   );
+  const transitionAnnouncement = studyTransitionAnnouncement({
+    assessment,
+    disposition,
+    message,
+    phase,
+    placement,
+    placementAssessmentDisposition,
+    placementResult,
+    questionStage,
+    retryAnnouncement,
+  });
+  const transitionFocusKey = [
+    phase,
+    placement?.question?.id ?? "",
+    placementResult === null ? "" : placementResultCopy(placementResult),
+    assessment?.attemptId ?? "",
+    question?.itemId ?? "",
+    message,
+  ].join(":");
+
+  useEffect(() => {
+    if (
+      phase === "checking" ||
+      phase === "placement_pending" ||
+      phase === "preparing" ||
+      phase === "submitting" ||
+      document.activeElement !== document.body
+    ) {
+      return;
+    }
+    (transitionFocusTarget.current ?? studyPanel.current)?.focus();
+  }, [phase, transitionFocusKey]);
 
   return (
     <section
@@ -1298,7 +1331,7 @@ export function FlowBStudy({
         className="visually-hidden"
         role="status"
       >
-        {retryAnnouncement || retryPresentation.announcement}
+        {transitionAnnouncement || retryPresentation.announcement}
       </p>
       <div className="flow-heading">
         <div>
@@ -1418,7 +1451,9 @@ export function FlowBStudy({
       placementQuestion !== null ? (
         <form className="flow-question" onSubmit={submitPlacementAnswer}>
           <p className="question-stage">{placementProgressLabel(placement)}</p>
-          <h3>{placementQuestion.prompt}</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            {placementQuestion.prompt}
+          </h3>
           {placementQuestion.itemType === "short_answer" ? (
             <>
               <label htmlFor="placement-answer">Your answer</label>
@@ -1461,13 +1496,15 @@ export function FlowBStudy({
       ) : null}
 
       {phase === "placement_result" && placementResult !== null ? (
-        <div className="flow-result" aria-live="polite">
+        <div className="flow-result">
           <p className="question-stage">
             {placement === null
               ? "Placement"
               : placementProgressLabel(placement)}
           </p>
-          <h3>{placementResultCopy(placementResult)}</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            {placementResultCopy(placementResult)}
+          </h3>
           {placementAssessmentDisposition === "abstained" &&
           placementFallback !== null ? (
             <div className="fallback-card">
@@ -1508,9 +1545,11 @@ export function FlowBStudy({
       ) : null}
 
       {phase === "placement_complete" && placement !== null ? (
-        <div className="flow-summary" aria-live="polite">
+        <div className="flow-summary">
           <p className="eyebrow">{placementProgressLabel(placement)}</p>
-          <h3>Your initial Knowledge Map is ready.</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            Your initial Knowledge Map is ready.
+          </h3>
           <p>
             Reflo used your confidently graded answers to choose what to study
             next. The map below reflects that evidence.
@@ -1582,7 +1621,9 @@ export function FlowBStudy({
           <p className="question-stage">
             {questionStage === "initial" ? "Quick check" : "Try it again"}
           </p>
-          <h3>{question.prompt}</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            {question.prompt}
+          </h3>
           <label htmlFor="flow-answer">Your answer</label>
           <textarea
             id="flow-answer"
@@ -1612,7 +1653,9 @@ export function FlowBStudy({
                   ? "Let’s work on this"
                   : "Answer recorded"}
           </span>
-          <h3>{assessment.learnerMessage}</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            {assessment.learnerMessage}
+          </h3>
           <p>
             {assessment.status === "replayed"
               ? "We found your earlier submission and kept a single result."
@@ -1676,7 +1719,9 @@ export function FlowBStudy({
                   : "Video lesson"}
             </span>
           </div>
-          <h3>{courseLesson.concept.conceptName}</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            {courseLesson.concept.conceptName}
+          </h3>
           <LessonMedia
             apiOrigin={apiOrigin}
             key={courseLesson.lesson.assetId}
@@ -1767,7 +1812,9 @@ export function FlowBStudy({
             <span>Another way to learn this</span>
             <span>Explanation {view.lesson.replacementOrdinal}</span>
           </div>
-          <h3>Here’s another way to look at it</h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
+            Here’s another way to look at it
+          </h3>
           <pre>{view.lesson.content}</pre>
           <p className="evidence-note">
             Based on {view.lesson.sourceSpanCount} course reference
@@ -1789,7 +1836,7 @@ export function FlowBStudy({
       {phase === "summary" && view !== null ? (
         <div className="flow-summary">
           <p className="eyebrow">Session summary</p>
-          <h3>
+          <h3 ref={transitionFocusTarget} tabIndex={-1}>
             {view.loopResult?.outcome === "retest_succeeded"
               ? "Nice work—the new explanation helped."
               : completedFromNextAction || view.state === "complete"
@@ -1888,6 +1935,66 @@ export function FlowBStudy({
     setMessage(error instanceof Error ? error.message : fallback);
     setPhase("error");
   }
+}
+
+function studyTransitionAnnouncement({
+  assessment,
+  disposition,
+  message,
+  phase,
+  placement,
+  placementAssessmentDisposition,
+  placementResult,
+  questionStage,
+  retryAnnouncement,
+}: {
+  readonly assessment: BrowserAssessmentResult | null;
+  readonly disposition: ReturnType<typeof assessmentDisposition> | null;
+  readonly message: string;
+  readonly phase: Phase;
+  readonly placement: PlacementView | null;
+  readonly placementAssessmentDisposition: ReturnType<
+    typeof assessmentDisposition
+  > | null;
+  readonly placementResult: PlacementAnswerResult | null;
+  readonly questionStage: QuestionStage;
+  readonly retryAnnouncement: string;
+}): string {
+  if (phase === "error") return "";
+  if (phase === "placement_question" && placement !== null) {
+    return `${placementProgressLabel(placement)} loaded.`;
+  }
+  if (phase === "placement_result" && placementResult !== null) {
+    const progress =
+      placement === null
+        ? "Placement answer recorded."
+        : `Placement answer ${Math.min(placement.answered + 1, placement.total)} of ${placement.total} recorded.`;
+    const fallback =
+      placementAssessmentDisposition === "abstained"
+        ? " A source-backed multiple-choice fallback is ready."
+        : "";
+    return `${placementResultCopy(placementResult)} ${progress}${fallback}`;
+  }
+  if (phase === "placement_complete" && placement !== null) {
+    return `${placementProgressLabel(placement)}. Your initial Knowledge Map is ready. Continue to the first lesson.`;
+  }
+  if (phase === "question") {
+    return `${questionStage === "initial" ? "Quick check" : "New retry question"} loaded.`;
+  }
+  if (phase === "result" && assessment !== null) {
+    const nextAction =
+      disposition === "abstained"
+        ? " A source-backed multiple-choice fallback is ready."
+        : disposition === "correct"
+          ? " Continue when ready."
+          : " Review the feedback and choose the next action.";
+    return `${assessment.learnerMessage}${nextAction}`;
+  }
+  if (phase === "lesson") return "The next source-backed lesson is ready.";
+  if (phase === "summary")
+    return "Session complete. Your Knowledge Map is up to date.";
+  if (message !== "" && phase === "activation_failed") return "";
+  return retryAnnouncement;
 }
 
 function FlowPlan({ view }: { readonly view: ConnectedStudyView }) {

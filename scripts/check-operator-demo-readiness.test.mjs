@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   assertOperatorDemoReady,
   collectOperatorDemoReadiness,
+  localUploadIdentityResult,
 } from "./check-operator-demo-readiness.mjs";
 
 const origins = {
@@ -62,6 +63,32 @@ describe("operator-hosted demo readiness", () => {
           }),
       }),
       /response_too_large/,
+    );
+  });
+
+  it("requires the API upload identities to match the prepared worker profile", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const snapshot = `cvd-${"b".repeat(32)}`;
+    const runtime = [
+      "REFLO_DEMO_UPLOAD_PROCESSOR_MODE=local-isolated-ingestion-bridge-v1",
+      `REFLO_LOCAL_CLAMAV_SNAPSHOT_ID=${snapshot}`,
+      `REFLO_LOCAL_INGESTION_IMAGE_DIGEST=${digest}`,
+    ].join("\n");
+    const workers = [
+      `REFLO_LOCAL_CLAMAV_SNAPSHOT_ID='${snapshot}'`,
+      `REFLO_LOCAL_INGESTION_IMAGE_DIGEST='${digest}'`,
+    ].join("\n");
+
+    assert.deepEqual(localUploadIdentityResult(runtime, workers), {
+      available: true,
+      component: "upload-identities",
+    });
+    assert.deepEqual(
+      localUploadIdentityResult(
+        runtime,
+        workers.replace(digest, `sha256:${"c".repeat(64)}`),
+      ),
+      { available: false, component: "upload-identities" },
     );
   });
 });

@@ -1097,6 +1097,10 @@ export function createApiRequestListener(
                 return;
               }
               const body = await readJsonBody(request);
+              const contextQuestionId = optionalStringField(
+                body,
+                "contextQuestionId",
+              );
               const answer = await tutorAgent.ask({
                 authorization: {
                   actorId: account.userId,
@@ -1104,6 +1108,9 @@ export function createApiRequestListener(
                   ownerScopeId: account.ownerScopeId,
                 },
                 courseId: stringField(body, "courseId"),
+                ...(contextQuestionId === undefined
+                  ? {}
+                  : { contextQuestionId }),
                 deadlineMs: 30_000,
                 idempotencyKey: stringField(body, "idempotencyKey"),
                 question: stringField(body, "question"),
@@ -1788,6 +1795,17 @@ function stringField(body: Record<string, unknown>, name: string): string {
     throw new JsonBodyError();
   }
   return value;
+}
+
+function optionalStringField(
+  body: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const value = body[name];
+  if (value === undefined || typeof value === "string") {
+    return value;
+  }
+  throw new JsonBodyError();
 }
 
 function deliveryProvider(

@@ -960,10 +960,12 @@ describe("auth, library, and session-history API", () => {
       `${baseUrl}/v1/study-sessions/${sessionId}/ask`,
       {
         body: JSON.stringify({
+          contextQuestionId: "60000000-0000-4000-8000-000000000004",
           courseId: "50000000-0000-4000-8000-000000000001",
           idempotencyKey: "api/tutor-question/v1/one",
           question: "What is a VPC?",
           sourceDocumentId: "80000000-0000-4000-8000-000000000001",
+          sourceSpanIds: ["client-controlled-span"],
         }),
         headers: {
           "content-type": "application/json",
@@ -986,6 +988,41 @@ describe("auth, library, and session-history API", () => {
         kind: "answer",
       },
     });
+    expect(tutorAgent.ask).toHaveBeenCalledWith({
+      authorization: expect.objectContaining({
+        ownerScopeId: expect.any(String),
+      }),
+      contextQuestionId: "60000000-0000-4000-8000-000000000004",
+      courseId: "50000000-0000-4000-8000-000000000001",
+      deadlineMs: 30_000,
+      idempotencyKey: "api/tutor-question/v1/one",
+      question: "What is a VPC?",
+      sessionId,
+      sourceDocumentId: "80000000-0000-4000-8000-000000000001",
+    });
+
+    const askWithoutContextResponse = await fetch(
+      `${baseUrl}/v1/study-sessions/${sessionId}/ask`,
+      {
+        body: JSON.stringify({
+          courseId: "50000000-0000-4000-8000-000000000001",
+          idempotencyKey: "api/tutor-question/v1/two",
+          question: "How is it isolated?",
+          sourceDocumentId: "80000000-0000-4000-8000-000000000001",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: cookie.header,
+          origin: "https://app.reflo.example",
+          "x-reflo-csrf": cookie.csrf,
+        },
+        method: "POST",
+      },
+    );
+    expect(askWithoutContextResponse.status).toBe(200);
+    expect(tutorAgent.ask).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ contextQuestionId: expect.anything() }),
+    );
   });
 
   it("serves bounded preflight, assessment replay, and persisted summaries", async () => {

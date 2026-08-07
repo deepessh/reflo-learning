@@ -25,9 +25,15 @@ const ids = {
   concept: "00000000-0000-4000-8000-000000000601",
   course: "00000000-0000-4000-8000-000000000401",
   document: "00000000-0000-4000-8000-000000000301",
+  foreignCourse: "00000000-0000-4000-8000-000000000402",
+  foreignDocument: "00000000-0000-4000-8000-000000000302",
+  foreignQuiz: "00000000-0000-4000-8000-000000000702",
+  foreignSpan: "00000000-0000-4000-8000-000000000902",
   generation: "10000000-0000-4000-8000-000000000003",
   member: "00000000-0000-4000-8000-000000000201",
   quiz: "00000000-0000-4000-8000-000000000701",
+  sameCourseQuiz: "00000000-0000-4000-8000-000000000703",
+  sameCourseSpan: "00000000-0000-4000-8000-000000000903",
   scope: "00000000-0000-4000-8000-000000000101",
   session: "00000000-0000-4000-8000-000000000801",
   span: "00000000-0000-4000-8000-000000000901",
@@ -91,8 +97,46 @@ test(
       assert.deepEqual(loaded.concepts[0].sourceSpans, [
         { id: ids.span, text: "A VPC is an isolated virtual network." },
       ]);
+      assert.deepEqual(
+        await repository.resolveAuthorizedQuestionSourceSpanIds(authorization, {
+          courseId: ids.course,
+          currentQuestionId: ids.quiz,
+          questionId: ids.quiz,
+          sessionId: ids.session,
+          sourceDocumentId: ids.document,
+        }),
+        [ids.span],
+      );
+      assert.deepEqual(
+        await repository.resolveAuthorizedQuestionSourceSpanIds(authorization, {
+          courseId: ids.course,
+          questionId: ids.foreignQuiz,
+          sessionId: ids.session,
+          sourceDocumentId: ids.document,
+        }),
+        [],
+      );
+      assert.deepEqual(
+        await repository.resolveAuthorizedQuestionSourceSpanIds(authorization, {
+          courseId: ids.course,
+          currentQuestionId: ids.quiz,
+          questionId: ids.sameCourseQuiz,
+          sessionId: ids.session,
+          sourceDocumentId: ids.document,
+        }),
+        [],
+      );
 
       await seedCorrectRetest(client);
+      assert.deepEqual(
+        await repository.resolveAuthorizedQuestionSourceSpanIds(authorization, {
+          courseId: ids.course,
+          questionId: ids.quiz,
+          sessionId: ids.session,
+          sourceDocumentId: ids.document,
+        }),
+        [ids.span],
+      );
       const result = await repository.recordLoopSuccess(authorization, {
         conceptId: ids.concept,
         finalMastery: "0.28571",
@@ -264,6 +308,72 @@ async function seedFixture(client) {
        (owner_scope_id, quiz_item_id, source_span_id)
      VALUES ($1, $2, $3)`,
     [ids.scope, ids.quiz, ids.span],
+  );
+  await client.query(
+    `INSERT INTO source_span
+       (id, owner_scope_id, source_document_id, canonical_text, text_hash,
+        canonical_start, canonical_end, parser_version, chunker_version,
+        tokenizer_version, chunk_order)
+     VALUES ($1, $2, $3, 'Unrelated same-course material.', 'hash-same-course',
+             30, 61, 'p1', 'c1', 't1', 1)`,
+    [ids.sameCourseSpan, ids.scope, ids.document],
+  );
+  await client.query(
+    `INSERT INTO quiz_item
+       (id, owner_scope_id, course_id, item_type, difficulty, prompt,
+        keyed_answer, version, normalized_prompt_hash, response_options)
+     VALUES (
+       $1, $2, $3, 'multiple_choice', 2, 'Unrelated same-course question?',
+       to_jsonb('Different answer'::text), 'fixture-v1', $4,
+       '["Different answer","Other"]'::jsonb
+     )`,
+    [ids.sameCourseQuiz, ids.scope, ids.course, "c".repeat(64)],
+  );
+  await client.query(
+    `INSERT INTO quiz_item_source_span
+       (owner_scope_id, quiz_item_id, source_span_id)
+     VALUES ($1, $2, $3)`,
+    [ids.scope, ids.sameCourseQuiz, ids.sameCourseSpan],
+  );
+  await client.query(
+    `INSERT INTO source_document
+       (id, owner_scope_id, object_key, checksum, media_type, byte_size,
+        parse_status)
+     VALUES ($1, $2, 'owners/tutor/foreign-source', 'sha256:foreign-tutor',
+             'application/pdf', 10, 'parsed')`,
+    [ids.foreignDocument, ids.scope],
+  );
+  await client.query(
+    `INSERT INTO source_span
+       (id, owner_scope_id, source_document_id, canonical_text, text_hash,
+        canonical_start, canonical_end, parser_version, chunker_version,
+        tokenizer_version, chunk_order)
+     VALUES ($1, $2, $3, 'Foreign course material.', 'hash-foreign', 0, 24,
+             'p1', 'c1', 't1', 0)`,
+    [ids.foreignSpan, ids.scope, ids.foreignDocument],
+  );
+  await client.query(
+    `INSERT INTO course
+       (id, owner_scope_id, source_document_id, title, status)
+     VALUES ($1, $2, $3, 'Foreign tutor fixture', 'ready')`,
+    [ids.foreignCourse, ids.scope, ids.foreignDocument],
+  );
+  await client.query(
+    `INSERT INTO quiz_item
+       (id, owner_scope_id, course_id, item_type, difficulty, prompt,
+        keyed_answer, version, normalized_prompt_hash, response_options)
+     VALUES (
+       $1, $2, $3, 'multiple_choice', 2, 'Foreign question?',
+       to_jsonb('Foreign answer'::text), 'fixture-v1', $4,
+       '["Foreign answer","Other"]'::jsonb
+     )`,
+    [ids.foreignQuiz, ids.scope, ids.foreignCourse, "b".repeat(64)],
+  );
+  await client.query(
+    `INSERT INTO quiz_item_source_span
+       (owner_scope_id, quiz_item_id, source_span_id)
+     VALUES ($1, $2, $3)`,
+    [ids.scope, ids.foreignQuiz, ids.foreignSpan],
   );
 }
 

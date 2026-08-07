@@ -12,6 +12,7 @@ import {
   type TutorLessonReference,
   type TutorLoopResult,
   type TutorQuestionRecord,
+  type TutorQuestionSourceSpanRequest,
   type TutorRetestQuestion,
   type TutorReviewSchedulerPort,
   type TutorSessionSnapshot,
@@ -193,6 +194,77 @@ export class PostgresTutorAgentRepository
         reteaches,
         questions,
       );
+    });
+  }
+
+  async resolveAuthorizedQuestionSourceSpanIds(
+    authorization: ScopeAuthorizationContext,
+    request: TutorQuestionSourceSpanRequest,
+  ): Promise<readonly string[]> {
+    validateAuthorization(authorization);
+    validateUuid(request.sessionId);
+    validateUuid(request.courseId);
+    validateUuid(request.sourceDocumentId);
+    validateUuid(request.questionId);
+    if (request.currentQuestionId !== undefined) {
+      validateUuid(request.currentQuestionId);
+    }
+    return this.#transaction(async (client) => {
+      await setScopeContext(client, authorization);
+      const session = await loadAuthorizedSession(
+        client,
+        authorization,
+        request.sessionId,
+        false,
+      );
+      if (
+        session === null ||
+        session.course_id !== request.courseId ||
+        session.source_document_id !== request.sourceDocumentId
+      ) {
+        return [];
+      }
+      const result = await client.query<{ source_span_id: string }>(
+        `SELECT source.source_span_id
+         FROM quiz_item AS item
+         JOIN quiz_item_source_span AS source
+           ON source.owner_scope_id = item.owner_scope_id
+          AND source.quiz_item_id = item.id
+         JOIN source_span AS span
+           ON span.owner_scope_id = source.owner_scope_id
+          AND span.id = source.source_span_id
+          AND span.source_document_id = $3
+         WHERE item.owner_scope_id = $1
+           AND item.course_id = $2
+           AND item.id = $4
+           AND (
+             item.id = $6
+             OR EXISTS (
+               SELECT 1
+               FROM attempt AS recorded_attempt
+               WHERE recorded_attempt.owner_scope_id = item.owner_scope_id
+                 AND recorded_attempt.session_id = $5
+                 AND recorded_attempt.quiz_item_id = item.id
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM assessment_session_question AS presented
+               WHERE presented.owner_scope_id = item.owner_scope_id
+                 AND presented.session_id = $5
+                 AND presented.quiz_item_id = item.id
+             )
+           )
+         ORDER BY span.chunk_order, span.id`,
+        [
+          authorization.ownerScopeId,
+          request.courseId,
+          request.sourceDocumentId,
+          request.questionId,
+          request.sessionId,
+          request.currentQuestionId ?? null,
+        ],
+      );
+      return result.rows.map((row) => row.source_span_id);
     });
   }
 

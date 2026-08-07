@@ -268,6 +268,7 @@ export interface SearchCommand {
   readonly courseId: string;
   readonly deadlineMs: number;
   readonly limit: number;
+  readonly preferredSourceSpanIds?: readonly string[];
   readonly query: string;
   readonly sourceDocumentId: string;
 }

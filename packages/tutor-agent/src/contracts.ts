@@ -161,6 +161,7 @@ export type NextTutorAction =
 
 export interface AskTutorCommand {
   readonly authorization: ScopeAuthorizationContext;
+  readonly contextQuestionId?: string;
   readonly courseId: string;
   readonly deadlineMs: number;
   readonly idempotencyKey: string;
@@ -217,7 +218,16 @@ export interface TutorSearchRequest {
   readonly courseId: string;
   readonly deadlineMs: number;
   readonly limit: number;
+  readonly preferredSourceSpanIds?: readonly string[];
   readonly query: string;
+  readonly sourceDocumentId: string;
+}
+
+export interface TutorQuestionSourceSpanRequest {
+  readonly courseId: string;
+  readonly currentQuestionId?: string;
+  readonly questionId: string;
+  readonly sessionId: string;
   readonly sourceDocumentId: string;
 }
 

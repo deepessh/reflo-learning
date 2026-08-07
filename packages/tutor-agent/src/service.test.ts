@@ -32,10 +32,13 @@ const ids = {
   chapter: "30000000-0000-4000-8000-000000000001",
   concept: "40000000-0000-4000-8000-000000000001",
   course: "50000000-0000-4000-8000-000000000001",
+  foreignQuestion: "a0000000-0000-4000-8000-000000000002",
+  question: "a0000000-0000-4000-8000-000000000001",
   scope: "60000000-0000-4000-8000-000000000001",
   session: "70000000-0000-4000-8000-000000000001",
   source: "80000000-0000-4000-8000-000000000001",
   span: "90000000-0000-4000-8000-000000000001",
+  spanSupplement: "90000000-0000-4000-8000-000000000002",
 } as const;
 
 const authorization = {
@@ -196,7 +199,7 @@ describe("TutorAgentService", () => {
     await expect(next(fixture.service)).resolves.toMatchObject({
       conceptId: ids.concept,
       kind: "retest",
-      question: { itemId: "question-retest" },
+      question: { itemId: ids.question },
     });
   });
 
@@ -320,6 +323,149 @@ describe("TutorAgentService", () => {
     );
   });
 
+  it("prefers server-authorized assessment evidence before retrieval supplements", async () => {
+    const fixture = createFixture({ tutorAnswer: "grounded" });
+    fixture.retrieval.preferredResults.set(ids.span, {
+      id: ids.span,
+      sectionPath: ["Agents", "Components"],
+      text: "An Agent has a brain and a body.",
+    });
+    fixture.retrieval.results = [
+      {
+        id: ids.spanSupplement,
+        sectionPath: ["Agents", "Tools"],
+        text: "Tools let Agents act in their environment.",
+      },
+    ];
+
+    await expect(
+      fixture.service.ask({
+        authorization,
+        contextQuestionId: ids.question,
+        courseId: ids.course,
+        deadlineMs: 5_000,
+        idempotencyKey: "test/tutor-question/v1/context",
+        question: "Why are tools described as the Agent's body?",
+        sessionId: ids.session,
+        sourceDocumentId: ids.source,
+      }),
+    ).resolves.toMatchObject({
+      citations: [{ sourceSpanId: ids.span }],
+      kind: "answer",
+    });
+    expect(fixture.retrieval.requests).toEqual([
+      expect.objectContaining({ preferredSourceSpanIds: [ids.span] }),
+    ]);
+    expect(
+      fixture.scripted.invocations.find(
+        (invocation) => invocation.task === "tutor.answer.v1",
+      ),
+    ).toMatchObject({
+      input: {
+        sourceSpans: [{ id: ids.span }, { id: ids.spanSupplement }],
+      },
+    });
+  });
+
+  it("does not let unrelated same-course question context steer Tutor evidence", async () => {
+    const fixture = createFixture({ tutorAnswer: "grounded" });
+    fixture.repository.questionSourceSpans.set(ids.foreignQuestion, {
+      courseId: ids.course,
+      sessionId: ids.session,
+      sourceDocumentId: ids.source,
+      sourceSpanIds: ["foreign-span"],
+    });
+    fixture.retrieval.results = [
+      { id: ids.span, sectionPath: ["VPC"], text: "authorized" },
+    ];
+
+    await expect(
+      fixture.service.ask({
+        authorization,
+        contextQuestionId: ids.foreignQuestion,
+        courseId: ids.course,
+        deadlineMs: 5_000,
+        idempotencyKey: "test/tutor-question/v1/mismatched-context",
+        question: "What is a VPC?",
+        sessionId: ids.session,
+        sourceDocumentId: ids.source,
+      }),
+    ).resolves.toMatchObject({ kind: "answer" });
+    expect(fixture.retrieval.requests[0]).not.toHaveProperty(
+      "preferredSourceSpanIds",
+    );
+    expect(JSON.stringify(fixture.scripted.invocations)).not.toContain(
+      "foreign-span",
+    );
+  });
+
+  it("allows question context already recorded in the same session", async () => {
+    const fixture = createFixture({ tutorAnswer: "grounded" });
+    fixture.repository.questionSourceSpans.set(ids.foreignQuestion, {
+      courseId: ids.course,
+      sessionId: ids.session,
+      sourceDocumentId: ids.source,
+      sourceSpanIds: ["recorded-span"],
+    });
+    fixture.repository.recordedQuestionIds.add(
+      `${ids.session}:${ids.foreignQuestion}`,
+    );
+    fixture.retrieval.preferredResults.set("recorded-span", {
+      id: "recorded-span",
+      sectionPath: ["Earlier question"],
+      text: "Evidence from an earlier question in this session.",
+    });
+    fixture.retrieval.results = [
+      { id: ids.span, sectionPath: ["VPC"], text: "authorized" },
+    ];
+
+    await expect(
+      fixture.service.ask({
+        authorization,
+        contextQuestionId: ids.foreignQuestion,
+        courseId: ids.course,
+        deadlineMs: 5_000,
+        idempotencyKey: "test/tutor-question/v1/recorded-context",
+        question: "Can you clarify my earlier answer?",
+        sessionId: ids.session,
+        sourceDocumentId: ids.source,
+      }),
+    ).resolves.toMatchObject({ kind: "answer" });
+    expect(fixture.retrieval.requests[0]).toMatchObject({
+      preferredSourceSpanIds: ["recorded-span"],
+    });
+  });
+
+  it("keeps an honest model not_found even with preferred question evidence", async () => {
+    const fixture = createFixture({ tutorAnswer: "not_found" });
+    fixture.retrieval.preferredResults.set(ids.span, {
+      id: ids.span,
+      sectionPath: ["VPC"],
+      text: "Authorized but insufficient evidence.",
+    });
+
+    await expect(
+      fixture.service.ask({
+        authorization,
+        contextQuestionId: ids.question,
+        courseId: ids.course,
+        deadlineMs: 5_000,
+        idempotencyKey: "test/tutor-question/v1/not-found",
+        question: "What is unsupported?",
+        sessionId: ids.session,
+        sourceDocumentId: ids.source,
+      }),
+    ).resolves.toEqual({ kind: "not_found" });
+    expect(fixture.repository.questions).toEqual([
+      {
+        idempotencyKey: "test/tutor-question/v1/not-found",
+        resultKind: "not_found",
+        sessionId: ids.session,
+        sourceSpanIds: [],
+      },
+    ]);
+  });
+
   it("fails closed on a model-supplied unauthorized citation", async () => {
     const fixture = createFixture({ tutorAnswer: "forged" });
     fixture.retrieval.results = [
@@ -364,7 +510,7 @@ function createFixture(
       readonly sourceSpanIds: readonly string[];
       readonly strategyTag: string;
     };
-    readonly tutorAnswer?: "forged" | "grounded";
+    readonly tutorAnswer?: "forged" | "grounded" | "not_found";
   } = {},
 ) {
   const repository = new InMemoryTutorRepository();
@@ -375,6 +521,12 @@ function createFixture(
   const contentHash = artifacts.seed("lessons/original.md", initialContent);
   const session = sessionFixture(contentHash, options.concept);
   repository.sessions.set(ids.session, session);
+  repository.questionSourceSpans.set(ids.question, {
+    courseId: ids.course,
+    sessionId: ids.session,
+    sourceDocumentId: ids.source,
+    sourceSpanIds: [ids.span],
+  });
   for (const lesson of session.concepts.flatMap(
     (concept) => concept.reteachLessons,
   )) {
@@ -402,12 +554,17 @@ function createFixture(
         : [
             {
               type: "result",
-              value: {
-                content: "A VPC is an isolated network.",
-                kind: "answer",
-                sourceSpanIds:
-                  options.tutorAnswer === "grounded" ? [ids.span] : ["forged"],
-              },
+              value:
+                options.tutorAnswer === "not_found"
+                  ? { kind: "not_found" }
+                  : {
+                      content: "A VPC is an isolated network.",
+                      kind: "answer",
+                      sourceSpanIds:
+                        options.tutorAnswer === "grounded"
+                          ? [ids.span]
+                          : ["forged"],
+                    },
             },
           ],
   };
@@ -423,6 +580,7 @@ function createFixture(
     repository,
     retrieval,
     scheduler,
+    scripted,
     service: new TutorAgentService({
       artifacts,
       models,
@@ -469,7 +627,7 @@ function sessionFixture(
         nextRetestQuestion: {
           conceptId: ids.concept,
           difficulty: 2,
-          itemId: "question-retest",
+          itemId: ids.question,
           itemType: "multiple_choice",
           prompt: "Which statement best describes a VPC?",
           responseOptions: ["An isolated network", "A storage bucket"],

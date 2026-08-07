@@ -13,6 +13,7 @@ import {
   type TextArtifactWriteResult,
   type TutorLoopResult,
   type TutorQuestionRecord,
+  type TutorQuestionSourceSpanRequest,
   type TutorRetrievedSpan,
   type TutorSearchRequest,
   type TutorSessionSnapshot,
@@ -27,6 +28,16 @@ import type {
 export class InMemoryTutorRepository implements TutorAgentRepositoryPort {
   readonly completedSessions: string[] = [];
   readonly questions: TutorQuestionRecord[] = [];
+  readonly recordedQuestionIds = new Set<string>();
+  readonly questionSourceSpans = new Map<
+    string,
+    {
+      readonly courseId: string;
+      readonly sessionId: string;
+      readonly sourceDocumentId: string;
+      readonly sourceSpanIds: readonly string[];
+    }
+  >();
   readonly sessions = new Map<string, TutorSessionSnapshot>();
   readonly stopped: TutorLoopResult[] = [];
   readonly succeeded: TutorLoopResult[] = [];
@@ -53,6 +64,31 @@ export class InMemoryTutorRepository implements TutorAgentRepositoryPort {
     return session !== undefined && authorized(session, authorization)
       ? session
       : null;
+  }
+
+  async resolveAuthorizedQuestionSourceSpanIds(
+    authorization: ScopeAuthorizationContext,
+    request: TutorQuestionSourceSpanRequest,
+  ): Promise<readonly string[]> {
+    const session = this.sessions.get(request.sessionId);
+    const question = this.questionSourceSpans.get(request.questionId);
+    if (
+      session === undefined ||
+      !authorized(session, authorization) ||
+      session.courseId !== request.courseId ||
+      session.sourceDocumentId !== request.sourceDocumentId ||
+      question === undefined ||
+      question.sessionId !== request.sessionId ||
+      question.courseId !== request.courseId ||
+      question.sourceDocumentId !== request.sourceDocumentId ||
+      (request.currentQuestionId !== request.questionId &&
+        !this.recordedQuestionIds.has(
+          `${request.sessionId}:${request.questionId}`,
+        ))
+    ) {
+      return [];
+    }
+    return question.sourceSpanIds;
   }
 
   async saveReteach(
@@ -223,6 +259,7 @@ export class InMemoryTutorArtifactStore implements TutorArtifactStorePort {
 }
 
 export class InMemoryTutorRetrieval implements TutorRetrievalPort {
+  readonly preferredResults = new Map<string, TutorRetrievedSpan>();
   readonly requests: TutorSearchRequest[] = [];
   results: readonly TutorRetrievedSpan[] = [];
 
@@ -230,7 +267,15 @@ export class InMemoryTutorRetrieval implements TutorRetrievalPort {
     request: TutorSearchRequest,
   ): Promise<readonly TutorRetrievedSpan[]> {
     this.requests.push(request);
-    return this.results;
+    const preferred = (request.preferredSourceSpanIds ?? []).flatMap((id) => {
+      const span = this.preferredResults.get(id);
+      return span === undefined ? [] : [span];
+    });
+    const preferredIds = new Set(preferred.map((span) => span.id));
+    return [
+      ...preferred,
+      ...this.results.filter((span) => !preferredIds.has(span.id)),
+    ].slice(0, request.limit);
   }
 }
 

@@ -187,7 +187,10 @@ export class TutorAgentService {
       command.question.trim().length === 0 ||
       command.question.length > 4_000 ||
       command.idempotencyKey.length < 1 ||
-      command.idempotencyKey.length > 240
+      command.idempotencyKey.length > 240 ||
+      (command.contextQuestionId !== undefined &&
+        (command.contextQuestionId.trim().length === 0 ||
+          command.contextQuestionId.length > 240))
     ) {
       throw new TutorAgentError("invalid_configuration");
     }
@@ -209,11 +212,28 @@ export class TutorAgentService {
     ) {
       throw new TutorAgentError("authorization_denied");
     }
+    const currentQuestionId = activeTutorContextQuestionId(session);
+    const preferredSourceSpanIds =
+      command.contextQuestionId === undefined
+        ? []
+        : await this.dependencies.repository.resolveAuthorizedQuestionSourceSpanIds(
+            command.authorization,
+            {
+              courseId: command.courseId,
+              ...(currentQuestionId === null ? {} : { currentQuestionId }),
+              questionId: command.contextQuestionId,
+              sessionId: command.sessionId,
+              sourceDocumentId: command.sourceDocumentId,
+            },
+          );
     const retrieved = await this.dependencies.retrieval.search({
       authorization: command.authorization,
       courseId: command.courseId,
       deadlineMs: remainingDeadline(deadlineAt),
       limit: 8,
+      ...(preferredSourceSpanIds.length === 0
+        ? {}
+        : { preferredSourceSpanIds }),
       query: command.question,
       sourceDocumentId: command.sourceDocumentId,
     });
@@ -394,6 +414,37 @@ export class TutorAgentService {
       },
     );
   }
+}
+
+function activeTutorContextQuestionId(
+  session: TutorSessionSnapshot,
+): string | null {
+  const concept =
+    session.concepts.find((candidate) => candidate.loopResult !== null) ??
+    session.concepts.find((candidate) => candidate.reteachLessons.length > 0) ??
+    session.concepts.find(
+      (candidate) =>
+        candidate.dueForReview && candidate.nextRetestQuestion !== null,
+    ) ??
+    session.concepts.find(
+      (candidate) =>
+        candidate.latestEligibleAttempt !== null &&
+        candidate.latestEligibleAttempt.rubricBand !== "correct" &&
+        candidate.nextRetestQuestion !== null,
+    ) ??
+    session.concepts.find(
+      (candidate) =>
+        candidate.latestLessonExposureAt === null &&
+        candidate.lesson !== null &&
+        candidate.nextRetestQuestion !== null,
+    ) ??
+    session.concepts.find(
+      (candidate) =>
+        candidate.eligibleAttemptCount > 0 &&
+        candidate.nextRetestQuestion !== null,
+    ) ??
+    null;
+  return concept?.nextRetestQuestion?.itemId ?? null;
 }
 
 export function isReteachTrigger(concept: TutorConceptSnapshot): boolean {

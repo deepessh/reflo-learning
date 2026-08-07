@@ -1222,21 +1222,15 @@ export function FlowBStudy({
     setAskingTutor(true);
     setTutorAnswer(null);
     try {
-      const idempotencyKey = await stableKey(
-        "tutor-question",
-        context.sessionId,
-        context.courseId,
+      const request = await tutorQuestionRequest(
+        context,
         tutorQuestion,
+        question?.itemId,
       );
       const response = await postJson<{ answer: TutorAnswer }>(
         apiOrigin,
         `/v1/study-sessions/${encodeURIComponent(context.sessionId)}/ask`,
-        {
-          courseId: context.courseId,
-          idempotencyKey,
-          question: tutorQuestion,
-          sourceDocumentId: context.sourceDocumentId,
-        },
+        request,
       );
       setTutorAnswer(response.answer);
     } catch (error) {
@@ -1899,7 +1893,7 @@ export function FlowBStudy({
               <ol>
                 {tutorAnswer.citations?.map((citation, index) => (
                   <li key={`${citation.sectionPath.join("/")}-${index}`}>
-                    {citation.sectionPath.join(" › ")}
+                    {tutorCitationLabel(citation.sectionPath, index)}
                   </li>
                 ))}
               </ol>
@@ -2303,6 +2297,44 @@ async function stableKey(
     byte.toString(16).padStart(2, "0"),
   ).join("");
   return `web/study/${kind}/v1/${sessionId}/${resourceId}/${hex}`;
+}
+
+async function tutorQuestionRequest(
+  context: {
+    readonly courseId: string;
+    readonly sessionId: string;
+    readonly sourceDocumentId: string;
+  },
+  question: string,
+  contextQuestionId?: string,
+): Promise<Readonly<Record<string, string>>> {
+  const idempotencyValue =
+    contextQuestionId === undefined
+      ? question
+      : `${contextQuestionId}\u0000${question}`;
+  return {
+    ...(contextQuestionId === undefined ? {} : { contextQuestionId }),
+    courseId: context.courseId,
+    idempotencyKey: await stableKey(
+      "tutor-question",
+      context.sessionId,
+      context.courseId,
+      idempotencyValue,
+    ),
+    question,
+    sourceDocumentId: context.sourceDocumentId,
+  };
+}
+
+function tutorCitationLabel(
+  sectionPath: readonly string[],
+  index: number,
+): string {
+  const label = sectionPath
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== "")
+    .join(" › ");
+  return label === "" ? `Course source ${index + 1}` : label;
 }
 
 function friendlyDependencyList(dependencies: readonly string[]): string {

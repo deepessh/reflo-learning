@@ -443,6 +443,67 @@ describe("retrieval vertical slice", () => {
     ).rejects.toMatchObject({ code: "invalid_vector_result" });
   });
 
+  it("orders preferred spans before vector results, deduplicates, and caps the result", async () => {
+    const fixture = searchFixture(4);
+
+    await expect(
+      fixture.service.search({
+        authorization,
+        courseId: access.courseId,
+        deadlineMs: 5_000,
+        limit: 3,
+        preferredSourceSpanIds: [
+          fixture.spans[2]!.id,
+          fixture.spans[0]!.id,
+          fixture.spans[2]!.id,
+        ],
+        query: "preferred grounding",
+        sourceDocumentId: access.sourceDocumentId,
+      }),
+    ).resolves.toEqual([
+      resolvedSpan(fixture.spans[2]!),
+      resolvedSpan(fixture.spans[0]!),
+      resolvedSpan(fixture.spans[1]!),
+    ]);
+  });
+
+  it("preserves vector-result ordering when no preferred spans are supplied", async () => {
+    const fixture = searchFixture(3);
+
+    await expect(
+      fixture.service.search({
+        authorization,
+        courseId: access.courseId,
+        deadlineMs: 5_000,
+        limit: 2,
+        query: "course-wide grounding",
+        sourceDocumentId: access.sourceDocumentId,
+      }),
+    ).resolves.toEqual([
+      resolvedSpan(fixture.spans[0]!),
+      resolvedSpan(fixture.spans[1]!),
+    ]);
+  });
+
+  it("fails closed when a preferred span is not in the authorized active generation", async () => {
+    const fixture = searchFixture(2);
+
+    await expect(
+      fixture.service.search({
+        authorization,
+        courseId: access.courseId,
+        deadlineMs: 5_000,
+        limit: 3,
+        preferredSourceSpanIds: ["00000000-0000-4000-8000-000000000999"],
+        query: "stale grounding",
+        sourceDocumentId: access.sourceDocumentId,
+      }),
+    ).rejects.toMatchObject({
+      code: "authorization_denied",
+      message: "source-span authorization changed during retrieval",
+    });
+  });
+
   it("requires a clean rebuild when the configured development embedding profile changes", async () => {
     const repository = new InMemoryContentRepository(access);
     repository.activeGeneration = {
@@ -519,6 +580,76 @@ describe("retrieval vertical slice", () => {
 
 function vector(value: number): readonly number[] {
   return Array.from({ length: EMBEDDING_DIMENSIONS }, () => value);
+}
+
+function searchFixture(spanCount: number) {
+  const spans = chunkNormalizedDocument({
+    document: multiSectionDocument(spanCount),
+    ownerScopeId: access.ownerScopeId,
+    sourceDocumentId: access.sourceDocumentId,
+  });
+  const generationId = "00000000-0000-5000-8000-000000000601";
+  const repository = new InMemoryContentRepository(access);
+  for (const span of spans) {
+    repository.sourceSpans.set(span.id, span);
+  }
+  repository.activeGeneration = {
+    adapterVersion: "scripted-adapter-v1",
+    dimensions: EMBEDDING_DIMENSIONS,
+    effectiveModel: "text-embedding-v4",
+    effectiveModelVersion: "fixture-version-1",
+    endpoint: "model-studio.example.invalid",
+    generationId,
+    inputMode: "document",
+    ownerScopeId: access.ownerScopeId,
+    profileVersion: "embedding-v1",
+    providerIdentifier: "model-studio",
+    providerRequestIds: ["document-request-search-fixture"],
+    region: "fixture-region-1",
+    sourceDocumentId: access.sourceDocumentId,
+    spanIds: spans.map((span) => span.id),
+  };
+  const vectors = new InMemoryVectorStore();
+  vectors.records.push(
+    ...spans.map((span, index) => ({
+      embedding: vector((index + 1) / 10),
+      embeddingInputHash: span.embeddingInputHash,
+      generationId,
+      ownerScopeId: access.ownerScopeId,
+      sourceDocumentId: access.sourceDocumentId,
+      sourceSpanId: span.id,
+    })),
+  );
+  const scripted = createScriptedAdapterRegistry({
+    "embedding.query.v1": [
+      {
+        type: "result",
+        value: {
+          metadata: embeddingMetadata("query", "query-request-search-fixture"),
+          vectors: [vector(0.2)],
+        },
+      },
+    ],
+  });
+  return {
+    service: new RetrievalService({
+      models: createModelRouter({
+        adapters: scripted.adapters,
+        traceSink: new InMemoryTraceSink(),
+      }),
+      repository,
+      vectors,
+    }),
+    spans,
+  };
+}
+
+function resolvedSpan(span: typeof fixtureSpan) {
+  return {
+    id: span.id,
+    sectionPath: span.sectionPath,
+    text: span.canonicalText,
+  };
 }
 
 function embeddingMetadata(

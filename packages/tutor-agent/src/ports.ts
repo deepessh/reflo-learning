@@ -7,6 +7,7 @@ import type {
   ReteachPersistenceRequest,
   TextArtifactWriteResult,
   TutorQuestionRecord,
+  TutorQuestionSourceSpanRequest,
   TutorRetrievedSpan,
   TutorSearchRequest,
   TutorSessionSnapshot,
@@ -56,6 +57,11 @@ export interface TutorAgentRepositoryPort {
     authorization: ScopeAuthorizationContext,
     record: TutorQuestionRecord,
   ): Promise<void>;
+
+  resolveAuthorizedQuestionSourceSpanIds(
+    authorization: ScopeAuthorizationContext,
+    request: TutorQuestionSourceSpanRequest,
+  ): Promise<readonly string[]>;
 }
 
 export interface TutorArtifactStorePort {

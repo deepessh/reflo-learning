@@ -225,7 +225,12 @@ export class RetrievalService {
         "vector results escaped the authorized namespace",
       );
     }
-    const orderedIds = vectorResults.map((result) => result.sourceSpanId);
+    const orderedIds = [
+      ...new Set([
+        ...(command.preferredSourceSpanIds ?? []),
+        ...vectorResults.map((result) => result.sourceSpanId),
+      ]),
+    ].slice(0, command.limit);
     const resolved =
       await this.dependencies.repository.resolveAuthorizedSourceSpans(
         access,

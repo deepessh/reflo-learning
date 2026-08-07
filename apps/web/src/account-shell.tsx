@@ -737,8 +737,8 @@ function Dashboard({
         >
           <summary>Add course material</summary>
           <p>
-            Course setup accepts course PDF sources and builds a source-backed
-            outline before lessons become available.
+            Choose a PDF and Reflo will build a source-backed course outline
+            before lessons become available.
           </p>
           <DemoUploadPanel
             apiOrigin={apiOrigin}

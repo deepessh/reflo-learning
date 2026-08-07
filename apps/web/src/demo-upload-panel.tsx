@@ -45,7 +45,6 @@ export function DemoUploadPanel({
   const [approvalScreen, setApprovalScreen] =
     useState<ApprovalScreen>("loading");
   const [approvals, setApprovals] = useState<readonly DemoSourceApproval[]>([]);
-  const [selectedApprovalId, setSelectedApprovalId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [submissionScreen, setSubmissionScreen] =
     useState<SubmissionScreen>("idle");
@@ -78,7 +77,6 @@ export function DemoUploadPanel({
       approvals: readonly DemoSourceApproval[];
     };
     setApprovals(body.approvals);
-    setSelectedApprovalId(body.approvals[0]?.approvalId ?? "");
     setApprovalScreen("ready");
   }, [apiOrigin]);
 
@@ -283,9 +281,7 @@ export function DemoUploadPanel({
     return null;
   }
 
-  const approval = approvals.find(
-    (candidate) => candidate.approvalId === selectedApprovalId,
-  );
+  const approval = approvals[0];
   const presentation =
     upload === null
       ? null
@@ -317,13 +313,13 @@ export function DemoUploadPanel({
     setOutline(null);
     if (approval === undefined || file === null) {
       submitGuard.current = false;
-      setLocalError("Choose a course source and its matching PDF file.");
+      setLocalError("Choose a PDF file.");
       return;
     }
     if (!isDemoPdfSelection(file)) {
       submitGuard.current = false;
       setLocalError(
-        "Choose the matching course PDF within the 50 MB limit. Other file types are not supported yet.",
+        "Choose a PDF within the 50 MB limit. Other file types are not supported yet.",
       );
       return;
     }
@@ -388,24 +384,23 @@ export function DemoUploadPanel({
           <p className="eyebrow">Course setup</p>
           <h2 id="demo-upload-title">Build a course from a PDF</h2>
           <p>
-            Choose a course source and its matching PDF. Reflo will validate it
-            and build a source-backed course outline; lessons, quizzes, and
-            audio may continue preparing afterward.
+            Choose a PDF. Reflo will validate it and build a source-backed
+            course outline; lessons, quizzes, and audio may continue preparing
+            afterward.
           </p>
         </div>
       </div>
 
       {approvalScreen === "loading" ? (
         <p className="upload-loading" role="status">
-          Loading course sources…
+          Preparing PDF upload…
         </p>
       ) : null}
       {approvalScreen === "error" ? (
         <div className="upload-state tone-negative">
-          <strong>Course setup is temporarily unavailable</strong>
+          <strong>PDF upload is temporarily unavailable</strong>
           <p>
-            Course sources could not be loaded. Your existing courses are
-            unaffected.
+            Reflo could not prepare the upload. Existing courses are unaffected.
           </p>
           <button
             className="secondary-button"
@@ -418,8 +413,8 @@ export function DemoUploadPanel({
       ) : null}
       {approvalScreen === "ready" && approvals.length === 0 ? (
         <div className="upload-state tone-attention">
-          <strong>No course sources configured</strong>
-          <p>Course setup becomes available when a course source is added.</p>
+          <strong>PDF upload is unavailable</strong>
+          <p>No demo course has been configured yet.</p>
         </div>
       ) : null}
       {approvalScreen === "ready" && approvals.length > 0 ? (
@@ -429,40 +424,12 @@ export function DemoUploadPanel({
             aria-busy={isBusy}
             onSubmit={submit}
           >
-            <label htmlFor="demo-source-approval">Course source</label>
-            <select
-              disabled={formLocked}
-              id="demo-source-approval"
-              onChange={(event) => {
-                setSelectedApprovalId(event.target.value);
-                setFile(null);
-                setUpload(null);
-                setOutline(null);
-                setLocalError(null);
-                setLastCheckedAt(null);
-                setSubmissionScreen("idle");
-                submitGuard.current = false;
-              }}
-              value={selectedApprovalId}
-            >
-              {approvals.map((candidate) => (
-                <option key={candidate.approvalId} value={candidate.approvalId}>
-                  {candidate.title} · {candidate.licenseLabel}
-                </option>
-              ))}
-            </select>
-            {approval === undefined ? null : (
-              <p className="approval-evidence">
-                {approval.attribution} · revision {approval.sourceRevision} ·{" "}
-                {approval.extension.toUpperCase()}
-              </p>
-            )}
-            <label htmlFor="demo-source-file">Matching PDF file</label>
+            <label htmlFor="demo-source-file">Course PDF</label>
             <input
               accept={DEMO_UPLOAD_FILE_ACCEPT}
               disabled={formLocked}
               id="demo-source-file"
-              key={`${selectedApprovalId}:${trackedUploadId ?? "new"}`}
+              key={trackedUploadId ?? "new"}
               onChange={(event) =>
                 setFile(event.currentTarget.files?.[0] ?? null)
               }

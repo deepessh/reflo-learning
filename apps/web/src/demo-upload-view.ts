@@ -204,10 +204,10 @@ export function demoUploadPresentation(
 function failureCopy(code: DemoUploadFailureCode | null): string {
   switch (code) {
     case "source_not_approved":
-      return "This file does not match the selected course source.";
+      return "This PDF is not configured for this demo.";
     case "unsupported_type":
     case "mime_mismatch":
-      return "Use the matching course PDF. This file type or signature did not match.";
+      return "Choose a PDF file. This file type or signature did not match.";
     case "over_limit":
     case "archive_limit":
       return "The source exceeded a declared compressed, expanded, or page limit.";

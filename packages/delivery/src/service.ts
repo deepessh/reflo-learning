@@ -28,6 +28,7 @@ import type {
   DemoDeliveryRepository,
   DemoMessagePort,
 } from "./ports.js";
+import { decodeTelegramCallback } from "./telegram-callback.js";
 
 const EMAIL_LINK_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const DISPATCH_LEASE_MS = 10 * 60 * 1_000;
@@ -602,13 +603,11 @@ function parseTelegramCallback(rawBody: string): TelegramCallback {
   const chat = asObject(message?.chat);
   const sender = asObject(callback?.from);
   const data = typeof callback?.data === "string" ? callback.data : "";
-  const match =
-    /^reflo:([0-9a-f-]{36}):([0-9a-f-]{36}):([0-9]|[1-9][0-9])$/i.exec(data);
+  const reference = decodeTelegramCallback(data);
   if (
     callback === null ||
     chat === null ||
     sender === null ||
-    match === null ||
     !/^\d+$/.test(String(chat.id)) ||
     !/^\d+$/.test(String(sender.id)) ||
     (typeof callback.id !== "string" && typeof update?.update_id !== "number")
@@ -616,9 +615,9 @@ function parseTelegramCallback(rawBody: string): TelegramCallback {
     throw new DeliveryError("invalid_input");
   }
   return {
-    answerIndex: Number(match[3]),
+    answerIndex: reference.answerIndex,
     chatId: String(chat.id),
-    deliveryItemId: match[2]!,
+    deliveryItemId: reference.deliveryItemId,
     providerSubmissionId:
       typeof callback.id === "string" ? callback.id : String(update?.update_id),
     senderId: String(sender.id),
@@ -629,11 +628,7 @@ function deliveryIdFromCallback(rawBody: string): string {
   const value = asObject(JSON.parse(rawBody));
   const callback = asObject(value?.callback_query);
   const data = typeof callback?.data === "string" ? callback.data : "";
-  const match = /^reflo:([0-9a-f-]{36}):/i.exec(data);
-  if (match === null) {
-    throw new DeliveryError("invalid_input");
-  }
-  return match[1]!;
+  return decodeTelegramCallback(data).deliveryId;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {

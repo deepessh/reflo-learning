@@ -2,6 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 
 import type { Deployment } from "@reflo/config";
 import {
+  DeliveryError,
   DemoDeliveryService,
   type DeliveryKnowledgePort,
   type DeliveryMessage,
@@ -12,7 +13,10 @@ import {
   createDirectMailDemoMessageAdapter,
   type DemoDirectMailRegion,
 } from "@reflo/delivery/directmail";
-import { createTelegramDemoMessageAdapter } from "@reflo/delivery/telegram";
+import {
+  createTelegramDemoMessageAdapter,
+  createTelegramLongPollingReceiver,
+} from "@reflo/delivery/telegram";
 import {
   PostgresAccountRepository,
   PostgresDemoDeliveryRepository,
@@ -91,6 +95,24 @@ export function createDeliveryRuntime(
   if (messageAdapter === "local-fixture" && deployment !== "dev") {
     throw new Error("The local delivery fixture is development-only");
   }
+  const telegramInboundMode =
+    input.REFLO_DEMO_TELEGRAM_INBOUND_MODE?.trim() || "webhook";
+  if (
+    telegramInboundMode !== "webhook" &&
+    telegramInboundMode !== "long-poll"
+  ) {
+    throw new Error("REFLO_DEMO_TELEGRAM_INBOUND_MODE is not allowlisted");
+  }
+  if (
+    telegramInboundMode === "long-poll" &&
+    (deployment !== "dev" ||
+      provider !== "telegram" ||
+      messageAdapter !== "provider")
+  ) {
+    throw new Error(
+      "Telegram long polling is limited to the local provider-backed demo runtime",
+    );
+  }
 
   const repository = new PostgresDemoDeliveryRepository(databaseUrl);
   const knowledgeRepository = new PostgresKnowledgeRepository(databaseUrl);
@@ -104,15 +126,20 @@ export function createDeliveryRuntime(
       );
     },
   };
-  const messagePorts = configuredProviders.map((configuredProvider) =>
-    messageAdapter === "local-fixture"
-      ? new LocalFixtureMessagePort(configuredProvider)
-      : configuredProvider === "telegram"
-        ? createTelegramDemoMessageAdapter({
-            botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
-          })
-        : createEmailPort(input, capacityRepository),
-  );
+  const telegramAdapter =
+    messageAdapter === "provider" && configuredProviders.includes("telegram")
+      ? createTelegramDemoMessageAdapter({
+          botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
+        })
+      : undefined;
+  const messagePorts = configuredProviders.map((configuredProvider) => {
+    if (messageAdapter === "local-fixture") {
+      return new LocalFixtureMessagePort(configuredProvider);
+    }
+    return configuredProvider === "telegram"
+      ? telegramAdapter!
+      : createEmailPort(input, capacityRepository);
+  });
   const emailLinkSigningKey = configuredProviders.includes("email")
     ? readKey(input, "REFLO_DEMO_EMAIL_LINK_SIGNING_KEY")
     : undefined;
@@ -139,9 +166,44 @@ export function createDeliveryRuntime(
     component: "api",
     deployment,
   });
+  const instrumentedDelivery = instrumentDemoDelivery(delivery, tracing);
+  const handleTelegramUpdate = async (rawUpdate: string, secret: string) => {
+    const finalizations = await instrumentedDelivery.handleTelegramWebhook(
+      rawUpdate,
+      secret,
+    );
+    await telegramAdapter?.acknowledge(rawUpdate, finalizations);
+    return finalizations;
+  };
+  const telegramPolling =
+    telegramInboundMode === "long-poll"
+      ? createTelegramLongPollingReceiver({
+          botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
+          handleUpdate: async (rawUpdate) => {
+            await handleTelegramUpdate(
+              rawUpdate,
+              required(input, "REFLO_DEMO_TELEGRAM_WEBHOOK_SECRET"),
+            );
+          },
+        })
+      : undefined;
+  telegramPolling?.start();
+  const exposedDelivery =
+    telegramInboundMode === "long-poll"
+      ? {
+          ...instrumentedDelivery,
+          handleTelegramWebhook: async () => {
+            throw new DeliveryError("invalid_configuration");
+          },
+        }
+      : {
+          ...instrumentedDelivery,
+          handleTelegramWebhook: handleTelegramUpdate,
+        };
   return {
-    delivery: instrumentDemoDelivery(delivery, tracing),
+    delivery: exposedDelivery,
     close: async () => {
+      await telegramPolling?.close();
       await Promise.all([
         repository.close(),
         knowledgeRepository.close(),

@@ -38,6 +38,24 @@ describe("demo delivery composition", () => {
         "staging",
       ),
     ).toThrow(/development-only/);
+    expect(() =>
+      createDeliveryRuntime(
+        {
+          ...environment(),
+          REFLO_DEMO_TELEGRAM_INBOUND_MODE: "long-poll",
+        },
+        "staging",
+      ),
+    ).toThrow(/local provider-backed demo runtime/);
+    expect(() =>
+      createDeliveryRuntime(
+        {
+          ...environment(),
+          REFLO_DEMO_TELEGRAM_INBOUND_MODE: "unknown",
+        },
+        "dev",
+      ),
+    ).toThrow(/not allowlisted/);
   });
 
   it("composes only explicit staff destinations and approved free capacity", async () => {
@@ -75,6 +93,40 @@ describe("demo delivery composition", () => {
     const runtime = createDeliveryRuntime(telegram, "staging");
     expect(runtime.delivery).toBeDefined();
     await runtime.close();
+  });
+
+  it("keeps local Telegram polling mutually exclusive with the webhook", async () => {
+    const fetch = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const runtime = createDeliveryRuntime(
+      {
+        ...environment(),
+        REFLO_DEMO_TELEGRAM_INBOUND_MODE: "long-poll",
+      },
+      "dev",
+    );
+
+    try {
+      await expect(
+        runtime.delivery?.handleTelegramWebhook("{}", "secret"),
+      ).rejects.toMatchObject({ code: "invalid_configuration" });
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/getUpdates"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    } finally {
+      await runtime.close();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("composes email without Telegram configuration", async () => {
@@ -152,6 +204,7 @@ function environment(): NodeJS.ProcessEnv {
     REFLO_DEMO_TELEGRAM_BOT_TOKEN: `123:${"a".repeat(32)}`,
     REFLO_DEMO_TELEGRAM_CHANNEL_ID: "40000000-0000-4000-8000-000000000001",
     REFLO_DEMO_TELEGRAM_DESTINATION: "100123456",
+    REFLO_DEMO_TELEGRAM_INBOUND_MODE: "webhook",
     REFLO_DEMO_TELEGRAM_OWNER_SCOPE_ID: "50000000-0000-4000-8000-000000000001",
     REFLO_DEMO_TELEGRAM_USER_ID: "60000000-0000-4000-8000-000000000001",
     REFLO_DEMO_TELEGRAM_WEBHOOK_SECRET: "staff-demo-webhook-secret",

@@ -28,6 +28,7 @@ import {
   shouldEnterPlacement,
   studyErrorRetryTarget,
   studyRetryPresentation,
+  tutorLockedForAssessment,
   unavailableDependencyNames,
   type BrowserAssessmentResult,
   type ActivationFailure,
@@ -170,6 +171,7 @@ export function FlowBStudy({
   const [tutorQuestion, setTutorQuestion] = useState("");
   const [tutorAnswer, setTutorAnswer] = useState<TutorAnswer | null>(null);
   const [askingTutor, setAskingTutor] = useState(false);
+  const [assessmentTutorUnlocked, setAssessmentTutorUnlocked] = useState(false);
   const [preparingSessionId, setPreparingSessionId] = useState<string | null>(
     null,
   );
@@ -223,6 +225,7 @@ export function FlowBStudy({
     }
     setPhase("checking");
     setCompletedFromNextAction(false);
+    setAssessmentTutorUnlocked(false);
     setMessage("");
     setActivationFailure(null);
     try {
@@ -924,6 +927,9 @@ export function FlowBStudy({
     );
     if (pendingAssessment.result === null) return false;
     setAssessment(pendingAssessment.result);
+    if (pendingAssessment.result.outcome === "graded") {
+      setAssessmentTutorUnlocked(true);
+    }
     setSubmissionRetry(null);
     setPhase("result");
     return true;
@@ -998,6 +1004,9 @@ export function FlowBStudy({
         },
       );
       setAssessment(response.result);
+      if (response.result.outcome === "graded") {
+        setAssessmentTutorUnlocked(true);
+      }
       setSubmissionRetry(null);
       setPhase("result");
       return true;
@@ -1041,6 +1050,9 @@ export function FlowBStudy({
         },
       );
       setAssessment(response.result);
+      if (response.result.outcome === "graded") {
+        setAssessmentTutorUnlocked(true);
+      }
       setSubmissionRetry(null);
       setPhase("result");
       return true;
@@ -1216,7 +1228,11 @@ export function FlowBStudy({
             sessionId: view.sessionId,
             sourceDocumentId: view.sourceDocumentId,
           };
-    if (context === null || tutorQuestion.trim() === "") {
+    if (
+      context === null ||
+      tutorQuestion.trim() === "" ||
+      assessmentTutorLocked
+    ) {
       return;
     }
     setAskingTutor(true);
@@ -1248,6 +1264,11 @@ export function FlowBStudy({
 
   const disposition =
     assessment === null ? null : assessmentDisposition(assessment);
+  const assessmentTutorLocked = tutorLockedForAssessment(
+    phase,
+    assessmentTutorUnlocked,
+    submissionRetry,
+  );
   const fallback = assessment?.fallback?.items[0] ?? null;
   const activationFailureCopy =
     activationFailurePresentation(activationFailure);
@@ -1874,19 +1895,25 @@ export function FlowBStudy({
             </label>
             <input
               aria-describedby={`${tutorInputId}-help`}
+              disabled={assessmentTutorLocked}
               id={tutorInputId}
               onChange={(event) => setTutorQuestion(event.target.value)}
               placeholder="What would you like clarified?"
               required
               value={tutorQuestion}
             />
-            <button disabled={askingTutor} type="submit">
+            <button
+              disabled={askingTutor || assessmentTutorLocked}
+              type="submit"
+            >
               {askingTutor ? "Finding an answer…" : "Ask"}
             </button>
           </div>
-          <span className="visually-hidden" id={`${tutorInputId}-help`}>
-            Tutor searches only within the selected course.
-          </span>
+          <small id={`${tutorInputId}-help`}>
+            {assessmentTutorLocked
+              ? "Answer once to unlock Tutor"
+              : "Tutor searches only within the selected course."}
+          </small>
           {tutorAnswer?.kind === "answer" ? (
             <div className="tutor-answer" aria-live="polite">
               <p>{tutorAnswer.content}</p>

@@ -22,6 +22,20 @@ export interface BrowserAssessmentResult {
 export type AssessmentDisposition =
   "abstained" | "correct" | "failed" | "unavailable";
 
+export function tutorLockedForAssessment(
+  phase: string,
+  assessmentTutorUnlocked: boolean,
+  submissionRetry: "replacement" | "short_answer" | null,
+): boolean {
+  return (
+    (phase === "question" ||
+      phase === "submitting" ||
+      phase === "result" ||
+      (phase === "error" && submissionRetry !== null)) &&
+    !assessmentTutorUnlocked
+  );
+}
+
 export function assessmentRequestErrorCopy(
   code: string | undefined,
 ): string | null {

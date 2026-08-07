@@ -22,7 +22,6 @@ export function KnowledgeMap({
   readonly progress: CourseProgress;
 }) {
   const [archiveConfirming, setArchiveConfirming] = useState(false);
-  const mastery = progress.mastery.value;
   const readiness = readinessPresentation(progress.readiness);
   return (
     <section
@@ -91,14 +90,12 @@ export function KnowledgeMap({
 
       <div className="knowledge-summary">
         <article className="summary-card mastery-summary">
-          <span>{progress.mastery.label}</span>
+          <span>Assessment coverage</span>
           <strong>
-            {mastery === null ? "Evidence needed" : `${fixedPercent(mastery)}%`}
-          </strong>
-          <small>
             {progress.mastery.assessedConceptCount} of{" "}
             {progress.mastery.totalConceptCount} concepts assessed
-          </small>
+          </strong>
+          <small>Concept-level mastery appears below.</small>
         </article>
         {progress.readiness.status === "eligible" ? (
           <article className="summary-card readiness-summary">

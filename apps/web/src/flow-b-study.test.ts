@@ -29,8 +29,6 @@ describe("Tutor question requests", () => {
     expect(source).toContain(
       'return label === "" ? `Course source ${index + 1}` : label;',
     );
-    expect(source).toContain(
-      "tutorCitationLabel(citation.sectionPath, index)",
-    );
+    expect(source).toContain("tutorCitationLabel(citation.sectionPath, index)");
   });
 });

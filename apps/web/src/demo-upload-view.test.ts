@@ -91,10 +91,10 @@ describe("course upload presentation", () => {
     );
     expect(
       demoUploadPresentation("failed", "source_not_approved").detail,
-    ).toContain("does not match");
+    ).toContain("not configured");
     expect(
       demoUploadPresentation("failed", "unsupported_type").detail,
-    ).toContain("matching course PDF");
+    ).toContain("Choose a PDF file");
   });
 
   it("offers retry lineage only for failures the server marks retryable", () => {

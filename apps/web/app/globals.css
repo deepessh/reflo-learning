@@ -1,5 +1,23 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+  --canvas: #f6f3ea;
+  --surface: #fffdf8;
+  --surface-soft: #f0ebe1;
+  --surface-raised: #ffffff;
+  --ink: #2d2926;
+  --ink-muted: #6f655e;
+  --ink-faint: #8b8178;
+  --border: rgba(76, 62, 50, 0.14);
+  --border-strong: rgba(76, 62, 50, 0.24);
+  --accent: #d97757;
+  --accent-strong: #a84f36;
+  --accent-soft: #f5ddd3;
+  --positive: #3f7058;
+  --positive-soft: #e4eee7;
+  --attention: #936a2f;
+  --attention-soft: #f4ead5;
+  --negative: #a84f3f;
+  --negative-soft: #f5ded7;
   font-family:
     Inter,
     ui-sans-serif,
@@ -8,8 +26,8 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  background: #07120f;
-  color: #f4faf7;
+  background: var(--canvas);
+  color: var(--ink);
 }
 
 * {
@@ -22,15 +40,15 @@ body {
   background:
     radial-gradient(
       circle at 12% -8%,
-      rgba(54, 219, 157, 0.15),
+      rgba(217, 119, 87, 0.14),
       transparent 31rem
     ),
     radial-gradient(
       circle at 95% 16%,
-      rgba(68, 112, 238, 0.1),
+      rgba(184, 146, 115, 0.1),
       transparent 27rem
     ),
-    #07120f;
+    var(--canvas);
 }
 
 button,
@@ -1737,6 +1755,380 @@ button:disabled {
 .quiz-result .button-link,
 .quiz-status .button-link {
   margin-top: 0.5rem;
+}
+
+/* Warm light presentation palette, inspired by Claude's cream and terracotta. */
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.topbar {
+  border-bottom-color: var(--border);
+}
+.skip-link {
+  background: var(--ink);
+  color: var(--surface-raised);
+}
+.topbar-purpose,
+.auth-card p,
+.auth-card small,
+.lede,
+.progress-copy,
+.history-list small,
+.history-list li > span:last-child,
+.history-summary-heading > span,
+.history-summary > small,
+.history-summary p,
+.empty-state p,
+.progress-state p,
+.knowledge-heading p:not(.eyebrow),
+.knowledge-heading time,
+.summary-card small,
+.readiness-details,
+.lesson-details,
+.preference-disclosure,
+.import-disclosure,
+.flow-heading p:not(.eyebrow),
+.flow-start p,
+.flow-result > p,
+.flow-summary > p,
+.evidence-note,
+.flow-notice p,
+.course-options summary,
+.assessment-availability,
+.flow-plan span,
+.concept-heading,
+.concept-measure span,
+.concept-meta,
+.delta-empty,
+.delta-list small,
+.tutor-ask small,
+.preference-form p,
+.preference-message p,
+.preference-disclosure > p[role="status"],
+.quiz-heading > p:last-child,
+.quiz-status p,
+.quiz-result p,
+.quiz-form small {
+  color: var(--ink-muted);
+}
+
+.eyebrow,
+.course-kicker,
+.question-stage,
+.chapter-title-group > span,
+.chapter-toggle,
+.history-action > small,
+.history-summary-heading div > span,
+.delta-list li > span {
+  color: var(--accent-strong);
+}
+
+.auth-card,
+.panel,
+.quiz-form,
+.quiz-card {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 22px 64px rgba(71, 54, 42, 0.1);
+}
+
+button,
+.button-link {
+  background: var(--accent-strong);
+  color: #fffdf8;
+}
+.secondary-button {
+  border-color: rgba(168, 79, 54, 0.25);
+  background: var(--accent-soft);
+  color: #7d3827;
+}
+
+.step,
+.panel-heading > span,
+.demo-boundary,
+.demo-badge {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+}
+
+.auth-card input,
+.demo-upload-form select,
+.demo-upload-form input[type="file"],
+.flow-question textarea,
+.tutor-input input,
+.preference-form input,
+.preference-form select {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+.auth-card input:focus,
+.demo-upload-form select:focus,
+.demo-upload-form input[type="file"]:focus,
+.flow-question textarea:focus,
+.preference-form input:focus,
+.preference-form select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.18);
+}
+.tutor-input input:focus-visible {
+  border-color: var(--accent-strong);
+  outline-color: var(--accent-strong);
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.16);
+}
+
+.center-state strong,
+.summary-card strong {
+  color: var(--ink);
+}
+.state-icon {
+  color: var(--accent);
+}
+.loading-ring {
+  border-color: rgba(217, 119, 87, 0.2);
+  border-top-color: var(--accent-strong);
+}
+
+.demo-upload-panel,
+.flow-panel {
+  border-color: rgba(217, 119, 87, 0.22);
+  background:
+    radial-gradient(
+      circle at 100% 0,
+      rgba(217, 119, 87, 0.1),
+      transparent 24rem
+    ),
+    color-mix(in srgb, var(--surface) 96%, transparent);
+}
+.demo-upload-heading p:last-child,
+.upload-state p,
+.approval-evidence,
+.upload-loading,
+.uploaded-outline li span {
+  color: var(--ink-muted);
+}
+.demo-upload-form label,
+.course-archive-confirmation p {
+  color: var(--ink);
+}
+.upload-state,
+.uploaded-outline,
+.uploaded-outline li {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+.upload-state.tone-positive,
+.uploaded-outline {
+  border-color: rgba(63, 112, 88, 0.3);
+}
+.upload-state.tone-attention {
+  border-color: rgba(147, 106, 47, 0.32);
+}
+.upload-state.tone-negative {
+  border-color: rgba(168, 79, 63, 0.32);
+}
+.upload-local-error,
+.preference-form .preference-error {
+  color: var(--negative);
+}
+
+.course-card,
+.history-summary,
+.summary-card,
+.chapter-row,
+.concept-tile,
+.flow-plan,
+.fallback-card,
+.choice-row,
+.lesson-media-state,
+.tutor-answer,
+.tutor-not-found,
+.tutor-error,
+.preference-disclosure,
+.import-disclosure,
+.quiz-options label {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+.course-card:hover,
+.course-card.is-selected,
+.chapter-row[open] {
+  border-color: rgba(168, 79, 54, 0.42);
+}
+.course-card.is-selected {
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.13);
+}
+.course-art {
+  background: linear-gradient(145deg, #ddaf96, #b86d51);
+  color: #fffdf8;
+}
+.course-art.tone-active {
+  background: linear-gradient(145deg, #d58d6d, #a84f36);
+}
+.course-art.tone-ready {
+  background: linear-gradient(145deg, #c39b82, #8b6250);
+}
+.course-art.tone-danger {
+  background: linear-gradient(145deg, #cb7d68, #8d4638);
+}
+.course-art.tone-waiting {
+  background: linear-gradient(145deg, #b6a99f, #786d65);
+}
+.progress-track,
+.mastery-meter {
+  background: rgba(76, 62, 50, 0.12);
+}
+.progress-track span,
+.mastery-meter span {
+  background: var(--accent);
+}
+.history-dot {
+  background: var(--accent);
+}
+.history-dot.status-active {
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.14);
+}
+.history-list li,
+.delta-section,
+.delta-list li,
+.flow-heading,
+.tutor-ask,
+.quiz-question {
+  border-color: var(--border);
+}
+
+.mastery-summary {
+  background:
+    radial-gradient(
+      circle at 90% 0,
+      rgba(217, 119, 87, 0.16),
+      transparent 11rem
+    ),
+    var(--surface-raised);
+}
+.readiness-summary,
+.assessment-availability,
+.fallback-card,
+.lesson-media-state.media-preparing {
+  border-color: rgba(147, 106, 47, 0.24);
+  background: var(--attention-soft);
+}
+.readiness-summary strong,
+.readiness-summary p,
+.evidence-abstained,
+.evidence-unavailable {
+  color: var(--attention);
+}
+.readiness-details summary,
+.lesson-details summary,
+.preference-disclosure > summary,
+.import-disclosure > summary,
+.lesson-transcript > summary {
+  color: var(--accent-strong);
+}
+
+.chapter-row[open] {
+  background: var(--surface-raised);
+}
+.chapter-row > summary:hover {
+  background: var(--accent-soft);
+}
+.chapter-row > summary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-strong);
+}
+.chapter-concept-count,
+.chapter-status,
+.mapping-badge {
+  color: var(--ink-muted);
+}
+.chapter-concept-count > strong {
+  color: var(--ink);
+}
+.chapter-status {
+  border-color: var(--border);
+  background: var(--surface-soft);
+}
+.chapter-status.tone-attention {
+  border-color: rgba(168, 79, 63, 0.26);
+  color: var(--negative);
+}
+.chapter-status.tone-ready {
+  border-color: rgba(63, 112, 88, 0.28);
+  color: var(--positive);
+}
+.concept-tile.tone-weak {
+  border-color: rgba(168, 79, 63, 0.25);
+  background: var(--negative-soft);
+}
+.concept-tile.tone-developing {
+  border-color: rgba(147, 106, 47, 0.24);
+  background: var(--attention-soft);
+}
+.concept-tile.tone-strong {
+  border-color: rgba(63, 112, 88, 0.25);
+  background: var(--positive-soft);
+}
+.concept-tile.tone-unassessed {
+  background: var(--surface-soft);
+}
+.tone-weak .mastery-meter span {
+  background: var(--negative);
+}
+.tone-developing .mastery-meter span {
+  background: var(--attention);
+}
+
+.flow-plan,
+.tutor-answer,
+.tutor-not-found,
+.tutor-error {
+  background: var(--surface-soft);
+}
+.evidence-pill,
+.delta-hero em,
+.lesson-meta span {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+.evidence-failed {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+.choice-row:has(input:checked),
+.quiz-options label:has(input:checked) {
+  border-color: rgba(168, 79, 54, 0.45);
+  background: var(--accent-soft);
+}
+.choice-row input,
+.quiz-options input {
+  accent-color: var(--accent-strong);
+}
+.flow-lesson pre,
+.lesson-content {
+  border-color: var(--border);
+  background: #f8f4ec;
+  color: var(--ink);
+}
+.lesson-media audio,
+.lesson-media video {
+  background: var(--surface-soft);
+}
+.lesson-media-state > span,
+.delta-hero strong,
+.tutor-answer ol,
+.preference-form .preference-success {
+  color: var(--positive);
+}
+.delta-hero {
+  color: var(--ink-muted);
+}
+.course-archive-confirmation {
+  border-color: rgba(168, 79, 63, 0.3);
+  background: var(--negative-soft);
 }
 
 @media (max-width: 800px) {

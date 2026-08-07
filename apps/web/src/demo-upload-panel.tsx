@@ -317,13 +317,13 @@ export function DemoUploadPanel({
     setOutline(null);
     if (approval === undefined || file === null) {
       submitGuard.current = false;
-      setLocalError("Choose an approved source and the matching PDF file.");
+      setLocalError("Choose a course source and its matching PDF file.");
       return;
     }
     if (!isDemoPdfSelection(file)) {
       submitGuard.current = false;
       setLocalError(
-        "Choose the matching approved PDF within the 50 MB limit. Other file types are not supported yet.",
+        "Choose the matching course PDF within the 50 MB limit. Other file types are not supported yet.",
       );
       return;
     }
@@ -362,7 +362,7 @@ export function DemoUploadPanel({
         response?.status === 413
           ? "The selected file exceeds the 50 MB product maximum."
           : response?.status === 415
-            ? "Course setup currently accepts only the matching approved PDF."
+            ? "Course setup currently accepts only the matching course PDF."
             : "The upload was not accepted. Check the file and try again.",
       );
       return;
@@ -388,24 +388,23 @@ export function DemoUploadPanel({
           <p className="eyebrow">Course setup</p>
           <h2 id="demo-upload-title">Build a course from a PDF</h2>
           <p>
-            Choose an approved source and the matching PDF. Reflo will validate
-            it and build a source-backed course outline; lessons, quizzes, and
+            Choose a course source and its matching PDF. Reflo will validate it
+            and build a source-backed course outline; lessons, quizzes, and
             audio may continue preparing afterward.
           </p>
         </div>
-        <span className="source-boundary">Approved sources only</span>
       </div>
 
       {approvalScreen === "loading" ? (
         <p className="upload-loading" role="status">
-          Loading approved sources…
+          Loading course sources…
         </p>
       ) : null}
       {approvalScreen === "error" ? (
         <div className="upload-state tone-negative">
           <strong>Course setup is temporarily unavailable</strong>
           <p>
-            Approved sources could not be loaded. Your existing courses are
+            Course sources could not be loaded. Your existing courses are
             unaffected.
           </p>
           <button
@@ -419,9 +418,9 @@ export function DemoUploadPanel({
       ) : null}
       {approvalScreen === "ready" && approvals.length === 0 ? (
         <div className="upload-state tone-attention">
-          <strong>No approved sources configured</strong>
+          <strong>No course sources configured</strong>
           <p>
-            Course setup becomes available when an approved source is added.
+            Course setup becomes available when a course source is added.
           </p>
         </div>
       ) : null}
@@ -432,7 +431,7 @@ export function DemoUploadPanel({
             aria-busy={isBusy}
             onSubmit={submit}
           >
-            <label htmlFor="demo-source-approval">Approved PDF</label>
+            <label htmlFor="demo-source-approval">Course source</label>
             <select
               disabled={formLocked}
               id="demo-source-approval"

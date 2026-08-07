@@ -41,8 +41,8 @@ export function courseStudyAvailability(
     const outlineMissing = course.chapterCount === 0;
     return {
       copy: outlineMissing
-        ? "The approved PDF stopped before a source-backed outline was ready. Reflo will not start a study session or record learning evidence from this unavailable course. Review course setup to validate the approved PDF again."
-        : "This course is marked as failed and cannot start a study session. Reflo will not record learning evidence from it. Review course setup before trying the approved PDF again.",
+        ? "The course PDF stopped before a source-backed outline was ready. Reflo will not start a study session or record learning evidence from this unavailable course. Review course setup to validate the course PDF again."
+        : "This course is marked as failed and cannot start a study session. Reflo will not record learning evidence from it. Review course setup before trying the course PDF again.",
       kind: "failed",
       title: outlineMissing
         ? "Course setup stopped before the outline was ready."
@@ -51,7 +51,7 @@ export function courseStudyAvailability(
   }
   if (course.sourceStatus === "ocr_required") {
     return {
-      copy: "Text recognition is required before this source can become a course. For this Demo Day surface, review course setup and choose the matching digitally generated approved PDF.",
+      copy: "Text recognition is required before this source can become a course. For this Demo Day surface, review course setup and choose the matching digitally generated course PDF.",
       kind: "ocr_required",
       title: "Text recognition is needed before study can begin.",
     };
@@ -69,7 +69,7 @@ export function courseStudyAvailability(
     course.chapterCount === 0
   ) {
     return {
-      copy: "This course has no usable source-backed outline, so Reflo will not start a study session or record learning evidence from it. Review course setup to validate the approved PDF again.",
+      copy: "This course has no usable source-backed outline, so Reflo will not start a study session or record learning evidence from it. Review course setup to validate the course PDF again.",
       kind: "failed",
       title: "A usable course outline is unavailable.",
     };

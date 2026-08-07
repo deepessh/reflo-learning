@@ -94,7 +94,7 @@ describe("course upload presentation", () => {
     ).toContain("does not match");
     expect(
       demoUploadPresentation("failed", "unsupported_type").detail,
-    ).toContain("matching approved PDF");
+    ).toContain("matching course PDF");
   });
 
   it("offers retry lineage only for failures the server marks retryable", () => {

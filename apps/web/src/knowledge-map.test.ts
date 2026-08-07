@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import type { CourseProgress } from "@reflo/accounts";
 import { describe, expect, it } from "vitest";
 
@@ -58,5 +60,22 @@ describe("chapterProgressPresentation", () => {
     expect(
       chapterProgressPresentation(chapter([concept(1), concept(2)])),
     ).toEqual({ label: "Assessed", tone: "ready" });
+  });
+});
+
+describe("Knowledge Map summary", () => {
+  it("shows coverage without a course-wide mastery aggregate", async () => {
+    const source = await readFile(
+      new URL("./knowledge-map.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("Assessment coverage");
+    expect(source).toContain("Concept-level mastery appears below.");
+    expect(source).toContain(
+      "{progress.mastery.totalConceptCount} concepts assessed",
+    );
+    expect(source).not.toContain("progress.mastery.label");
+    expect(source).not.toContain("const mastery = progress.mastery.value");
   });
 });

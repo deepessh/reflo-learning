@@ -110,7 +110,7 @@ export function demoUploadPresentation(
   switch (state) {
     case "accepted":
       return {
-        detail: "The approved source was received and is entering validation.",
+        detail: "The course source was received and is entering validation.",
         formLocked: true,
         label: "Upload received",
         poll: true,
@@ -176,7 +176,7 @@ export function demoUploadPresentation(
         label: "Text recognition needed",
         poll: false,
         progress:
-          "Outline generation did not start. Choose a digitally generated approved PDF to try again.",
+          "Outline generation did not start. Choose a digitally generated course PDF to try again.",
         tone: "attention",
       };
     case "outline_ready":
@@ -204,18 +204,18 @@ export function demoUploadPresentation(
 function failureCopy(code: DemoUploadFailureCode | null): string {
   switch (code) {
     case "source_not_approved":
-      return "This file does not match the selected approved source.";
+      return "This file does not match the selected course source.";
     case "unsupported_type":
     case "mime_mismatch":
-      return "Use the matching approved PDF. This file type or signature did not match.";
+      return "Use the matching course PDF. This file type or signature did not match.";
     case "over_limit":
     case "archive_limit":
       return "The source exceeded a declared compressed, expanded, or page limit.";
     case "encrypted":
-      return "Encrypted documents cannot be processed. Use an unencrypted approved source.";
+      return "Encrypted documents cannot be processed. Use an unencrypted course source.";
     case "malformed_document":
     case "active_content":
-      return "The source could not be parsed safely. Check the approved artifact and try again.";
+      return "The source could not be parsed safely. Check the course PDF and try again.";
     case "malware_detected":
       return "The malware gate rejected this source. No course was created.";
     case "dependency_unavailable":

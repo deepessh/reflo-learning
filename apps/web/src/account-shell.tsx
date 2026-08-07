@@ -737,7 +737,7 @@ function Dashboard({
         >
           <summary>Add course material</summary>
           <p>
-            Course setup accepts approved PDF sources and builds a source-backed
+            Course setup accepts course PDF sources and builds a source-backed
             outline before lessons become available.
           </p>
           <DemoUploadPanel

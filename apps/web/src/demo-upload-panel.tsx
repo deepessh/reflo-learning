@@ -419,9 +419,7 @@ export function DemoUploadPanel({
       {approvalScreen === "ready" && approvals.length === 0 ? (
         <div className="upload-state tone-attention">
           <strong>No course sources configured</strong>
-          <p>
-            Course setup becomes available when a course source is added.
-          </p>
+          <p>Course setup becomes available when a course source is added.</p>
         </div>
       ) : null}
       {approvalScreen === "ready" && approvals.length > 0 ? (

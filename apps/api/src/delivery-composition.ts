@@ -126,15 +126,20 @@ export function createDeliveryRuntime(
       );
     },
   };
-  const messagePorts = configuredProviders.map((configuredProvider) =>
-    messageAdapter === "local-fixture"
-      ? new LocalFixtureMessagePort(configuredProvider)
-      : configuredProvider === "telegram"
-        ? createTelegramDemoMessageAdapter({
-            botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
-          })
-        : createEmailPort(input, capacityRepository),
-  );
+  const telegramAdapter =
+    messageAdapter === "provider" && configuredProviders.includes("telegram")
+      ? createTelegramDemoMessageAdapter({
+          botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
+        })
+      : undefined;
+  const messagePorts = configuredProviders.map((configuredProvider) => {
+    if (messageAdapter === "local-fixture") {
+      return new LocalFixtureMessagePort(configuredProvider);
+    }
+    return configuredProvider === "telegram"
+      ? telegramAdapter!
+      : createEmailPort(input, capacityRepository);
+  });
   const emailLinkSigningKey = configuredProviders.includes("email")
     ? readKey(input, "REFLO_DEMO_EMAIL_LINK_SIGNING_KEY")
     : undefined;
@@ -162,12 +167,20 @@ export function createDeliveryRuntime(
     deployment,
   });
   const instrumentedDelivery = instrumentDemoDelivery(delivery, tracing);
+  const handleTelegramUpdate = async (rawUpdate: string, secret: string) => {
+    const finalizations = await instrumentedDelivery.handleTelegramWebhook(
+      rawUpdate,
+      secret,
+    );
+    await telegramAdapter?.acknowledge(rawUpdate, finalizations);
+    return finalizations;
+  };
   const telegramPolling =
     telegramInboundMode === "long-poll"
       ? createTelegramLongPollingReceiver({
           botToken: required(input, "REFLO_DEMO_TELEGRAM_BOT_TOKEN"),
           handleUpdate: async (rawUpdate) => {
-            await instrumentedDelivery.handleTelegramWebhook(
+            await handleTelegramUpdate(
               rawUpdate,
               required(input, "REFLO_DEMO_TELEGRAM_WEBHOOK_SECRET"),
             );
@@ -183,7 +196,10 @@ export function createDeliveryRuntime(
             throw new DeliveryError("invalid_configuration");
           },
         }
-      : instrumentedDelivery;
+      : {
+          ...instrumentedDelivery,
+          handleTelegramWebhook: handleTelegramUpdate,
+        };
   return {
     delivery: exposedDelivery,
     close: async () => {

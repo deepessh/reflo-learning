@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TelegramDemoMessageAdapter } from "./telegram.js";
+import { decodeTelegramCallback } from "../telegram-callback.js";
 
 describe("Telegram demo adapter", () => {
   it("sends one bounded staff-only message with delivery-bound callbacks", async () => {
@@ -34,8 +35,12 @@ describe("Telegram demo adapter", () => {
     const body = JSON.parse(fetch.mock.calls[0][1].body);
     expect(body.text).toContain("A quick Reflo review");
     expect(body.text.toLowerCase()).not.toContain("demo");
-    expect(body.reply_markup.inline_keyboard[1][0].callback_data).toBe(
-      "reflo:30000000-0000-4000-8000-000000000043:40000000-0000-4000-8000-000000000043:1",
-    );
+    const callback = body.reply_markup.inline_keyboard[1][0].callback_data;
+    expect(Buffer.byteLength(callback, "utf8")).toBeLessThanOrEqual(64);
+    expect(decodeTelegramCallback(callback)).toEqual({
+      answerIndex: 1,
+      deliveryId: "30000000-0000-4000-8000-000000000043",
+      deliveryItemId: "40000000-0000-4000-8000-000000000043",
+    });
   });
 });

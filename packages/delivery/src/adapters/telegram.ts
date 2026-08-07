@@ -2,6 +2,7 @@ import type { DeliveryMessage } from "../contracts.js";
 import { DeliveryError } from "../errors.js";
 import { REVIEW_MESSAGE_COPY } from "../experience.js";
 import type { DemoMessagePort } from "../ports.js";
+import { encodeTelegramCallback } from "../telegram-callback.js";
 
 export interface TelegramAdapterConfig {
   readonly botToken: string;
@@ -38,7 +39,11 @@ export class TelegramDemoMessageAdapter implements DemoMessagePort {
         inline_keyboard: message.questions.flatMap((question, questionIndex) =>
           question.responseOptions.map((option, answerIndex) => [
             {
-              callback_data: `reflo:${message.deliveryId}:${question.deliveryItemId}:${answerIndex}`,
+              callback_data: encodeTelegramCallback({
+                answerIndex,
+                deliveryId: message.deliveryId,
+                deliveryItemId: question.deliveryItemId,
+              }),
               text: `${questionIndex + 1}.${answerIndex + 1} ${boundedLabel(option)}`,
             },
           ]),
@@ -113,3 +118,8 @@ function telegramMessageId(value: unknown): string | null {
 function boundedLabel(value: string): string {
   return Array.from(value).slice(0, 24).join("");
 }
+
+export {
+  createTelegramLongPollingReceiver,
+  TelegramLongPollingReceiver,
+} from "./telegram-polling.js";

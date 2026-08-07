@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DemoDeliveryDestination, ReservedDelivery } from "./contracts.js";
 import type { DeliveryError } from "./errors.js";
 import { DemoDeliveryService } from "./service.js";
+import { encodeTelegramCallback } from "./telegram-callback.js";
 import {
   FakeDemoMessagePort,
   InMemoryDeliveryKnowledgePort,
@@ -140,7 +141,11 @@ describe("demo-only ambient delivery", () => {
     });
     const body = JSON.stringify({
       callback_query: {
-        data: `reflo:${ids.delivery}:${ids.item}:1`,
+        data: encodeTelegramCallback({
+          answerIndex: 1,
+          deliveryId: ids.delivery,
+          deliveryItemId: ids.item,
+        }),
         from: { id: Number(telegramDestination.recipient) },
         id: "callback-1",
         message: { chat: { id: telegramDestination.recipient } },
